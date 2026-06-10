@@ -438,3 +438,171 @@ Traceback (most recent call last):
   File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
     raise exception
 telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-06-10 18:24:31,793 DEBUG Calling Bot API endpoint `getUpdates` with parameters `{'timeout': datetime.timedelta(seconds=10), 'offset': 0, 'allowed_updates': [<UpdateType.MESSAGE>, <UpdateType.EDITED_MESSAGE>, <UpdateType.CHANNEL_POST>, <UpdateType.EDITED_CHANNEL_POST>, <UpdateType.INLINE_QUERY>, <UpdateType.CHOSEN_INLINE_RESULT>, <UpdateType.CALLBACK_QUERY>, <UpdateType.SHIPPING_QUERY>, <UpdateType.PRE_CHECKOUT_QUERY>, <UpdateType.POLL>, <UpdateType.POLL_ANSWER>, <UpdateType.MY_CHAT_MEMBER>, <UpdateType.CHAT_MEMBER>, <UpdateType.CHAT_JOIN_REQUEST>, <UpdateType.CHAT_BOOST>, <UpdateType.REMOVED_CHAT_BOOST>, <UpdateType.MESSAGE_REACTION>, <UpdateType.MESSAGE_REACTION_COUNT>, <UpdateType.BUSINESS_CONNECTION>, <UpdateType.BUSINESS_MESSAGE>, <UpdateType.EDITED_BUSINESS_MESSAGE>, <UpdateType.DELETED_BUSINESS_MESSAGES>, <UpdateType.PURCHASED_PAID_MEDIA>]}`
+2026-06-10 18:24:31,795 DEBUG close.started
+2026-06-10 18:24:31,795 DEBUG close.complete
+2026-06-10 18:24:31,796 DEBUG connect_tcp.started host='api.telegram.org' port=443 local_address=None timeout=5.0 socket_options=None
+2026-06-10 18:24:31,976 DEBUG connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daeba00>
+2026-06-10 18:24:31,976 DEBUG start_tls.started ssl_context=<ssl.SSLContext object at 0x10d871190> server_hostname='api.telegram.org' timeout=5.0
+2026-06-10 18:24:32,357 DEBUG start_tls.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10d929ee0>
+2026-06-10 18:24:32,358 DEBUG send_request_headers.started request=<Request [b'POST']>
+2026-06-10 18:24:32,359 DEBUG send_request_headers.complete
+2026-06-10 18:24:32,359 DEBUG send_request_body.started request=<Request [b'POST']>
+2026-06-10 18:24:32,359 DEBUG send_request_body.complete
+2026-06-10 18:24:32,359 DEBUG receive_response_headers.started request=<Request [b'POST']>
+2026-06-10 18:24:37,224 DEBUG receive_response_headers.complete return_value=(b'HTTP/1.1', 409, b'Conflict', [(b'Server', b'nginx/1.30.1'), (b'Date', b'Wed, 10 Jun 2026 23:24:37 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'143'), (b'Connection', b'keep-alive'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'Content-Length,Content-Type,Date,Server,Connection')])
+2026-06-10 18:24:37,225 INFO HTTP Request: POST https://api.telegram.org/bot8825611260:AAGUNS50bMjxRiLe0bhK9E4psYncmgovbNs/getUpdates "HTTP/1.1 409 Conflict"
+2026-06-10 18:24:37,225 DEBUG receive_response_body.started request=<Request [b'POST']>
+2026-06-10 18:24:37,225 DEBUG receive_response_body.complete
+2026-06-10 18:24:37,226 DEBUG response_closed.started
+2026-06-10 18:24:37,226 DEBUG response_closed.complete
+2026-06-10 18:24:37,227 DEBUG Network Retry Loop (Polling Updates): Failed run number 10 of -1. Retrying.
+2026-06-10 18:24:37,227 ERROR No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 134, in network_retry_loop
+    await do_action()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 127, in do_action
+    action_cb_task.result()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_updater.py", line 340, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+    raise exception
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-06-10 18:25:07,228 DEBUG Calling Bot API endpoint `getUpdates` with parameters `{'timeout': datetime.timedelta(seconds=10), 'offset': 0, 'allowed_updates': [<UpdateType.MESSAGE>, <UpdateType.EDITED_MESSAGE>, <UpdateType.CHANNEL_POST>, <UpdateType.EDITED_CHANNEL_POST>, <UpdateType.INLINE_QUERY>, <UpdateType.CHOSEN_INLINE_RESULT>, <UpdateType.CALLBACK_QUERY>, <UpdateType.SHIPPING_QUERY>, <UpdateType.PRE_CHECKOUT_QUERY>, <UpdateType.POLL>, <UpdateType.POLL_ANSWER>, <UpdateType.MY_CHAT_MEMBER>, <UpdateType.CHAT_MEMBER>, <UpdateType.CHAT_JOIN_REQUEST>, <UpdateType.CHAT_BOOST>, <UpdateType.REMOVED_CHAT_BOOST>, <UpdateType.MESSAGE_REACTION>, <UpdateType.MESSAGE_REACTION_COUNT>, <UpdateType.BUSINESS_CONNECTION>, <UpdateType.BUSINESS_MESSAGE>, <UpdateType.EDITED_BUSINESS_MESSAGE>, <UpdateType.DELETED_BUSINESS_MESSAGES>, <UpdateType.PURCHASED_PAID_MEDIA>]}`
+2026-06-10 18:25:07,229 DEBUG close.started
+2026-06-10 18:25:07,230 DEBUG close.complete
+2026-06-10 18:25:07,230 DEBUG connect_tcp.started host='api.telegram.org' port=443 local_address=None timeout=5.0 socket_options=None
+2026-06-10 18:25:07,452 DEBUG connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daf2c40>
+2026-06-10 18:25:07,453 DEBUG start_tls.started ssl_context=<ssl.SSLContext object at 0x10d871190> server_hostname='api.telegram.org' timeout=5.0
+2026-06-10 18:25:07,804 DEBUG start_tls.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daeabe0>
+2026-06-10 18:25:07,805 DEBUG send_request_headers.started request=<Request [b'POST']>
+2026-06-10 18:25:07,806 DEBUG send_request_headers.complete
+2026-06-10 18:25:07,806 DEBUG send_request_body.started request=<Request [b'POST']>
+2026-06-10 18:25:07,806 DEBUG send_request_body.complete
+2026-06-10 18:25:07,806 DEBUG receive_response_headers.started request=<Request [b'POST']>
+2026-06-10 18:25:12,749 DEBUG receive_response_headers.complete return_value=(b'HTTP/1.1', 409, b'Conflict', [(b'Server', b'nginx/1.30.1'), (b'Date', b'Wed, 10 Jun 2026 23:25:12 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'143'), (b'Connection', b'keep-alive'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'Content-Length,Content-Type,Date,Server,Connection')])
+2026-06-10 18:25:12,750 INFO HTTP Request: POST https://api.telegram.org/bot8825611260:AAGUNS50bMjxRiLe0bhK9E4psYncmgovbNs/getUpdates "HTTP/1.1 409 Conflict"
+2026-06-10 18:25:12,750 DEBUG receive_response_body.started request=<Request [b'POST']>
+2026-06-10 18:25:12,751 DEBUG receive_response_body.complete
+2026-06-10 18:25:12,751 DEBUG response_closed.started
+2026-06-10 18:25:12,751 DEBUG response_closed.complete
+2026-06-10 18:25:12,752 DEBUG Network Retry Loop (Polling Updates): Failed run number 11 of -1. Retrying.
+2026-06-10 18:25:12,752 ERROR No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 134, in network_retry_loop
+    await do_action()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 127, in do_action
+    action_cb_task.result()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_updater.py", line 340, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+    raise exception
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-06-10 18:25:42,754 DEBUG Calling Bot API endpoint `getUpdates` with parameters `{'timeout': datetime.timedelta(seconds=10), 'offset': 0, 'allowed_updates': [<UpdateType.MESSAGE>, <UpdateType.EDITED_MESSAGE>, <UpdateType.CHANNEL_POST>, <UpdateType.EDITED_CHANNEL_POST>, <UpdateType.INLINE_QUERY>, <UpdateType.CHOSEN_INLINE_RESULT>, <UpdateType.CALLBACK_QUERY>, <UpdateType.SHIPPING_QUERY>, <UpdateType.PRE_CHECKOUT_QUERY>, <UpdateType.POLL>, <UpdateType.POLL_ANSWER>, <UpdateType.MY_CHAT_MEMBER>, <UpdateType.CHAT_MEMBER>, <UpdateType.CHAT_JOIN_REQUEST>, <UpdateType.CHAT_BOOST>, <UpdateType.REMOVED_CHAT_BOOST>, <UpdateType.MESSAGE_REACTION>, <UpdateType.MESSAGE_REACTION_COUNT>, <UpdateType.BUSINESS_CONNECTION>, <UpdateType.BUSINESS_MESSAGE>, <UpdateType.EDITED_BUSINESS_MESSAGE>, <UpdateType.DELETED_BUSINESS_MESSAGES>, <UpdateType.PURCHASED_PAID_MEDIA>]}`
+2026-06-10 18:25:42,756 DEBUG close.started
+2026-06-10 18:25:42,757 DEBUG close.complete
+2026-06-10 18:25:42,758 DEBUG connect_tcp.started host='api.telegram.org' port=443 local_address=None timeout=5.0 socket_options=None
+2026-06-10 18:25:43,099 DEBUG connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daf4700>
+2026-06-10 18:25:43,100 DEBUG start_tls.started ssl_context=<ssl.SSLContext object at 0x10d871190> server_hostname='api.telegram.org' timeout=5.0
+2026-06-10 18:25:43,453 DEBUG start_tls.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daf4eb0>
+2026-06-10 18:25:43,454 DEBUG send_request_headers.started request=<Request [b'POST']>
+2026-06-10 18:25:43,455 DEBUG send_request_headers.complete
+2026-06-10 18:25:43,455 DEBUG send_request_body.started request=<Request [b'POST']>
+2026-06-10 18:25:43,455 DEBUG send_request_body.complete
+2026-06-10 18:25:43,455 DEBUG receive_response_headers.started request=<Request [b'POST']>
+2026-06-10 18:25:48,484 DEBUG receive_response_headers.complete return_value=(b'HTTP/1.1', 409, b'Conflict', [(b'Server', b'nginx/1.30.1'), (b'Date', b'Wed, 10 Jun 2026 23:25:48 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'143'), (b'Connection', b'keep-alive'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'Content-Length,Content-Type,Date,Server,Connection')])
+2026-06-10 18:25:48,485 INFO HTTP Request: POST https://api.telegram.org/bot8825611260:AAGUNS50bMjxRiLe0bhK9E4psYncmgovbNs/getUpdates "HTTP/1.1 409 Conflict"
+2026-06-10 18:25:48,485 DEBUG receive_response_body.started request=<Request [b'POST']>
+2026-06-10 18:25:48,486 DEBUG receive_response_body.complete
+2026-06-10 18:25:48,486 DEBUG response_closed.started
+2026-06-10 18:25:48,486 DEBUG response_closed.complete
+2026-06-10 18:25:48,487 DEBUG Network Retry Loop (Polling Updates): Failed run number 12 of -1. Retrying.
+2026-06-10 18:25:48,487 ERROR No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 134, in network_retry_loop
+    await do_action()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 127, in do_action
+    action_cb_task.result()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_updater.py", line 340, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+    raise exception
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-06-10 18:26:18,488 DEBUG Calling Bot API endpoint `getUpdates` with parameters `{'timeout': datetime.timedelta(seconds=10), 'offset': 0, 'allowed_updates': [<UpdateType.MESSAGE>, <UpdateType.EDITED_MESSAGE>, <UpdateType.CHANNEL_POST>, <UpdateType.EDITED_CHANNEL_POST>, <UpdateType.INLINE_QUERY>, <UpdateType.CHOSEN_INLINE_RESULT>, <UpdateType.CALLBACK_QUERY>, <UpdateType.SHIPPING_QUERY>, <UpdateType.PRE_CHECKOUT_QUERY>, <UpdateType.POLL>, <UpdateType.POLL_ANSWER>, <UpdateType.MY_CHAT_MEMBER>, <UpdateType.CHAT_MEMBER>, <UpdateType.CHAT_JOIN_REQUEST>, <UpdateType.CHAT_BOOST>, <UpdateType.REMOVED_CHAT_BOOST>, <UpdateType.MESSAGE_REACTION>, <UpdateType.MESSAGE_REACTION_COUNT>, <UpdateType.BUSINESS_CONNECTION>, <UpdateType.BUSINESS_MESSAGE>, <UpdateType.EDITED_BUSINESS_MESSAGE>, <UpdateType.DELETED_BUSINESS_MESSAGES>, <UpdateType.PURCHASED_PAID_MEDIA>]}`
+2026-06-10 18:26:18,493 DEBUG close.started
+2026-06-10 18:26:18,493 DEBUG close.complete
+2026-06-10 18:26:18,494 DEBUG connect_tcp.started host='api.telegram.org' port=443 local_address=None timeout=5.0 socket_options=None
+2026-06-10 18:26:18,667 DEBUG connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daf24c0>
+2026-06-10 18:26:18,667 DEBUG start_tls.started ssl_context=<ssl.SSLContext object at 0x10d871190> server_hostname='api.telegram.org' timeout=5.0
+2026-06-10 18:26:19,018 DEBUG start_tls.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x10daf4130>
+2026-06-10 18:26:19,019 DEBUG send_request_headers.started request=<Request [b'POST']>
+2026-06-10 18:26:19,019 DEBUG send_request_headers.complete
+2026-06-10 18:26:19,020 DEBUG send_request_body.started request=<Request [b'POST']>
+2026-06-10 18:26:19,020 DEBUG send_request_body.complete
+2026-06-10 18:26:19,020 DEBUG receive_response_headers.started request=<Request [b'POST']>
+2026-06-10 18:26:23,379 DEBUG receive_response_headers.complete return_value=(b'HTTP/1.1', 409, b'Conflict', [(b'Server', b'nginx/1.30.1'), (b'Date', b'Wed, 10 Jun 2026 23:26:23 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'143'), (b'Connection', b'keep-alive'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'Content-Length,Content-Type,Date,Server,Connection')])
+2026-06-10 18:26:23,379 INFO HTTP Request: POST https://api.telegram.org/bot8825611260:AAGUNS50bMjxRiLe0bhK9E4psYncmgovbNs/getUpdates "HTTP/1.1 409 Conflict"
+2026-06-10 18:26:23,380 DEBUG receive_response_body.started request=<Request [b'POST']>
+2026-06-10 18:26:23,380 DEBUG receive_response_body.complete
+2026-06-10 18:26:23,381 DEBUG response_closed.started
+2026-06-10 18:26:23,381 DEBUG response_closed.complete
+2026-06-10 18:26:23,382 DEBUG Network Retry Loop (Polling Updates): Failed run number 13 of -1. Retrying.
+2026-06-10 18:26:23,382 ERROR No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 134, in network_retry_loop
+    await do_action()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_utils/networkloop.py", line 127, in do_action
+    action_cb_task.result()
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_updater.py", line 340, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/macbook/Documents/proyectos /BotElectric-main/.venv/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+    raise exception
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
