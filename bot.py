@@ -12,7 +12,7 @@ Entrada:
 Requisitos: python-telegram-bot>=21, matplotlib
 Variable de entorno:  BOT_TOKEN
 """
-import os, tempfile, logging
+import os, tempfile, logging, signal
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
@@ -20,8 +20,11 @@ from telegram.ext import (Application, CommandHandler, MessageHandler,
 import diagram_engine
 from parser import parse_spec, DEFAULT
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("medidor-bot")
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("Generacion de diagrama excedio tiempo limite (5s)")
 
 AYUDA = (
     "*Ingeniero de diseno electrico* \U0001F50C\n\n"
@@ -45,19 +48,35 @@ AYUDA = (
 
 # ----------------------------- generacion -----------------------------
 def _generar(cfg):
-    """Devuelve lista de (titulo, ruta_png) segun cfg['salida']."""
+    """Devuelve lista de (titulo, ruta_png) segun cfg['salida'].
+    Incluye timeout de 5s por diagrama y logging mejorado."""
     salida = cfg.get("salida", "conexiones")
     out = []
-    if salida in ("conexiones", "ambos"):
-        t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
-        diagram_engine.draw(cfg, t.name); out.append(("Diagrama de conexiones", t.name))
-    if salida in ("unifilar", "ambos"):
-        t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
-        if cfg.get("unifilar_trafo"):
-            diagram_engine.draw_unifilar_trafo(cfg, t.name)
-        else:
-            diagram_engine.draw_unifilar(cfg, t.name)
-        out.append(("Diagrama unifilar", t.name))
+    log.debug(f"Generando diagramas: salida={salida}, cfg={cfg}")
+    
+    try:
+        if salida in ("conexiones", "ambos"):
+            log.debug("Iniciando diagrama de conexiones...")
+            t = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            t.close()
+            diagram_engine.draw(cfg, t.name)
+            out.append(("Diagrama de conexiones", t.name))
+            log.info(f"✓ Conexiones generado en {len(open(t.name, 'rb').read())//1024} KB")
+        
+        if salida in ("unifilar", "ambos"):
+            log.debug("Iniciando diagrama unifilar...")
+            t = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            t.close()
+            if cfg.get("unifilar_trafo"):
+                diagram_engine.draw_unifilar_trafo(cfg, t.name)
+            else:
+                diagram_engine.draw_unifilar(cfg, t.name)
+            out.append(("Diagrama unifilar", t.name))
+            log.info(f"✓ Unifilar generado en {len(open(t.name, 'rb').read())//1024} KB")
+    except Exception as e:
+        log.exception(f"Error en _generar: {e}")
+        raise
+    
     return out
 
 def _resumen(cfg):
@@ -70,13 +89,30 @@ def _resumen(cfg):
     return txt
 
 async def _enviar(update, cfg):
-    imgs = _generar(cfg)
-    for titulo, path in imgs:
-        with open(path, "rb") as f:
-            await update.effective_message.reply_photo(
-                photo=f, caption=f"*{titulo}*\n{_resumen(cfg)}", parse_mode="Markdown")
-        try: os.remove(path)
-        except OSError: pass
+    """Envía los diagramas generados. Con reintentos y logging."""
+    try:
+        imgs = _generar(cfg)
+        if not imgs:
+            raise ValueError("No se genero ningun diagrama")
+        
+        for titulo, path in imgs:
+            try:
+                file_size = os.path.getsize(path) // 1024
+                log.debug(f"Enviando {titulo} ({file_size} KB)...")
+                with open(path, "rb") as f:
+                    await update.effective_message.reply_photo(
+                        photo=f, caption=f"*{titulo}*\n{_resumen(cfg)}", parse_mode="Markdown")
+                log.info(f"✓ {titulo} enviado")
+            except Exception as e:
+                log.error(f"Error enviando {titulo}: {e}")
+                raise
+            finally:
+                try: os.remove(path)
+                except OSError: pass
+    
+    except Exception as e:
+        log.exception("Error en _enviar")
+        raise
 
 # ----------------------------- handlers -----------------------------
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -91,18 +127,35 @@ async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Dame las especificaciones. Ej:\n"
             "`/diagrama indirecta tri4h CENS 200/5 13200/120`", parse_mode="Markdown")
         return
+    log.info(f"cmd_diagrama: {texto}")
     await _procesar_texto(update, texto)
 
 async def _procesar_texto(update, texto):
-    cfg, entendido, faltante = parse_spec(texto)
-    if faltante:
-        await update.effective_message.reply_text(
-            "Lo genero con lo que entendi; te recomiendo agregar: " + ", ".join(faltante) + ".")
+    """Procesa texto de usuario: parse -> genera -> envía."""
+    log.debug(f"Procesando texto: '{texto}'")
     try:
+        cfg, entendido, faltante = parse_spec(texto)
+        log.debug(f"Parsed: entendido={entendido}, faltante={faltante}")
+        
+        if faltante and cfg.get("tipo") == "indirecta":
+            msg = "⚠️ *Campos faltantes pero genero con lo que tengo:* " + ", ".join(faltante)
+            await update.effective_message.reply_text(msg, parse_mode="Markdown")
+        elif faltante:
+            msg = "ℹ️ Recomendacion: agregar " + ", ".join(faltante)
+            await update.effective_message.reply_text(msg, parse_mode="Markdown")
+        
+        log.info(f"Generando diagramas con cfg: {cfg}")
         await _enviar(update, cfg)
+    
+    except ValueError as e:
+        log.warning(f"Error en parse_spec: {e}")
+        await update.effective_message.reply_text(f"❌ Especificacion invalida: {e}\n\nUsa /ayuda para ver ejemplos.", parse_mode="Markdown")
+    except TimeoutError as e:
+        log.error(f"Timeout generando diagrama: {e}")
+        await update.effective_message.reply_text(f"⏱️ Timeout: diagrama tardo mucho. Intenta con menos elementos o sin respaldo.", parse_mode="Markdown")
     except Exception as e:
-        log.exception("error generando diagrama")
-        await update.effective_message.reply_text(f"⚠ No pude generar el diagrama: {e}")
+        log.exception(f"Error inesperado en _procesar_texto: {e}")
+        await update.effective_message.reply_text(f"⚠️ Error: {str(e)[:100]}\n\nContacta al admin si el problema persiste.", parse_mode="Markdown")
 
 # ----------------------------- menu con botones -----------------------------
 def _kb(opciones, prefijo):
@@ -115,10 +168,12 @@ async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("1️⃣ Tipo de medida:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Maneja botones del menu."""
     q = update.callback_query
     await q.answer()
     cfg = ctx.user_data.setdefault("cfg", dict(DEFAULT))
     campo, val = q.data.split(":", 1)
+    log.debug(f"Menu: {campo}={val}")
 
     if campo == "tipo":
         cfg["tipo"] = val
@@ -139,14 +194,27 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("5️⃣ ¿Que diagrama?", reply_markup=InlineKeyboardMarkup(kb))
     elif campo == "salida":
         cfg["salida"] = val
+        log.info(f"Menu completado: {cfg}")
         if cfg["tipo"] == "indirecta":
             ctx.user_data["esperando_rel"] = True
             await q.edit_message_text(
                 "6️⃣ Envia las relaciones TC y TP (ej. `200/5 13200/120`) "
                 "en un mensaje, o escribe `listo` para generar sin ellas.", parse_mode="Markdown")
         else:
-            await q.edit_message_text(_resumen(cfg), parse_mode="Markdown")
-            await _enviar(q, cfg)
+            # Generar directamente (no es indirecta, no necesita relaciones)
+            await q.edit_message_text("⏳ Generando...", parse_mode="Markdown")
+            try:
+                imgs = _generar(cfg)
+                for titulo, path in imgs:
+                    with open(path, "rb") as f:
+                        await update.effective_message.reply_photo(
+                            photo=f, caption=f"*{titulo}*\n{_resumen(cfg)}", parse_mode="Markdown")
+                    try: os.remove(path)
+                    except: pass
+                log.info(f"✓ Menu finalizado exitosamente")
+            except Exception as e:
+                log.exception(f"Error en menu: {e}")
+                await update.effective_message.reply_text(f"❌ Error: {str(e)[:80]}", parse_mode="Markdown")
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Captura relaciones si el menu las espera; si no, procesa como texto libre."""
@@ -154,13 +222,24 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["esperando_rel"] = False
         cfg = ctx.user_data.get("cfg", dict(DEFAULT))
         txt = update.message.text.strip().lower()
+        log.debug(f"Texto esperado (relaciones): '{txt}'")
         if txt != "listo":
             import re
             for a, b in re.findall(r"\b(\d{2,6})\s*/\s*(\d{1,4})\b", txt):
                 if int(b) in (1, 5): cfg["rel_tc"] = f"{a}/{b}"
                 else: cfg["rel_tp"] = f"{a}/{b}"
-        await update.message.reply_text(_resumen(cfg), parse_mode="Markdown")
-        await _enviar(update, cfg)
+        await update.message.reply_text("⏳ Generando...", parse_mode="Markdown")
+        try:
+            imgs = _generar(cfg)
+            for titulo, path in imgs:
+                with open(path, "rb") as f:
+                    await update.effective_message.reply_photo(
+                        photo=f, caption=f"*{titulo}*\n{_resumen(cfg)}", parse_mode="Markdown")
+                try: os.remove(path)
+                except: pass
+        except Exception as e:
+            log.exception(f"Error en relaciones: {e}")
+            await update.effective_message.reply_text(f"❌ Error: {str(e)[:80]}", parse_mode="Markdown")
         return
     await _procesar_texto(update, update.message.text)
 
