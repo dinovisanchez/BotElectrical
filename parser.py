@@ -3,7 +3,12 @@
 import re
 
 DEFAULT = dict(sistema="tri4h", tipo="indirecta", respaldo=False,
-               norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="")
+               norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="",
+               # Nuevos parámetros para precisión
+               asimetrico=False,  # Solo para directa: asimétrico vs simétrico
+               trafo_presente=False,  # Unifilar: tiene transformador
+               interruptor_pos="antes",  # Unifilar: "antes", "despues", "ambos"
+               interruptor_antes_kva="", interruptor_despues_kva="")
 
 def _norm(s):
     """Normaliza: lowercase + sin acentos."""

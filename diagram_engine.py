@@ -99,6 +99,100 @@ def _ground(ax, x, y, s=1.0):
         ax.plot([x-w*s,x+w*s],[y-(1.2+0.5*i)*s]*2,color=COL["G"],lw=1.4)
 
 # ============================================================
+#  DIAGRAMA DE CONEXIONES - MEDIDA DIRECTA (sin bloque prueba)
+# ============================================================
+def _draw_directa_conn(cfg, out_path):
+    """Dibuja conexiones para MEDIDA DIRECTA (sin TC/TP/bloque de prueba)."""
+    sistema=cfg.get("sistema","tri4h"); respaldo=bool(cfg.get("respaldo",False))
+    norma=cfg.get("norma","RA8"); proyecto=cfg.get("proyecto","")
+    asimetrico=cfg.get("asimetrico",False)
+    
+    terms=meter_terminals(sistema,norma); n=len(terms)
+    all_ph=phases_of(sistema)
+    
+    fig,ax=plt.subplots(figsize=(17,11)); ax.set_xlim(0,178); ax.set_ylim(0,116); ax.axis("off")
+    
+    # Títulos
+    titulo=f"DIAGRAMA DE CONEXIONES   ·   MEDIDA DIRECTA   ·   {SIS_TXT[sistema]}"
+    if respaldo: titulo+="   ·   PRINCIPAL + CHEQUEO"
+    ax.text(89,112,titulo,ha="center",va="center",fontsize=15,fontweight="bold",color=INK)
+    
+    asim_txt="ASIMÉTRICA" if asimetrico else "SIMÉTRICA"
+    sub=f"Conexión {asim_txt}   ·   Norma {norma}"
+    if proyecto: sub+=f"   ·   {proyecto}"
+    ax.text(89,107.5,sub,ha="center",va="center",fontsize=10.5,color="#666")
+    
+    # PRIMARIO (Acometida)
+    x0,x1=6,40; base_y=104; dy=8
+    y_ph={ph:base_y-i*dy for i,ph in enumerate(all_ph)}
+    y_N=base_y-len(all_ph)*dy
+    show_N=sistema in ("mono","bifasico","tri4h")
+    
+    ax.text((x0+x1)/2,max(y_ph.values())+4.5,"ACOMETIDA",ha="center",fontsize=9,
+            color="#444",style="italic")
+    
+    for ph in all_ph:
+        ax.plot([x0,x1],[y_ph[ph]]*2,color=COL[ph],lw=3,zorder=2)
+        ax.text(x0-1.5,y_ph[ph],ph,ha="right",va="center",fontsize=13,fontweight="bold",color=COL[ph])
+    
+    if show_N:
+        ax.plot([x0,x1],[y_N]*2,color=COL["N"],lw=2.0,ls=(0,(6,3)),zorder=2)
+        ax.text(x0-1.5,y_N,"N",ha="right",va="center",fontsize=12,fontweight="bold",color=COL["N"])
+    
+    # MEDIDOR(ES) - conectado directamente sin bloque de prueba
+    def draw_meter_direct(mx0,mx1,my0,my1,etq):
+        ax.add_patch(FancyBboxPatch((mx0,my0),mx1-mx0,my1-my0,boxstyle="round,pad=0.6,rounding_size=3",
+                     fill=True,fc=INK,ec="#0B0F14",lw=2,zorder=2))
+        ax.text((mx0+mx1)/2,my1-4.5,etq,ha="center",va="center",fontsize=12,fontweight="bold",color="white")
+        ax.add_patch(Rectangle((mx0+6,my1-17),(mx1-mx0)-12,7,fc="#0B3D2E",ec="#0A5",lw=1))
+        ax.text((mx0+mx1)/2,my1-13.5,"kWh   kvarh",ha="center",va="center",fontsize=8.5,
+                color="#36df8f",family="monospace")
+        m_y={}; ty=np.linspace(my0+5,my0+5+(n-1)*3.3,n)[::-1]; mxr=mx0+2.4
+        for (tlbl,rot,kind,ph,io),yy in zip(terms,ty):
+            c=COL[ph]
+            ax.add_patch(Circle((mxr,yy),0.85,fc="white",ec=c,lw=1.7,zorder=5))
+            ax.text(mxr+1.6,yy,tlbl,ha="left",va="center",fontsize=7,color="white",fontweight="bold")
+            m_y[tlbl]=yy
+        return m_y,mxr
+    
+    # Posicionar medidor(es)
+    mh=max(n*3.3+24,42); my1=98
+    if not respaldo:
+        m_y,mxr=draw_meter_direct(130,162,my1-mh,my1,"MEDIDOR")
+    else:
+        h=mh*0.5
+        m_y_p,_=draw_meter_direct(132,162,60,60+h,"PRINCIPAL")
+        m_y_c,mxr=draw_meter_direct(132,162,10,10+h,"CHEQUEO")
+        m_y={**m_y_p, **m_y_c}  # Combinar terminales de ambos medidores
+    
+    # Ruteo: Acometida -> Medidor (directamente, sin TC/TP/bloque)
+    xm=np.linspace(100,128,n)
+    for idx,(tlbl,rot,kind,ph,io) in enumerate(terms):
+        c=COL[ph]
+        yb=y_ph.get(ph, y_N)
+        ls="-" if ph!="N" else (0,(6,3))
+        ax.plot([x1, xm[idx]], [yb,yb], color=c, lw=1.7, ls=ls)
+        if tlbl in m_y:
+            ym=m_y[tlbl]
+            ax.plot([xm[idx], xm[idx]], [yb, ym], color=c, lw=1.5, ls=ls)
+            ax.plot([xm[idx], mxr], [ym, ym], color=c, lw=1.5, ls=ls)
+    
+    # LEYENDA
+    leg=[Line2D([0],[0],color=COL["R"],lw=3,label="Fase R"),
+         Line2D([0],[0],color=COL["S"],lw=3,label="Fase S"),
+         Line2D([0],[0],color=COL["T"],lw=3,label="Fase T")]
+    if show_N:
+        leg.append(Line2D([0],[0],color=COL["N"],lw=2,ls=(0,(6,3)),label="Neutro"))
+    
+    ax.legend(handles=leg,loc="lower left",bbox_to_anchor=(0.005,0.005),fontsize=8.5,
+              framealpha=0.96,ncol=3)
+    
+    plt.tight_layout(); plt.savefig(out_path, dpi=DPI, bbox_inches="tight", facecolor="white"); plt.close(fig)
+    _save_cached(out_path, cfg, "conn")
+    return out_path
+
+
+# ============================================================
 #  DIAGRAMA DE CONEXIONES
 # ============================================================
 def draw(cfg, out_path):
@@ -112,7 +206,12 @@ def draw(cfg, out_path):
         except:
             pass  # Si falló caché, generar nuevo
     
-    sistema=cfg.get("sistema","tri4h"); tipo=cfg.get("tipo","indirecta")
+    # CASO ESPECIAL: medida directa sin bloque de prueba
+    tipo=cfg.get("tipo","indirecta")
+    if tipo == "directa":
+        return _draw_directa_conn(cfg, out_path)
+    
+    sistema=cfg.get("sistema","tri4h")
     respaldo=bool(cfg.get("respaldo",False)); norma=cfg.get("norma","RA8")
     rel_tc=cfg.get("rel_tc",""); rel_tp=cfg.get("rel_tp",""); proyecto=cfg.get("proyecto","")
     has_tc=tipo in ("semidirecta","indirecta"); has_tp=tipo=="indirecta"
