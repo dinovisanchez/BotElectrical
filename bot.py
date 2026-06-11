@@ -1,16 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Bot de Telegram - Ingeniero de diseno electrico.
-Genera diagramas de CONEXIONES y/o UNIFILAR de sistemas de medida.
-
-Entrada:
-  - Texto libre:  "indirecta trifasica 3 elementos norma CENS 200/5 13200/120"
-                  "unifilar semidirecta 300/5 13.2 kv"
-  - Comando:      /diagrama tipo=indirecta sistema=tri4h norma=RA8 rtc=200/5 rtp=13200/120
-  - Menu guiado:  /menu
+Bot de Telegram - Ingeniero de diseño eléctrico.
+Genera diagramas de CONEXIONES y/o UNIFILAR de sistemas de medida y absuelve consultas RETIE.
 
 Requisitos: python-telegram-bot>=21, matplotlib, google-genai
-Variable de entorno:  BOT_TOKEN, GEMINI_API_KEY
+Variables de entorno: BOT_TOKEN, GEMINI_API_KEY
 """
 import os, tempfile, logging, signal
 from google import genai
@@ -21,16 +15,16 @@ from telegram.ext import (Application, CommandHandler, MessageHandler,
 import diagram_engine
 from parser import parse_spec, DEFAULT
 
+# Configuración estricta de logs para auditoría de la terminal
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("medidor-bot")
 
+# Inicialización nativa y recomendada por el nuevo SDK google-genai
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
-    client = genai.Client(
-        api_key=GEMINI_KEY,
-        http_options={'api_version': 'v1'} # Evita conflicto con rutas v1beta en entornos viejos
-    )
+    log.info("Inicializando cliente oficial de Google GenAI...")
+    client = genai.Client(api_key=GEMINI_KEY)
 
 PROMPT_SISTEMA_RETIE = """
 Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, especializado estrictamente en el RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
@@ -47,12 +41,12 @@ async def _procesar_texto(update: Update, texto_usuario: str):
     texto_usuario_limpio = texto_usuario.strip()
     texto_minusculas = texto_usuario_limpio.lower()
     
-    # Discriminación inteligente: Palabras clave obligatorias para activar Matplotlib
+    # Discriminación inteligente de flujo: Palabras clave para activar el motor gráfico de Matplotlib
     palabras_clave_diagrama = ["unifilar", "conexiones", "esquema", "plano", "dibuja", "grafica", "diagrama"]
     
     cfg, entendido, faltante = parse_spec(texto_usuario_limpio)
     
-    # Solo genera diagrama si pide explícitamente gráficos o si el parser entendió pero NO se menciona el RETIE
+    # Evalúa si la intención primaria es la generación de un esquema gráfico
     pide_diagrama = any(p in texto_minusculas for p in palabras_clave_diagrama) or (entendido and not "retie" in texto_minusculas)
     
     if pide_diagrama:
@@ -61,29 +55,33 @@ async def _procesar_texto(update: Update, texto_usuario: str):
         await _enviar(update, cfg)
         return
 
-    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con Gemini
+    # Módulo Experto RETIE con Inteligencia Artificial
     if not client:
-        await update.message.reply_text("⚠️ Error: La variable GEMINI_API_KEY no está configurada o el cliente no inició.")
+        await update.message.reply_text("⚠️ Error de configuración: La variable de entorno GEMINI_API_KEY no está definida en la terminal.")
         return
 
     await update.message.reply_chat_action("typing")
 
     try:
-        # Inyectamos el prompt de comportamiento directo en las instrucciones del mensaje para eludir errores 400
+        log.info(f"Despachando consulta técnica a la API de Gemini: '{texto_usuario_limpio}'")
+        
+        # Estructuración agnóstica de prompt: evitamos fallos de serialización inyectando el contexto de manera directa
         prompt_final = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA TÉCNICA DEL USUARIO:\n{texto_usuario_limpio}"
         
         response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=prompt_final
         )
+        
         await update.message.reply_text(response.text, parse_mode="Markdown")
+        log.info("Respuesta del módulo experto RETIE enviada exitosamente a Telegram.")
+        
     except Exception as e:
-        log.error(f"Error en Gemini: {e}")
+        log.error(f"Fallo crítico en el módulo Gemini: {e}")
         await update.message.reply_text(f"❌ Ocurrió un error en el módulo experto RETIE: {str(e)}")
 
-
 async def _procesar_texto_libre(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Manejador intermedio de mensajes de texto en Telegram."""
+    """Manejador intermedio de mensajes de texto entrantes."""
     if ctx.user_data.get("esperando_rel"):
         ctx.user_data["esperando_rel"] = False
         cfg = ctx.user_data.get("cfg", dict(DEFAULT))
@@ -99,9 +97,8 @@ async def _procesar_texto_libre(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     await _procesar_texto(update, update.message.text)
 
-
 async def _boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Manejador de los botones del menú guiado."""
+    """Manejador de los eventos de la interfaz interactiva (botones de Telegram)."""
     query = update.callback_query
     await query.answer()
     
@@ -144,7 +141,7 @@ async def _boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 def _menu_kbd(cfg):
-    """Estructura del teclado en línea para el menú guiado."""
+    """Genera los botones dinámicos en línea."""
     botones = [
         [InlineKeyboardButton(f"Tipo: {cfg.get('tipo', 'directa')}", callback_data="toggle_tipo")],
         [InlineKeyboardButton("Modificar Relaciones (TC/TP)", callback_data="m_rel")],
@@ -154,11 +151,10 @@ def _menu_kbd(cfg):
     return InlineKeyboardMarkup(botones)
 
 def _resumen(cfg):
-    """Retorna un texto resumen de la configuración técnica."""
     return f"📐 *Especificación de Medida Detectada:*\n• Tipo: {cfg.get('tipo')}\n• TC: {cfg.get('rel_tc', 'Directo')}\n• TP: {cfg.get('rel_tp', 'Directo')}"
 
 async def _enviar(update_or_query, cfg):
-    """Genera la imagen con diagramas y la despacha al usuario."""
+    """Gestiona la renderización gráfica del diagrama y su envío final por Telegram."""
     msg = update_or_query.message if isinstance(update_or_query, Update) else update_or_query.message
     await msg.reply_chat_action("upload_photo")
     try:
@@ -174,8 +170,9 @@ async def _enviar(update_or_query, cfg):
         log.error(f"Error generando imagen: {e}")
         await msg.reply_text(f"❌ Error al renderizar el gráfico: {str(e)}")
 
+# Manejadores de Comandos Estándar de Telegram
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 ¡Hola! Soy tu asistente de Ingeniería Eléctrica.\n\n• Para planos escríbeme términos como `unifilar` o `conexiones`.\n• Para normativa pregúntame directamente cualquier duda del **RETIE**.")
+    await update.message.reply_text("👋 ¡Hola! Soy tu asistente de Ingeniería Eléctrica.\n\n• Para planos escrébeme términos como `unifilar` o `conexiones`.\n• Para normativa pregúntame directamente cualquier duda del **RETIE**.")
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💡 *Ayuda rápida:*\nEscribe libremente tu pregunta técnica sobre el RETIE (ej: distancias, alturas) o solicita un diagrama indicando el tipo de medida.", parse_mode="Markdown")
@@ -190,10 +187,11 @@ async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def main():
     token = os.environ.get("BOT_TOKEN")
     if not token:
-        raise SystemExit("Define la variable de entorno BOT_TOKEN (token de @BotFather).")
+        raise SystemExit("Error Fatal: Define la variable de entorno BOT_TOKEN antes de iniciar.")
     
     app = Application.builder().token(token).build()
     
+    # Registro formal de Handlers
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("ayuda", cmd_help))
