@@ -10,7 +10,7 @@ Entrada:
   - Menu guiado:  /menu
 
 Requisitos: python-telegram-bot>=21, matplotlib
-Variable de entorno:  BOT_TOKEN
+Variable de entorno:  BOT_TOKEN, GEMINI_API_KEY
 """
 import os, tempfile, logging, signal
 import google.generativeai as genai
@@ -39,20 +39,25 @@ Tu objetivo es responder de forma libre, técnica y precisa a las consultas del 
 """
 
 async def _procesar_texto(update: Update, texto_usuario: str):
-    """Analiza si el texto es para un diagrama con Matplotlib o una consulta RETIE."""
-    texto_usuario = texto_usuario.strip()
+    """Analiza con precisión si el usuario quiere un plano o una consulta RETIE."""
+    texto_usuario_limpio = texto_usuario.strip()
+    texto_minusculas = texto_usuario_limpio.lower()
     
-    # 1. Verificar si el usuario quiere generar un diagrama eléctrico
-    cfg, entendido, faltante = parse_spec(texto_usuario)
-    pide_diagrama = "unifilar" in texto_usuario.lower() or "conexiones" in texto_usuario.lower() or entendido
+    # Discriminación inteligente: Palabras clave obligatorias para activar Matplotlib
+    palabras_clave_diagrama = ["unifilar", "conexiones", "esquema", "plano", "dibuja", "grafica", "diagrama"]
+    
+    cfg, entendido, faltante = parse_spec(texto_usuario_limpio)
+    
+    # Solo genera diagrama si pide explícitamente gráficos o si el parser entendió pero NO se menciona el RETIE
+    pide_diagrama = any(p in texto_minusculas for p in palabras_clave_diagrama) or (entendido and not "retie" in texto_minusculas)
     
     if pide_diagrama:
-        log.info(f"Procesando solicitud de diagrama: {texto_usuario}")
+        log.info(f"Procesando solicitud de diagrama: {texto_usuario_limpio}")
         await update.message.reply_text(_resumen(cfg), parse_mode="Markdown")
         await _enviar(update, cfg)
         return
 
-    # 2. Si NO pide un diagrama, se procesa como consulta experta del RETIE con Gemini
+    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con Gemini
     if not GEMINI_KEY:
         await update.message.reply_text("⚠️ Error: La variable GEMINI_API_KEY no está configurada en la terminal.")
         return
@@ -64,7 +69,7 @@ async def _procesar_texto(update: Update, texto_usuario: str):
             model_name="gemini-1.5-flash",
             system_instruction=PROMPT_SISTEMA_RETIE
         )
-        response = model.generate_content(texto_usuario)
+        response = model.generate_content(texto_usuario_limpio)
         await update.message.reply_text(response.text, parse_mode="Markdown")
     except Exception as e:
         log.error(f"Error en Gemini: {e}")
@@ -79,14 +84,13 @@ async def _procesar_texto_libre(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         txt = update.message.text.strip().lower()
         if txt != "listo":
             import re
-            for a, b in re.findall(r"(\d{2,6})\s*/\s*(\d{1,4})", txt):
+            for a, b in re.findall(r"\b(\d{2,6})\s*/\s*(\d{1,4})\b", txt):
                 if int(b) in (1, 5): cfg["rel_tc"] = f"{a}/{b}"
                 else: cfg["rel_tp"] = f"{a}/{b}"
         await update.message.reply_text(_resumen(cfg), parse_mode="Markdown")
         await _enviar(update, cfg)
         return
     
-    # CORRECCIÓN AQUÍ: Se le pasa el texto del mensaje para procesarlo con Gemini o Matplotlib
     await _procesar_texto(update, update.message.text)
 
 
@@ -105,7 +109,6 @@ async def _boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
         
     if data == "m_cancelar":
-        # CORRECCIÓN DE ERROR AQUÍ: Se usa query.edit_message_text en lugar de update.edit_message_text
         await query.edit_message_text("❌ Configuración cancelada.")
         return
         
@@ -121,21 +124,65 @@ async def _boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "m_rel":
         ctx.user_data["esperando_rel"] = True
         await query.edit_message_text(
-            "Escribe las relaciones de transformación en formato `IP/IS`.
-"
+            "Escribe las relaciones de transformación en formato `IP/IS`.\n"
             "Ejemplo para TC y TP: `200/5 13200/120` o escribe *listo* si ya terminaste.",
             parse_mode="Markdown"
         )
         return
         
     kbd = _menu_kbd(cfg)
-    # CORRECCIÓN DE ERROR AQUÍ: Editamos el mensaje usando el objeto query
     await query.edit_message_text(
-        "🛠️ *Configurador Guiado de Medida*
-Selecciona las opciones técnicas de tu sistema:",
+        "🛠️ *Configurador Guiado de Medida*\nSelecciona las opciones técnicas de tu sistema:",
         reply_markup=kbd,
         parse_mode="Markdown"
     )
+
+# --- Funciones auxiliares y de Comandos (Personalizables) ---
+
+def _menu_kbd(cfg):
+    """Estructura del teclado en línea para el menú guiado."""
+    botones = [
+        [InlineKeyboardButton(f"Tipo: {cfg.get('tipo', 'directa')}", callback_data="toggle_tipo")],
+        [InlineKeyboardButton("Modificar Relaciones (TC/TP)", callback_data="m_rel")],
+        [InlineKeyboardButton("✅ Generar Plano", callback_data="m_listo"),
+         InlineKeyboardButton("❌ Cancelar", callback_data="m_cancelar")]
+    ]
+    return InlineKeyboardMarkup(botones)
+
+def _resumen(cfg):
+    """Retorna un texto resumen de la configuración técnica."""
+    return f"📐 *Especificación de Medida Detectada:*\n• Tipo: {cfg.get('tipo')}\n• TC: {cfg.get('rel_tc', 'Directo')}\n• TP: {cfg.get('rel_tp', 'Directo')}"
+
+async def _enviar(update_or_query, cfg):
+    """Genera la imagen con diagramas y la despacha al usuario."""
+    msg = update_or_query.message if isinstance(update_or_query, Update) else update_or_query.message
+    await msg.reply_chat_action("upload_photo")
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_name = tmp.name
+        
+        # Llama a tu motor gráfico pasándole la ruta temporal y los parámetros
+        diagram_engine.generar_diagrama(cfg, tmp_name)
+        
+        with open(tmp_name, "rb") as foto:
+            await msg.reply_photo(photo=foto, caption="Aquí tienes tu diagrama de conexiones solicitado. ⚡")
+        os.remove(tmp_name)
+    except Exception as e:
+        log.error(f"Error generando imagen: {e}")
+        await msg.reply_text(f"❌ Error al renderizar el gráfico: {str(e)}")
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 ¡Hola! Soy tu asistente de Ingeniería Eléctrica.\n\n• Para planos escríbeme términos como `unifilar` o `conexiones`.\n• Para normativa pregúntame directamente cualquier duda del **RETIE**.")
+
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💡 *Ayuda rápida:*\nEscribe libremente tu pregunta técnica sobre el RETIE (ej: distancias, alturas) o solicita un diagrama indicando el tipo de medida.", parse_mode="Markdown")
+
+async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data["cfg"] = dict(DEFAULT)
+    await update.message.reply_text("🛠️ *Configurador Guiado de Medida*\nSelecciona las opciones técnicas de tu sistema:", reply_markup=_menu_kbd(dict(DEFAULT)), parse_mode="Markdown")
+
+async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Envía los parámetros directamente en un solo texto libre, por ejemplo:\n`indirecta trifasica CENS 200/5`")
 
 # ----------------------------- main -----------------------------
 def main():
