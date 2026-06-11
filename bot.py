@@ -11,15 +11,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("medidor-bot")
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent"
 
 PROMPT_SISTEMA_RETIE = """
-Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, especializado estrictamente en el RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
-1. Toda respuesta debe alinearse con el RETIE vigente (Resolución 40117 de 2024).
-2. Siempre cita el artículo, sección o tabla del RETIE que respalda tu respuesta.
-3. Utiliza viñetas, negritas y lenguaje formal de ingeniería en Markdown.
-4. Si algo viola las distancias de seguridad, adviértelo con advertencias visibles con el emoji de advertencia.
+Eres un experto en electricidad colombiano que explica las normas del RETIE de forma clara y sencilla.
+
+Responde SIEMPRE en dos partes:
+
+1. RESUMEN SIMPLE (para cualquier persona):
+   - Usa lenguaje cotidiano, como si le explicaras a un vecino
+   - Máximo 3 oraciones cortas
+   - Sin términos técnicos o explícalos si los usas
+   - Usa emojis para hacer la respuesta más amigable
+
+2. DETALLE TÉCNICO (para ingenieros):
+   - Cita el artículo exacto del RETIE (Resolución 40117 de 2024)
+   - Usa términos técnicos precisos
+   - Incluye valores numéricos exactos
+
+Regla de oro: si algo es peligroso, adviértelo con ⚠️ en ambas secciones.
 """
 
 def _resumen(cfg):
