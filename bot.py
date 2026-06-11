@@ -14,7 +14,6 @@ Variable de entorno:  BOT_TOKEN, GEMINI_API_KEY
 """
 import os, tempfile, logging, signal
 from google import genai
-from google.genai import types
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
@@ -30,7 +29,7 @@ client = None
 if GEMINI_KEY:
     client = genai.Client(
         api_key=GEMINI_KEY,
-        http_options={'api_version': 'v1'} # <-- Esto obliga al SDK a saltarse la v1beta
+        http_options={'api_version': 'v1'} # Evita conflicto con rutas v1beta en entornos viejos
     )
 
 PROMPT_SISTEMA_RETIE = """
@@ -62,7 +61,7 @@ async def _procesar_texto(update: Update, texto_usuario: str):
         await _enviar(update, cfg)
         return
 
-    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con el nuevo SDK de Gemini
+    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con Gemini
     if not client:
         await update.message.reply_text("⚠️ Error: La variable GEMINI_API_KEY no está configurada o el cliente no inició.")
         return
@@ -70,18 +69,14 @@ async def _procesar_texto(update: Update, texto_usuario: str):
     await update.message.reply_chat_action("typing")
 
     try:
-        # Fusionamos la directiva de experto con la pregunta del usuario en un solo cuerpo de texto
-        prompt_final = f"{PROMPT_SISTEMA_RETIE}\n\nCONTAXT/CONSULTA DEL USUARIO:\n{texto_usuario_limpio}"
+        # Inyectamos el prompt de comportamiento directo en las instrucciones del mensaje para eludir errores 400
+        prompt_final = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA TÉCNICA DEL USUARIO:\n{texto_usuario_limpio}"
         
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=prompt_final  # <-- Pasamos todo directo aquí, sin configs problemáticos
+            contents=prompt_final
         )
         await update.message.reply_text(response.text, parse_mode="Markdown")
-    except Exception as e:
-        log.error(f"Error en Gemini: {e}")
-        await update.message.reply_text(f"❌ Ocurrió un error en el módulo experto RETIE: {str(e)}")
-
     except Exception as e:
         log.error(f"Error en Gemini: {e}")
         await update.message.reply_text(f"❌ Ocurrió un error en el módulo experto RETIE: {str(e)}")
@@ -148,8 +143,6 @@ async def _boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# --- Funciones auxiliares y de Comandos (Personalizables) ---
-
 def _menu_kbd(cfg):
     """Estructura del teclado en línea para el menú guiado."""
     botones = [
@@ -172,7 +165,6 @@ async def _enviar(update_or_query, cfg):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp_name = tmp.name
         
-        # Llama a tu motor gráfico pasándole la ruta temporal y los parámetros
         diagram_engine.generar_diagrama(cfg, tmp_name)
         
         with open(tmp_name, "rb") as foto:
@@ -195,7 +187,6 @@ async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Envía los parámetros directamente en un solo texto libre, por ejemplo:\n`indirecta trifasica CENS 200/5`")
 
-# ----------------------------- main -----------------------------
 def main():
     token = os.environ.get("BOT_TOKEN")
     if not token:
