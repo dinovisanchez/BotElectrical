@@ -28,7 +28,10 @@ log = logging.getLogger("medidor-bot")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 client = None
 if GEMINI_KEY:
-    client = genai.Client(api_key=GEMINI_KEY)
+    client = genai.Client(
+        api_key=GEMINI_KEY,
+        http_options={'api_version': 'v1'} # <-- Esto obliga al SDK a saltarse la v1beta
+    )
 
 PROMPT_SISTEMA_RETIE = """
 Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, especializado estrictamente en el RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
