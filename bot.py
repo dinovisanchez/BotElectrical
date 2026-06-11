@@ -29,7 +29,7 @@ if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
 
 PROMPT_SISTEMA_RETIE = """
-Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, especializado estrictamente en el RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
+Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, specialized strictly in RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
 
 Tu objetivo es responder de forma libre, técnica y precisa a las consultas del usuario. Sigue rigurosamente estas reglas:
 1. Base Normativa Absoluta: Toda respuesta debe alinearse con las exigencias de seguridad, distancias mínimas, grados de protección (IP/IK) y puesta a tierra del RETIE vigente (Resolución 40117 de 2024).
@@ -65,8 +65,9 @@ async def _procesar_texto(update: Update, texto_usuario: str):
     await update.message.reply_chat_action("typing")
 
     try:
+        # CORRECCIÓN AQUÍ: Cambiado a gemini-1.5-flash-latest para compatibilidad con la API v1beta
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-1.5-flash-latest",
             system_instruction=PROMPT_SISTEMA_RETIE
         )
         response = model.generate_content(texto_usuario_limpio)
