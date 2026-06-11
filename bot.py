@@ -64,10 +64,12 @@ async def _procesar_texto(update: Update, texto_usuario: str):
 
     await update.message.reply_chat_action("typing")
 
+    # Normalizar y limpiar entrada antes de llamar al modelo
+    texto_usuario_limpio = texto_usuario.strip()
+
     try:
-        # CORRECCIÓN AQUÍ: Cambiado a gemini-1.5-flash-latest para compatibilidad con la API v1beta
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
+            model_name="models/gemini-1.5-flash",
             system_instruction=PROMPT_SISTEMA_RETIE
         )
         response = model.generate_content(texto_usuario_limpio)
