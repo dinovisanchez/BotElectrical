@@ -414,6 +414,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     log.info("Bot iniciado. Esperando mensajes...")
+    print("Bot encendido con éxito. Presiona Ctrl + C para salir.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
