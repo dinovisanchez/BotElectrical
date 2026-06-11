@@ -70,14 +70,18 @@ async def _procesar_texto(update: Update, texto_usuario: str):
     await update.message.reply_chat_action("typing")
 
     try:
+        # Fusionamos la directiva de experto con la pregunta del usuario en un solo cuerpo de texto
+        prompt_final = f"{PROMPT_SISTEMA_RETIE}\n\nCONTAXT/CONSULTA DEL USUARIO:\n{texto_usuario_limpio}"
+        
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=texto_usuario_limpio,
-            config=types.GenerateContentConfig(
-                system_instruction=PROMPT_SISTEMA_RETIE
-            )
+            contents=prompt_final  # <-- Pasamos todo directo aquí, sin configs problemáticos
         )
         await update.message.reply_text(response.text, parse_mode="Markdown")
+    except Exception as e:
+        log.error(f"Error en Gemini: {e}")
+        await update.message.reply_text(f"❌ Ocurrió un error en el módulo experto RETIE: {str(e)}")
+
     except Exception as e:
         log.error(f"Error en Gemini: {e}")
         await update.message.reply_text(f"❌ Ocurrió un error en el módulo experto RETIE: {str(e)}")
