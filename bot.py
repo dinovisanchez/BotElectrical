@@ -9,11 +9,12 @@ Entrada:
   - Comando:      /diagrama tipo=indirecta sistema=tri4h norma=RA8 rtc=200/5 rtp=13200/120
   - Menu guiado:  /menu
 
-Requisitos: python-telegram-bot>=21, matplotlib
+Requisitos: python-telegram-bot>=21, matplotlib, google-genai
 Variable de entorno:  BOT_TOKEN, GEMINI_API_KEY
 """
 import os, tempfile, logging, signal
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
@@ -25,11 +26,12 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(mes
 log = logging.getLogger("medidor-bot")
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+client = None
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
+    client = genai.Client(api_key=GEMINI_KEY)
 
 PROMPT_SISTEMA_RETIE = """
-Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, specialized strictly in RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
+Eres un Ingeniero Electricista Colombiano experto en normatividad y diseño de sistemas de medida, especializado estrictamente en el RETIE (Reglamento Técnico de Instalaciones Eléctricas de Colombia).
 
 Tu objetivo es responder de forma libre, técnica y precisa a las consultas del usuario. Sigue rigurosamente estas reglas:
 1. Base Normativa Absoluta: Toda respuesta debe alinearse con las exigencias de seguridad, distancias mínimas, grados de protección (IP/IK) y puesta a tierra del RETIE vigente (Resolución 40117 de 2024).
@@ -57,22 +59,21 @@ async def _procesar_texto(update: Update, texto_usuario: str):
         await _enviar(update, cfg)
         return
 
-    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con Gemini
-    if not GEMINI_KEY:
-        await update.message.reply_text("⚠️ Error: La variable GEMINI_API_KEY no está configurada en la terminal.")
+    # 2. Si es una consulta libre o pregunta por normatividad, se procesa con el nuevo SDK de Gemini
+    if not client:
+        await update.message.reply_text("⚠️ Error: La variable GEMINI_API_KEY no está configurada o el cliente no inició.")
         return
 
     await update.message.reply_chat_action("typing")
 
-    # Normalizar y limpiar entrada antes de llamar al modelo
-    texto_usuario_limpio = texto_usuario.strip()
-
     try:
-        model = genai.GenerativeModel(
-            model_name="models/gemini-1.5-flash",
-            system_instruction=PROMPT_SISTEMA_RETIE
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=texto_usuario_limpio,
+            config=types.GenerateContentConfig(
+                system_instruction=PROMPT_SISTEMA_RETIE
+            )
         )
-        response = model.generate_content(texto_usuario_limpio)
         await update.message.reply_text(response.text, parse_mode="Markdown")
     except Exception as e:
         log.error(f"Error en Gemini: {e}")
