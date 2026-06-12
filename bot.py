@@ -37,14 +37,11 @@ def _generar(cfg):
     out = []
     if salida in ("conexiones", "ambos"):
         t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
-        diagram_engine.draw(cfg, t.name)
+        diagram_engine.draw_conexiones_retie(cfg, t.name)
         out.append(("Diagrama de conexiones", t.name))
     if salida in ("unifilar", "ambos"):
         t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
-        if cfg.get("unifilar_trafo"):
-            diagram_engine.draw_unifilar_trafo(cfg, t.name)
-        else:
-            diagram_engine.draw_unifilar(cfg, t.name)
+        diagram_engine.draw_unifilar_generico(cfg, t.name)
         out.append(("Diagrama unifilar", t.name))
     return out
 
