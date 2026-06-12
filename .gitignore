@@ -7,3 +7,17 @@ e2e_*.png
 _zoom_*.png
 muestra_*.png
 *.png
+
+# Entornos virtuales
+.venv_setup/
+.venv/
+
+# Documentos RETIE (pesados, no necesarios en el repo)
+retie_docs/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
