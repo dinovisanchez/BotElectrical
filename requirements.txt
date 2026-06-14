@@ -1,4 +1,4 @@
-python-telegram-bot==22.8
+python-telegram-bot[webhooks]==22.8
 matplotlib
 numpy
 google-genai>=2.8.0
