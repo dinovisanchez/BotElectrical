@@ -1,3 +1,5 @@
-python-telegram-bot>=21.0
-matplotlib>=3.7
-numpy>=1.24
+python-telegram-bot==22.8
+matplotlib
+numpy
+google-genai>=2.8.0
+httpx

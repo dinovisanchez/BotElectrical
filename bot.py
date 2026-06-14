@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re
+import os, tempfile, logging, re, asyncio
 import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, MessageHandler,
@@ -7,20 +7,126 @@ from telegram.ext import (Application, CommandHandler, MessageHandler,
 import diagram_engine
 from parser import parse_spec, DEFAULT
 
+from google import genai
+from google.genai import types
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("medidor-bot")
 
 GEMINI_KEY   = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.5-flash-lite"
-GEMINI_URL   = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+# Nombre del File Search Store con el PDF del RETIE (Resolucion 40117 de 2024).
+# Se obtiene UNA SOLA VEZ corriendo setup_retie_store.py y pegando el valor aqui.
+# Ejemplo: "fileSearchStores/abc123xyz"
+RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
+
+_genai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 PROMPT_SISTEMA_RETIE = (
-    "Eres un experto en electricidad colombiano que explica las normas del RETIE de forma clara.\n"
-    "Responde SIEMPRE en dos partes:\n"
-    "1. RESUMEN SIMPLE: lenguaje cotidiano, max 3 oraciones, usa emojis\n"
-    "2. DETALLE TECNICO: cita articulo exacto del RETIE (Resolucion 40117 de 2024), valores exactos\n"
-    "Si algo es peligroso adviertelo con advertencia visible en ambas secciones.\n"
-    "IMPORTANTE: no uses asteriscos dobles (**) ni caracteres especiales de Markdown en tu respuesta."
+    "Eres un asistente tecnico experto en el sector electrico colombiano "
+    "(RETIE Resolucion 40117 de 2024 y resoluciones CREG). Tu objetivo es "
+    "responder consultas tecnicas de forma extremadamente estructurada, breve "
+    "y facil de entender tanto para un cliente sin experiencia como para un "
+    "ingeniero.\n"
+    "\n"
+    "Tienes acceso mediante busqueda en documentos a:\n"
+    "- RETIE 2024 (4 libros completos: Disposiciones Generales, Productos, "
+    "Instalaciones, Evaluacion de la Conformidad)\n"
+    "- CREG 038 de 2014 (Codigo de Medida) - NORMA PRINCIPAL DE MEDICION\n"
+    "- CREG 015 de 2014\n"
+    "- CREG 038 de 2018 (autogeneracion en ZNI)\n"
+    "- Documentos D-019-14 (actualizacion Codigo de Medida)\n"
+    "\n"
+    "DATOS CLAVE MEMORIZADOS (usar SIEMPRE sin necesidad de buscar):\n"
+    "\n"
+    "TABLA DE CLASIFICACION DE PUNTOS DE MEDICION (CREG 038/2014, Tabla 1):\n"
+    "  Tipo 1: C >= 15.000 MWh-mes  O  CI >= 30 MVA\n"
+    "  Tipo 2: 500 <= C < 15.000    O  1 <= CI < 30 MVA\n"
+    "  Tipo 3: 50 <= C < 500        O  0,1 <= CI < 1 MVA\n"
+    "  Tipo 4: 5 <= C < 50          O  0,01 <= CI < 0,1 MVA\n"
+    "  Tipo 5: C < 5 MWh-mes        O  CI < 0,01 MVA\n"
+    "  (Si CI y C dan tipos distintos, usar el de MAYORES exigencias)\n"
+    "  Ejemplos: 500 kVA=0,5 MVA => Tipo 3 | 1.000 kVA=1 MVA => Tipo 2\n"
+    "\n"
+    "TIPOS DE CONEXION (CREG 038/2014):\n"
+    "  - Directa: V e I directos al medidor. Sin TC ni TP. BT baja corriente.\n"
+    "  - Semidirecta: V directo, I por TC. Sin TP. BT alta corriente.\n"
+    "  - Indirecta: V por TP, I por TC. Obligatoria en MT/AT (>1 kV) o CI>=0,1 MVA.\n"
+    "\n"
+    "EXACTITUD DE EQUIPOS (CREG 038/2014, Tabla 2):\n"
+    "  Tipo 1: medidor 0,2S | TC 0,2S | TP 0,2\n"
+    "  Tipo 2 y 3: medidor 0,5S | TC 0,5S | TP 0,5\n"
+    "  Tipo 4: medidor clase 1 | TC 0,5 | TP 0,5\n"
+    "  Tipo 5: medidor clase 1 o 2 | sin TC/TP\n"
+    "\n"
+    "FRECUENCIA MANTENIMIENTO (CREG 038/2014, Tabla 4):\n"
+    "  Tipo 1: 2 años | Tipo 2 y 3: 4 años | Tipo 4 y 5: 10 años\n"
+    "\n"
+    "NIVELES DE TENSION (RETIE 2024, Libro 3, Titulo 9):\n"
+    "  BT (Nivel 1): <= 1.000 V | MT (Nivel 2): >1 kV y <57,5 kV | AT: >=57,5 kV\n"
+    "  Tensiones MT normalizadas en Colombia: 11,4 / 13,2 / 34,5 / 44 kV\n"
+    "\n"
+    "CUANDO EL USUARIO HAGA UNA PREGUNTA, BUSCA EN LOS DOCUMENTOS INDEXADOS "
+    "para encontrar articulos/numerales/paginas exactos que respalden la respuesta. "
+    "Combina lo que encuentres con los datos memorizados arriba.\n"
+    "\n"
+    "ESTRUCTURA DE RESPUESTA - SIEMPRE estos 3 bloques, en este orden, cortos:\n"
+    "\n"
+    "1. RESPUESTA DIRECTA (Para el No Experto):\n"
+    "   Maximo 3-4 viñetas. Lenguaje simple, sin tecnicismos. Al grano. "
+    "Responde exactamente lo que preguntaron.\n"
+    "\n"
+    "2. ESPECIFICACIONES TECNICAS (Para el Tecnico/Ingeniero):\n"
+    "   Tabla simple o lista corta con datos tecnicos clave: clases de "
+    "exactitud, distancias, valores, corrientes, tensiones, etc.\n"
+    "\n"
+    "3. SOPORTE NORMATIVO (Para el Experto/Auditor):\n"
+    "   Lista breve con articulos exactos del RETIE o CREG que respaldan "
+    "la respuesta. Formato: 'Libro X, Articulo Y, numeral Z, pag. N'\n"
+    "\n"
+    "BLOQUE ADICIONAL (solo cuando el usuario pida una recomendacion):\n"
+    "   RECOMENDACIONES: lista concisa basada en los documentos, con criterio "
+    "tecnico-practico.\n"
+    "\n"
+    "FORMATO DE RESPUESTA - reglas estrictas de presentacion:\n"
+    "- NO uses # ni ## ni ### para titulos.\n"
+    "- Los bloques van EXACTAMENTE con estos titulos (sin numeros, sin dos puntos extra):\n"
+    "    💬 LO QUE NECESITAS SABER\n"
+    "    ⚙️ ESPECIFICACIONES\n"
+    "    🏛️ NORMATIVA APLICABLE\n"
+    "    ✅ TE RECOMENDAMOS  (solo si el usuario pide recomendacion o consejo)\n"
+    "- Usa emojis relevantes dentro de cada viñeta para hacer la lectura agradable:\n"
+    "    ✅ para lo que cumple o es correcto\n"
+    "    ⚠️ para advertencias importantes\n"
+    "    📐 para medidas y distancias\n"
+    "    🔌 para conexiones electricas\n"
+    "    🏭 para equipos e instalaciones\n"
+    "    📅 para plazos, fechas y frecuencias\n"
+    "    🎯 para clasificaciones o tipos\n"
+    "    💰 para costos o valores economicos\n"
+    "- Las listas usan guion (-), no asterisco (*).\n"
+    "- Sin asteriscos dobles (**). Sin links ni URLs.\n"
+    "- Numerales como texto plano (ej: numeral 13.3.1.1), nunca como link.\n"
+    "- PROHIBIDO parrafos largos. Maximo 1 linea por viñeta.\n"
+    "- Deja UNA linea en blanco entre cada bloque.\n"
+    "- El titulo de cada bloque va solo en su linea, en MAYUSCULAS.\n"
+    "\n"
+    "REGLA ESPECIAL - FORMULAS Y CALCULOS:\n"
+    "Si el usuario pide 'la formula', 'como se calcula', 'de donde sale', "
+    "'matematicamente', 'el procedimiento', 'paso a paso', 'justifica el calculo', "
+    "'explicame el calculo' o cualquier sinonimo, SIEMPRE agrega un bloque extra:\n"
+    "\n"
+    "    🧮 DESARROLLO MATEMATICO\n"
+    "\n"
+    "Con este formato para cada paso:\n"
+    "    Paso N - Nombre del calculo:\n"
+    "    Formula: [simbolos]\n"
+    "    Sustituyendo: [valores reales del problema]\n"
+    "    Resultado: [valor con unidades]\n"
+    "\n"
+    "Muestra TODOS los pasos en orden. Cada resultado intermedio debe aparecer "
+    "antes de usarse en el siguiente paso."
 )
 
 AYUDA = (
@@ -82,32 +188,145 @@ async def _enviar_foto(mensaje, cfg):
         except OSError: pass
 
 # ── Modulo experto RETIE ─────────────────────────────────────────────────────
+TELEGRAM_MAX_LEN = 4000  # margen bajo el limite real de 4096
+
+
+async def _enviar_largo(update: Update, texto: str):
+    """Envia texto en varios mensajes si excede el limite de Telegram,
+    cortando preferentemente en saltos de linea/parrafo."""
+    texto = texto.strip()
+    if len(texto) <= TELEGRAM_MAX_LEN:
+        await update.message.reply_text(texto)
+        return
+
+    partes = []
+    restante = texto
+    while len(restante) > TELEGRAM_MAX_LEN:
+        corte = restante.rfind("\n\n", 0, TELEGRAM_MAX_LEN)
+        if corte == -1:
+            corte = restante.rfind("\n", 0, TELEGRAM_MAX_LEN)
+        if corte == -1:
+            corte = restante.rfind(" ", 0, TELEGRAM_MAX_LEN)
+        if corte == -1:
+            corte = TELEGRAM_MAX_LEN
+        partes.append(restante[:corte].strip())
+        restante = restante[corte:].strip()
+    if restante:
+        partes.append(restante)
+
+    for i, parte in enumerate(partes, 1):
+        prefijo = f"({i}/{len(partes)})\n" if len(partes) > 1 else ""
+        await update.message.reply_text(prefijo + parte)
+
+
 async def _consulta_retie(update: Update, texto: str):
     if not GEMINI_KEY:
         await update.message.reply_text("Error: GEMINI_API_KEY no definida.")
         return
     await update.message.reply_chat_action("typing")
     try:
-        payload = {"contents": [{"parts": [{"text": f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA:\n{texto}"}]}]}
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(
-                GEMINI_URL, json=payload,
-                params={"key": GEMINI_KEY},
-                headers={"Content-Type": "application/json"}
+        tools = []
+        if RETIE_STORE_NAME:
+            tools.append(
+                types.Tool(
+                    file_search=types.FileSearch(
+                        file_search_store_names=[RETIE_STORE_NAME]
+                    )
+                )
             )
-        res_json = response.json()
-        if response.status_code == 200:
-            respuesta = res_json["candidates"][0]["content"]["parts"][0]["text"]
-            respuesta = respuesta.replace("**", "").replace("__", "")
-            await update.message.reply_text(respuesta)
-        else:
-            msg = res_json.get("error", {}).get("message", "Error desconocido.")
-            await update.message.reply_text(f"Error API ({response.status_code}): {msg}")
-    except httpx.TimeoutException:
-        await update.message.reply_text("Timeout. Intenta de nuevo.")
+
+        prompt = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA:\n{texto}"
+
+        response = None
+        last_err = None
+        for intento in range(3):
+            try:
+                response = await _genai_client.aio.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(tools=tools) if tools else None,
+                )
+                break
+            except Exception as e:
+                last_err = e
+                msg = str(e)
+                if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+                    if intento < 2:
+                        log.warning(f"Modelo ocupado (intento {intento+1}/3), reintentando...")
+                        await asyncio.sleep(2 * (intento + 1))
+                        continue
+                raise
+        if response is None:
+            raise last_err
+
+        respuesta = (response.text or "").strip()
+
+        if not respuesta:
+            finish_reason = None
+            try:
+                finish_reason = response.candidates[0].finish_reason
+            except Exception:
+                pass
+
+            if str(finish_reason) and "RECITATION" in str(finish_reason):
+                log.warning("Respuesta bloqueada por RECITATION, reintentando con parafraseo forzado.")
+                prompt_retry = (
+                    f"{prompt}\n\n"
+                    "NOTA: tu intento anterior fue bloqueado por citar texto "
+                    "demasiado literal del documento. Responde de nuevo a la "
+                    "misma consulta, pero PARAFRASEANDO TODO con tus propias "
+                    "palabras (resumenes cortos, sin copiar frases largas "
+                    "tal cual del documento), manteniendo las cifras y "
+                    "referencias de articulo/numeral/pagina."
+                )
+                try:
+                    response = await _genai_client.aio.models.generate_content(
+                        model=GEMINI_MODEL,
+                        contents=prompt_retry,
+                        config=types.GenerateContentConfig(tools=tools) if tools else None,
+                    )
+                    respuesta = (response.text or "").strip()
+                except Exception as e:
+                    log.error(f"Error en reintento por RECITATION: {e}")
+
+        if not respuesta:
+            log.warning(f"Respuesta vacia. response={response!r}")
+            try:
+                log.warning(f"candidates={response.candidates!r}")
+            except Exception:
+                pass
+            await update.message.reply_text(
+                "El modelo no pudo generar una respuesta para esta consulta "
+                "(posiblemente por longitud o por las restricciones del "
+                "documento). Intenta dividir la pregunta en partes mas "
+                "especificas."
+            )
+            return
+
+        respuesta = respuesta.replace("**", "").replace("__", "")
+        # Convierte cualquier link markdown [texto](destino) -> texto, por si el
+        # modelo lo genera a pesar de las instrucciones del prompt. El "destino"
+        # puede ser una URL con o sin esquema (a veces el modelo genera
+        # "[13.3.1.4](13.3.1.4)" o variantes sin "http").
+        respuesta = re.sub(r"\[([^\[\]]+)\]\([^\(\)]*\)", r"\1", respuesta)
+
+        if not RETIE_STORE_NAME:
+            respuesta += (
+                "\n\n[Aviso: RETIE_STORE_NAME no configurado - respondiendo sin "
+                "consultar el documento del RETIE. Ver setup_retie_store.py]"
+            )
+
+        await _enviar_largo(update, respuesta)
     except Exception as e:
         log.error(f"Error Gemini: {e}")
-        await update.message.reply_text(f"Error: {str(e)}")
+        msg = str(e)
+        if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+            await update.message.reply_text(
+                "El modelo esta saturado en este momento (alta demanda en Gemini). "
+                "Por favor intenta de nuevo en unos segundos."
+            )
+        else:
+            await update.message.reply_text(f"Error: {str(e)}")
 
 async def _procesar_texto(update, texto):
     cfg, entendido, faltante = parse_spec(texto)
@@ -400,6 +619,7 @@ def main():
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise SystemExit("Define BOT_TOKEN antes de iniciar.")
+
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("help",     cmd_help))
@@ -409,7 +629,23 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     log.info("Bot iniciado.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Si RENDER_EXTERNAL_URL esta definida, usar webhook (modo Render/produccion)
+    # Si no, usar polling (modo local/desarrollo)
+    webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if webhook_url:
+        port = int(os.environ.get("PORT", 8443))
+        log.info(f"Modo WEBHOOK en {webhook_url} puerto {port}")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=token,
+            webhook_url=f"{webhook_url}/{token}",
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        log.info("Modo POLLING (local)")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()

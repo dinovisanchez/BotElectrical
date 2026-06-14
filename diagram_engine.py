@@ -66,33 +66,34 @@ def meter_terminals(sistema, norma):
                 ("7","N","V","N",None)]
 
     if sistema == "tri3h":
-        # 2 elementos Aron: R y T, sin elemento en S
-        # Borne 4 = recibe los 2 cierres (C1 del TC-R y C3 del TC-T)
-        # Borne 5 = neutro
-        # Puentes internos en medidor: 3-6-9
-        # Con respaldo: B3 bloque -> B1 chequeo
-        #               borne 4 chequeo -> borne 6 principal
-        return [("1","IA","I","R","in"),
-                ("2","VA","V","R",None),
-                ("3","Cierre-R","I","R","cierre"),
-                ("4","C1+C3","I","N","cierre_aron"),   # 2 cierres (TC-R y TC-T)
-                ("5","N","V","N",None),                 # neutro
-                ("6","IC","I","T","in"),
-                ("7","VC","V","T",None),
-                ("8","Cierre-T","I","T","puente_3"),    # puenteado con 3
-                ("9","Cierre","I","R","puente_3")]      # puenteado con 3
+        # Orden bloque Aron:
+        # VA(2), VC(8), N(5) = tensiones
+        # C1+C3(4) = los 2 cierres se unen punteados en el bloque -> borne 4 medidor
+        # IA(1), IC(7) = corrientes
+        # 3, 6, 9 = solo cuchilla en el bloque, SIN cable al medidor
+        #           el puente 3-6-9 es INTERNO del medidor
+        return [("2","VA","V","R",None),
+                ("8","VC","V","T",None),
+                ("5","N","V","N",None),
+                ("4","C1+C3","I","N","cierre_aron"),
+                ("1","IA","I","R","in"),
+                ("7","IC","I","T","in"),
+                ("3","Cierre-R","I","R","puente_3"),
+                ("6","Cierre-T","I","T","puente_3"),
+                ("9","Cierre","I","R","puente_3")]
 
-    # tri4h: 3 elementos, orden real 1-2-3 / 4-5-6 / 7-8-9 / 11
-    return [("1","IA","I","R","in"),
-            ("2","VA","V","R",None),
-            ("3","Cierre-R","I","R","cierre"),
-            ("4","IB","I","S","in"),
+    # tri4h: 3 elementos, orden real del bloque de pruebas:
+    # V1, V2, V3, N, C1, I1, C2, I2, C3, I3
+    return [("2","VA","V","R",None),
             ("5","VB","V","S",None),
-            ("6","Cierre-S","I","S","cierre"),
-            ("7","IC","I","T","in"),
             ("8","VC","V","T",None),
+            ("11","N","V","N",None),
+            ("3","Cierre-R","I","R","cierre"),
+            ("1","IA","I","R","in"),
+            ("6","Cierre-S","I","S","cierre"),
+            ("4","IB","I","S","in"),
             ("9","Cierre-T","I","T","cierre"),
-            ("11","N","V","N",None)]
+            ("7","IC","I","T","in")]
 
 def meter_bridges(sistema):
     """
@@ -103,8 +104,8 @@ def meter_bridges(sistema):
       - borne 4 CHEQUEO -> borne 6 PRINCIPAL (cable externo, se maneja en ruteo)
     """
     if sistema == "tri3h":
-        # (origen, [destinos]) - puentes internos dentro de cada medidor
-        return [("3", ["8", "9"])]
+        # Puentes internos: 3 <-> 6 <-> 9
+        return [("3", ["6", "9"])]
     return []
 
 def phases_of(s):
@@ -760,15 +761,19 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     terms = meter_terminals(sistema, norma); n = len(terms)
     cur_ph = current_phases(sistema); all_ph = phases_of(sistema)
 
-    # Canvas: mas ancho cuando hay respaldo + Aron (cables entre medidores)
+    # Canvas: más ancho para Aron con respaldo, más alto con respaldo
     fig_w = 22 if (respaldo and sistema == "tri3h") else 18
-    fig, ax = plt.subplots(figsize=(fig_w,11))
-    xlim = 210 if (respaldo and sistema == "tri3h") else 190
-    ax.set_xlim(0,xlim); ax.set_ylim(0,116); ax.axis("off")
+    fig_h = 22 if respaldo else 11
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    xlim  = 210 if (respaldo and sistema == "tri3h") else 190
+    ylim  = 240 if respaldo else 116
+    ax.set_xlim(0, xlim); ax.set_ylim(0, ylim); ax.axis("off")
 
     titulo = f"DIAGRAMA DE CONEXIONES   ·   MEDIDA {tipo.upper()}   ·   {SIS_TXT[sistema]}"
     if respaldo: titulo += "   ·   PRINCIPAL + CHEQUEO"
-    ax.text(95,112,titulo,ha="center",va="center",fontsize=15,fontweight="bold",color=INK)
+    ty_titulo = 236 if respaldo else 112
+    ty_sub    = 231 if respaldo else 107.5
+    ax.text(95, ty_titulo, titulo, ha="center", va="center", fontsize=15, fontweight="bold", color=INK)
     sub = f"Norma {norma}"
     if rel_tc: sub += f"      RTC {rel_tc}"
     if rel_tp: sub += f"      RTP {rel_tp}"
@@ -776,10 +781,11 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     if cfg.get("seccionamiento") or cfg.get("interruptor"):
         amp = cfg.get("interruptor") or cfg.get("tc_amp","")
         if amp: sub += f"      Seccionador {amp}" + ("" if "A" in str(amp) else " A")
-    ax.text(95,107.5,sub,ha="center",va="center",fontsize=10.5,color="#666")
+    ax.text(95, ty_sub, sub, ha="center", va="center", fontsize=10.5, color="#666")
 
     # ---------- PRIMARIO (ACOMETIDA) ----------
-    x0,x1=6,40; base_y=104; dy=8
+    base_y = 226 if respaldo else 104
+    x0,x1=6,40; dy=8
     y_ph={ph:base_y-i*dy for i,ph in enumerate(all_ph)}
     y_N=base_y-len(all_ph)*dy
     show_N=sistema in ("mono","bifasico","tri4h")
@@ -804,10 +810,11 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             yref=y_N if show_N else min(y_ph.values())-5
             _pt(ax,cx,y_ph[ph],yref,COL[ph],f"TP-{ph}")
 
-    # ---------- BLOQUE DE PRUEBA (siempre presente) ----------
+    # ---------- BLOQUE DE PRUEBA ----------
     bx0,bx1=76,104
-    step=min(8.4,(96-12)/max(n,1))
-    by1=98; by0=by1-(n*step)-4
+    by1 = 226 if respaldo else 98
+    step=min(8.4,(by1-12)/max(n,1))
+    by0=by1-(n*step)-4
     ax.add_patch(FancyBboxPatch((bx0,by0),bx1-bx0,by1-by0,boxstyle="round,pad=0.5,rounding_size=2.5",
                  fill=True,fc="#EEF2F6",ec="#2B2B2B",lw=2,zorder=1))
     blab="BLOQUE DE PRUEBA  "+("(13 term.)" if norma=="CENS" else "(B1-B26)")
@@ -827,43 +834,70 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         ax.text((xL+xR)/2,y-1.9,rot,ha="center",va="top",fontsize=7.5,color=c,fontweight="bold")
 
     # ---------- MEDIDOR(ES) ----------
-    # IMPORTANTE: las posiciones Y de los terminales del medidor deben usar
-    # la MISMA escala/orden 'ys' que el bloque de pruebas (variable 'row'),
-    # para que cada cable Bloque->Medidor sea una linea predominantemente
-    # HORIZONTAL (fiel a los diagramas del Anexo I del PDF EPM), evitando
-    # el "espagueti" de cruces en diagonal que se producia al usar una
-    # escala Y independiente para el medidor.
-    def draw_meter(mx0,mx1,my0,my1,etq):
-        ax.add_patch(FancyBboxPatch((mx0,my0),mx1-mx0,my1-my0,boxstyle="round,pad=0.6,rounding_size=3",
+    # El medidor muestra sus bornes en ORDEN FISICO (1,2,3,4,5,6,7,8,9,11)
+    # de arriba a abajo, independiente del orden del bloque.
+    # El ruteo conecta: borne N del bloque -> borne N del medidor (mismo número).
+    # Como el orden físico del medidor difiere del orden visual del bloque,
+    # el cable hace una L: horizontal desde xR hasta una columna xm, luego
+    # vertical hasta la Y del borne en el medidor, luego horizontal al medidor.
+
+    # Orden físico del medidor según sistema
+    if sistema == "tri4h":
+        meter_order = ["1","2","3","4","5","6","7","8","9","11"]
+    elif sistema == "tri3h":
+        meter_order = ["1","2","3","4","5","6","7","8","9"]
+    elif sistema == "bifasico":
+        meter_order = ["1","2","3","4","5","6","7"]
+    else:  # mono
+        meter_order = ["1","2","3","4"]
+
+    # Mapa tlbl -> (tipo, fase, color) para colorear bornes del medidor
+    term_info = {t[0]: t for t in terms}
+
+    def draw_meter(mx0, mx1, y_top, etq):
+        """
+        y_top: Y de la parte superior del área de bornes del medidor.
+        Los bornes se espacian igual que el bloque (step).
+        """
+        n_m = len(meter_order)
+        # Y de cada borne del medidor en orden físico, de arriba a abajo
+        ys_m = np.array([y_top - i*step for i in range(n_m)])
+        my0 = ys_m[-1] - step*0.5
+        my1 = y_top    + step*0.5 + 14
+        ax.add_patch(FancyBboxPatch((mx0,my0),mx1-mx0,my1-my0,
+                     boxstyle="round,pad=0.6,rounding_size=3",
                      fill=True,fc=INK,ec="#0B0F14",lw=2,zorder=2))
-        ax.text((mx0+mx1)/2,my1-4.5,etq,ha="center",va="center",fontsize=12,fontweight="bold",color="white")
-        ax.add_patch(Rectangle((mx0+6,my1-17),(mx1-mx0)-12,7,fc="#0B3D2E",ec="#0A5",lw=1))
-        ax.text((mx0+mx1)/2,my1-13.5,"kWh   kvarh",ha="center",va="center",fontsize=8.5,
-                color="#36df8f",family="monospace")
-        # Reescala 'ys' (rango by0..by1, escala del bloque) al rango my0..my1
-        # del medidor, manteniendo el MISMO orden relativo (misma fila).
-        y_lo, y_hi = ys.min(), ys.max()
-        span = (y_hi - y_lo) if (y_hi - y_lo) > 1e-9 else 1.0
-        pad = (my1 - my0) * 0.08
-        ty = my0 + pad + (ys - y_lo) * ((my1 - my0 - 2*pad) / span)
-        mxr=mx0+2.4
-        m_y={}
-        for (tlbl,rot,kind,ph,io),yy in zip(terms,ty):
-            c=COL[ph]
+        ax.text((mx0+mx1)/2, my1-4.5, etq, ha="center", va="center",
+                fontsize=12, fontweight="bold", color="white")
+        ax.add_patch(Rectangle((mx0+6,my1-17),(mx1-mx0)-12,7,
+                     fc="#0B3D2E",ec="#0A5",lw=1))
+        ax.text((mx0+mx1)/2,my1-13.5,"kWh   kvarh",ha="center",va="center",
+                fontsize=8.5,color="#36df8f",family="monospace")
+        mxr = mx0 + 2.4
+        m_y = {}
+        for tlbl, yy in zip(meter_order, ys_m):
+            info = term_info.get(tlbl)
+            c = COL[info[3]] if info else "#888"
             ax.add_patch(Circle((mxr,yy),0.85,fc="white",ec=c,lw=1.7,zorder=5))
-            ax.text(mxr+1.6,yy,tlbl,ha="left",va="center",fontsize=7,color="white",fontweight="bold")
-            m_y[tlbl]=yy
-        return m_y,mxr
-    mh=max(n*3.3+24,42); my1=98
-    # Con respaldo Aron: medidores más a la derecha para dar espacio a cables inter-medidores
-    mx0 = 136 if (respaldo and sistema == "tri3h") else 132
-    mx1 = mx0 + 32
+            ax.text(mxr+1.6, yy, tlbl, ha="left", va="center",
+                    fontsize=7, color="white", fontweight="bold")
+            m_y[tlbl] = yy
+        return m_y, mxr
+
+    # Posición vertical: el medidor empieza en la misma Y que el bloque (by1-step*0.7)
+    meter_top = by1 - step*0.7
     if not respaldo:
-        meters=[draw_meter(mx0,mx1,my1-mh,my1,"MEDIDOR")]
+        meters = [draw_meter(132, 164, meter_top, "MEDIDOR")]
     else:
-        h=mh*0.5
-        meters=[draw_meter(mx0,mx1,60,60+h,"PRINCIPAL"),
-                draw_meter(mx0,mx1,10,10+h,"CHEQUEO")]
+        n_m     = len(meter_order)
+        meter_h = n_m * step + 18
+        gap     = step * 2
+        top_princ = meter_top
+        top_cheq  = top_princ - meter_h - gap
+        mx0 = 136 if sistema == "tri3h" else 132
+        mx1 = mx0 + 32
+        meters = [draw_meter(mx0, mx1, top_princ, "PRINCIPAL"),
+                  draw_meter(mx0, mx1, top_cheq,  "CHEQUEO")]
 
     # ---------- RUTEO ACOMETIDA -> BLOQUE ----------
     # Reglas confirmadas por el usuario:
@@ -950,60 +984,52 @@ def _draw_semi_indirecta_retie(cfg, out_path):
                 ax.plot([mxr, px], [y_dest, y_dest], color="#2B2B2B", lw=2.0, zorder=6)
 
     # ---------- BLOQUE -> MEDIDOR(ES) ----------
-    # m_y usa la MISMA escala que 'row' -> cables casi horizontales.
-    # Con respaldo: cada medidor tiene su propia banda de columnas.
-    # Aron con respaldo: cables especiales B3->B1chequeo y b4chequeo->b6principal.
-    n_meters = len(meters)
-    fan_lo, fan_hi = 106, 130
+    # Cada borne N del bloque -> mismo borne N del medidor.
+    # Como el orden visual difiere, se traza una L:
+    #   xR (bloque) horizontal hasta columna xm,
+    #   vertical hasta Y del borne en el medidor,
+    #   horizontal hasta mxr (medidor).
+    # Columnas xm separadas para no solaparse (una por borne del order)
+    xm_cols = np.linspace(106, 128, len(order))
+    xm_map  = {tlbl: xm_cols[i] for i,tlbl in enumerate(order)}
+
     for mi, (m_y, mxr) in enumerate(meters):
-        band_lo = fan_lo + (fan_hi-fan_lo) * mi / n_meters
-        band_hi = fan_lo + (fan_hi-fan_lo) * (mi+1) / n_meters
-        xfan = np.linspace(band_lo, band_hi, len(order))
-        for idx, tlbl in enumerate(order):
-            yb=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
-            ls=(0,(6,3)) if ph=="N" else "-"; xm=xfan[idx]
-            ym=m_y[tlbl]
-            ax.plot([xR,xm],[yb,yb],color=c,lw=1.7,ls=ls)
-            ax.plot([xm,xm],[yb,ym],color=c,lw=1.5,ls=ls)
-            ax.plot([xm,mxr],[ym,ym],color=c,lw=1.5,ls=ls)
-            # Puentes internos del medidor (ej: Aron 3->8,9)
-            for tlbl_src, destinos in meter_bridges(sistema):
-                if tlbl == tlbl_src:
-                    for tlbl_dest in destinos:
-                        if tlbl_dest in m_y:
-                            yd = m_y[tlbl_dest]
-                            ax.plot([xm,xm],[ym,yd],color=c,lw=1.5,ls=ls)
-                            ax.plot([xm,mxr],[yd,yd],color=c,lw=1.5,ls=ls)
+        for tlbl in order:
+            if tlbl not in m_y or tlbl not in row:
+                continue
+            yb = row[tlbl][0]   # Y en el bloque
+            ym = m_y[tlbl]      # Y en el medidor (orden físico)
+            ph = row[tlbl][1]; c = COL[ph]
+            ls = (0,(6,3)) if ph=="N" else "-"
+            lw = 1.7
+            xm = xm_map[tlbl]
+            ax.plot([xR, xm],[yb, yb], color=c, lw=lw, ls=ls)   # horizontal desde bloque
+            ax.plot([xm, xm],[yb, ym], color=c, lw=lw, ls=ls)   # vertical
+            ax.plot([xm, mxr],[ym, ym], color=c, lw=lw, ls=ls)  # horizontal al medidor
 
     # Aron con respaldo: cables externos especiales entre medidores
-    # 1) B3 del bloque -> borne 1 del CHEQUEO  (corriente R)
-    # 2) borne 4 del CHEQUEO -> borne 6 del PRINCIPAL (cierre_aron)
     if sistema == "tri3h" and respaldo and len(meters) == 2:
-        m_y_princ, mxr_princ = meters[0]   # PRINCIPAL (mi=0)
-        m_y_cheq,  mxr_cheq  = meters[1]   # CHEQUEO   (mi=1)
+        m_y_princ, mxr_princ = meters[0]
+        m_y_cheq,  mxr_cheq  = meters[1]
+        x_extra = mxr_cheq + 8
 
-        # 1) B3 bloque (borne "3" corriente R, xR) -> borne "1" del CHEQUEO
         if "3" in row and "1" in m_y_cheq:
-            yb3   = row["3"][0]
-            y1ch  = m_y_cheq["1"]
-            xmid  = fan_hi + 2          # columna intermedia extra a la derecha
-            c_r   = COL["R"]
-            ax.plot([xR, xmid],[yb3, yb3], color=c_r, lw=1.7)
-            ax.plot([xmid, xmid],[yb3, y1ch], color=c_r, lw=1.5)
-            ax.plot([xmid, mxr_cheq],[y1ch, y1ch], color=c_r, lw=1.5)
-            ax.text(xmid+0.5,(yb3+y1ch)/2,"B3→1",fontsize=6.5,color=c_r,
+            yb3  = row["3"][0]
+            y1ch = m_y_cheq["1"]
+            ax.plot([xR, x_extra],[yb3, yb3], color=COL["R"], lw=1.7)
+            ax.plot([x_extra, x_extra],[yb3, y1ch], color=COL["R"], lw=1.5)
+            ax.plot([x_extra, mxr_cheq],[y1ch, y1ch], color=COL["R"], lw=1.5)
+            ax.text(x_extra+0.5,(yb3+y1ch)/2,"B3→1",fontsize=6.5,color=COL["R"],
                     ha="left",va="center",style="italic")
 
-        # 2) borne 4 del CHEQUEO -> borne 6 del PRINCIPAL
         if "4" in m_y_cheq and "6" in m_y_princ:
-            y4ch  = m_y_cheq["4"]
-            y6pr  = m_y_princ["6"]
-            xlink = fan_hi + 5          # columna aun más a la derecha
-            c_n   = COL["N"]            # neutro/gris porque son los cierres
-            ax.plot([mxr_cheq, xlink],[y4ch, y4ch], color=c_n, lw=1.5, ls=(0,(4,2)))
-            ax.plot([xlink, xlink],[y4ch, y6pr],    color=c_n, lw=1.5, ls=(0,(4,2)))
-            ax.plot([xlink, mxr_princ],[y6pr, y6pr],color=c_n, lw=1.5, ls=(0,(4,2)))
-            ax.text(xlink+0.5,(y4ch+y6pr)/2,"4→6",fontsize=6.5,color=c_n,
+            y4ch = m_y_cheq["4"]
+            y6pr = m_y_princ["6"]
+            xlink = x_extra + 4
+            ax.plot([mxr_cheq, xlink],[y4ch, y4ch], color=COL["N"], lw=1.5, ls=(0,(4,2)))
+            ax.plot([xlink, xlink],[y4ch, y6pr],    color=COL["N"], lw=1.5, ls=(0,(4,2)))
+            ax.plot([xlink, mxr_princ],[y6pr, y6pr],color=COL["N"], lw=1.5, ls=(0,(4,2)))
+            ax.text(xlink+0.5,(y4ch+y6pr)/2,"4→6",fontsize=6.5,color=COL["N"],
                     ha="left",va="center",style="italic")
 
     # ---------- SALIDA A CARGA (linea de potencia, solo fases de corriente) ----------
