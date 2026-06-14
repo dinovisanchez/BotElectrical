@@ -275,6 +275,132 @@ async def _enviar_foto(mensaje, cfg):
         try: os.remove(path)
         except OSError: pass
 
+# ── Prompt validación de conexiones (Gemini Vision) ──────────────────────────
+PROMPT_VALIDACION_CX = (
+    "Eres un ingeniero inspector experto en sistemas de medida de energía eléctrica "
+    "según normativa colombiana: RETIE 2024 y CREG 038/2014.\n\n"
+    "Analiza la imagen del bloque de pruebas / bornera de medida.\n\n"
+    "TIPO DE MEDIDA: {tipo}\n"
+    "NORMA APLICABLE: {norma}\n\n"
+    "EVALÚA PUNTO POR PUNTO:\n\n"
+    "1. CÓDIGO DE COLORES (RETIE 2024, Título 5):\n"
+    "   R→rojo  |  S→azul  |  T→amarillo  |  N→blanco/gris  |  Tierra→verde\n\n"
+    "2. POLARIDAD DE CORRIENTE:\n"
+    "   TCs correctamente orientados (P1 entrada, P2 salida).\n"
+    "   Detecta inversión de polaridad si es visible.\n\n"
+    "3. PUENTES DE TENSIÓN:\n"
+    "   ¿Están instalados los puentes de tensión donde corresponde?\n\n"
+    "4. CORTOCIRCUITADORES DE CORRIENTE:\n"
+    "   ¿Posición correcta para medida normal (abiertos)?\n\n"
+    "5. TERMINALES / BORNERA:\n"
+    "   Secuencia correcta según norma {norma}.\n"
+    "   Terminales sueltos, conductores sin terminal, cruces.\n\n"
+    "6. ESTADO FÍSICO:\n"
+    "   Aislamiento dañado, corrosión, contaminación, tornillos flojos.\n\n"
+    "RESPONDE EXACTAMENTE con este formato:\n\n"
+    "🔍 DIAGNÓSTICO DE CONEXIONES\n"
+    "─────────────────────────\n"
+    "Estado: [✅ CORRECTO | ⚠️ CON OBSERVACIONES | ❌ INCORRECTO]\n\n"
+    "HALLAZGOS:\n"
+    "- [✅/⚠️/❌] descripción breve y específica de cada hallazgo\n\n"
+    "CORRECCIONES:\n"
+    "- acción específica numerada (o 'Ninguna' si todo está bien)\n\n"
+    "NORMATIVA:\n"
+    "- artículo o sección exacta que aplica\n\n"
+    "ADVERTENCIA DE SEGURIDAD:\n"
+    "- riesgo específico si aplica (o 'Ninguna')\n\n"
+    "Si la imagen no muestra un sistema de medida eléctrica o no tiene suficiente "
+    "resolución para evaluar, indícalo claramente."
+)
+
+# ── Calculadora de Burden ─────────────────────────────────────────────────────
+def _calcular_burden(bd):
+    """Calcula burden total y evalúa cumplimiento. bd = burden_data dict."""
+    RHO   = 0.0172          # Ω·mm²/m cobre a 75 °C
+    I_n   = float(bd.get("i_n", 5))          # A secundario (default 5 A)
+    S_nom = float(bd["nominal"])              # VA nominal del TC/TP
+    S_med = float(bd.get("s_med", 0))        # VA medidor
+    S_rel = float(bd.get("s_rele", 0))       # VA relé
+    tipo  = bd.get("tipo", "tc")
+
+    if tipo == "tc":
+        L   = float(bd.get("cable_long", 0))
+        A   = float(bd.get("cable_sec", 1))
+        R   = 2 * L * RHO / A               # Ω (ida + vuelta)
+        S_cable = I_n ** 2 * R              # VA
+    else:
+        S_cable = 0.0                        # TP: carga de cable despreciable
+
+    S_total = S_cable + S_med + S_rel
+    cumple  = S_total <= S_nom
+    margen  = S_nom - S_total
+    pct     = margen / S_nom * 100
+
+    lines = [
+        "🧮 RESULTADO DE BURDEN",
+        "─────────────────────────",
+        "",
+    ]
+    if tipo == "tc":
+        lines.append(f"  Cable ({bd.get('cable_long','?')} m · {bd.get('cable_sec','?')} mm²)  {S_cable:.2f} VA")
+    lines.append(f"  Medidor                         {S_med:.2f} VA")
+    if S_rel:
+        lines.append(f"  Relé                            {S_rel:.2f} VA")
+    lines += [
+        "  ─────────────────────────",
+        f"  Total cargado                  {S_total:.2f} VA",
+        f"  Nominal {tipo.upper()}                    {S_nom:.2f} VA",
+        "",
+        f"  {'✅ CUMPLE' if cumple else '❌ NO CUMPLE'}",
+    ]
+
+    if cumple:
+        lines.append(f"  Margen libre  {margen:.2f} VA  ({pct:.0f}%)")
+        if pct < 25:
+            lines += [
+                "",
+                "  ⚠️ Margen < 25% — considera un",
+                f"     {tipo.upper()} de mayor burden para robustez.",
+            ]
+    else:
+        lines += ["", "RECOMENDACIONES:"]
+        S_cable_max = S_nom - S_med - S_rel
+        if S_cable_max > 0 and tipo == "tc":
+            L = float(bd.get("cable_long", 0))
+            A = float(bd.get("cable_sec", 1))
+            A_min = I_n**2 * 2 * L * RHO / S_cable_max
+            L_max = S_cable_max * A / (I_n**2 * 2 * RHO)
+            lines.append(f"  1. Aumentar sección a ≥ {A_min:.1f} mm²")
+            lines.append(f"  2. Reducir longitud a ≤ {L_max:.1f} m (ida+vuelta)")
+        extra = max(S_total - S_nom, 0)
+        lines.append(f"  3. Seleccionar {tipo.upper()} con burden nominal ≥ {S_nom + extra + 2:.0f} VA")
+
+    lines += [
+        "",
+        "─────────────────────────",
+        "CREG 038/2014 · IEC 61869-2",
+    ]
+    return "\n".join(lines)
+
+async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
+    if not _genai_client:
+        return "⚠️ Servicio de análisis de imágenes no disponible."
+    prompt = PROMPT_VALIDACION_CX.format(tipo=tipo, norma=norma)
+    try:
+        response = await _genai_client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                prompt,
+            ],
+        )
+        texto = (response.text or "").strip()
+        texto = texto.replace("**", "").replace("__", "")
+        return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
+    except Exception as e:
+        log.error(f"Error Gemini Vision: {e}")
+        return "⚠️ No pude analizar la imagen. Asegúrate de que la foto sea clara y bien iluminada."
+
 # ── Modulo experto RETIE ─────────────────────────────────────────────────────
 TELEGRAM_MAX_LEN = 4000
 
@@ -620,20 +746,23 @@ async def _kb_respaldo_msg(msg, cfg, n):
     )
 
 # ── cmd_menu ──────────────────────────────────────────────────────────────────
+_MENU_KB = InlineKeyboardMarkup([
+    [InlineKeyboardButton("📐  Diagrama",        callback_data="inicio:diagramas"),
+     InlineKeyboardButton("📷  Validar cx",      callback_data="inicio:validar")],
+    [InlineKeyboardButton("💬  Consulta",        callback_data="inicio:consultas"),
+     InlineKeyboardButton("🧮  Burden TC/TP",   callback_data="inicio:burden")],
+])
+_MENU_TXT = (
+    "⚡ BotElectric\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "¿Qué necesitas hoy?"
+)
+
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
     ctx.user_data["cfg"] = dict(DEFAULT)
     ctx.user_data["paso_n"] = 1
-    kb = [
-        [InlineKeyboardButton("📐   Generar diagrama",    callback_data="inicio:diagramas")],
-        [InlineKeyboardButton("💬   Consulta normativa",  callback_data="inicio:consultas")],
-    ]
-    await update.message.reply_text(
-        "⚡ BotElectric\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "¿Qué necesitas hoy?",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
+    await update.message.reply_text(_MENU_TXT, reply_markup=_MENU_KB)
 
 # ── on_button: máquina de estados completa ────────────────────────────────────
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -661,6 +790,38 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "  ej: ¿Cuándo es obligatoria la medida indirecta?\n"
                 "  ej: Distancias de seguridad tablero BT"
             )
+        elif val == "validar":
+            ctx.user_data["validando_foto"] = True
+            ctx.user_data["val_tipo"] = "no especificado"
+            ctx.user_data["val_norma"] = "no especificada"
+            kb = _kb([
+                ("⬇ Directa",     "directa"),
+                ("⚡ Semidirecta", "semidirecta"),
+                ("🔭 Indirecta",  "indirecta"),
+            ], "val_tipo")
+            await q.edit_message_text(
+                "📷 Validación de conexiones\n"
+                "─────────────────────────\n\n"
+                "Voy a analizar la foto con IA y detectar errores.\n\n"
+                "Primero dime: ¿tipo de medida?",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
+        elif val == "burden":
+            ctx.user_data["burden_data"] = {}
+            kb = _kb([
+                ("TC — corriente", "tc"),
+                ("TP — tensión",   "tp"),
+            ], "burden_tipo")
+            await q.edit_message_text(
+                "🧮 Calculadora de Burden\n"
+                "─────────────────────────\n\n"
+                "El burden es la carga conectada al secundario del TC o TP.\n"
+                "Si excede el valor nominal, el equipo pierde exactitud.\n\n"
+                "¿Qué equipo vas a calcular?",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
         else:
             _adv()
             kb = _kb([
@@ -922,6 +1083,78 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             "  Formato primario/secundario  ej: 200/5")
         )
 
+    # ── Validación de conexiones — tipo ──────────────────────────────────────
+    elif campo == "val_tipo":
+        ctx.user_data["val_tipo"] = val
+        kb = _kb([("CENS","CENS"),("RA8","RA8")], "val_norma")
+        await q.edit_message_text(
+            "📷 Validación de conexiones\n"
+            "─────────────────────────\n\n"
+            f"Tipo: {val.capitalize()}\n\n"
+            "¿Norma de la instalación?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    elif campo == "val_norma":
+        ctx.user_data["val_norma"] = val
+        tipo = ctx.user_data.get("val_tipo", "no especificado")
+        await q.edit_message_text(
+            "📷 Validación de conexiones\n"
+            "─────────────────────────\n\n"
+            f"Tipo: {tipo.capitalize()}  ·  Norma: {val}\n\n"
+            "✅ Listo. Ahora sube la foto del bloque de pruebas.\n\n"
+            "  Consejos para mejor análisis:\n"
+            "  - Foto nítida y bien iluminada\n"
+            "  - Captura todo el bloque de pruebas\n"
+            "  - Incluye los conductores y terminales"
+        )
+
+    # ── Burden — tipo TC/TP ───────────────────────────────────────────────────
+    elif campo == "burden_tipo":
+        ctx.user_data["burden_data"]["tipo"] = val
+        kb = _kb([
+            ("0.2S",    "0.2S"),
+            ("0.5S",    "0.5S"),
+            ("Clase 1", "1"),
+            ("Clase 3", "3"),
+        ], "burden_clase")
+        await q.edit_message_text(
+            "🧮 Burden  —  "
+            f"{'TC corriente' if val == 'tc' else 'TP tensión'}\n"
+            "─────────────────────────\n\n"
+            "¿Clase de exactitud del equipo?\n\n"
+            "  0.2S / 0.5S  medida de energía\n"
+            "  Clase 1 / 3  protección",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    elif campo == "burden_clase":
+        ctx.user_data["burden_data"]["clase"] = val
+        ctx.user_data["burden_paso"] = "nominal"
+        tipo_lbl = "TC" if ctx.user_data["burden_data"].get("tipo") == "tc" else "TP"
+        await q.edit_message_text(
+            "🧮 Burden  —  Paso 1 de 4\n"
+            "─────────────────────────\n\n"
+            f"¿Burden nominal del {tipo_lbl}? (VA)\n\n"
+            "  Está en la placa del equipo.\n"
+            "  Valores comunes: 5 · 10 · 15 · 25 · 30 VA"
+        )
+
+    elif campo == "burden_rele":
+        bd = ctx.user_data.setdefault("burden_data", {})
+        if val == "si":
+            ctx.user_data["burden_paso"] = "rele"
+            await q.edit_message_text(
+                "🧮 Burden  —  Paso final\n"
+                "─────────────────────────\n\n"
+                "¿Burden del relé de medida? (VA)\n\n"
+                "  Valor en placa o catálogo del relé.\n"
+                "  Valores comunes: 1 · 2 · 5 VA"
+            )
+        else:
+            bd["s_rele"] = 0
+            await q.edit_message_text(_calcular_burden(bd))
+
     # ── Norma ─────────────────────────────────────────────────────────────────
     elif campo == "norma":
         cfg["norma"] = val
@@ -950,16 +1183,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data.clear()
             ctx.user_data["cfg"] = dict(DEFAULT)
             ctx.user_data["paso_n"] = 1
-            kb = [
-                [InlineKeyboardButton("📐   Generar diagrama",   callback_data="inicio:diagramas")],
-                [InlineKeyboardButton("💬   Consulta normativa", callback_data="inicio:consultas")],
-            ]
-            await q.edit_message_text(
-                "⚡ BotElectric\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "¿Qué necesitas hoy?",
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
+            await q.edit_message_text(_MENU_TXT, reply_markup=_MENU_KB)
 
 # ── Pantalla de confirmación ──────────────────────────────────────────────────
 async def _paso_confirmar(q, cfg):
@@ -1184,8 +1408,112 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _kb_norma_msg(update.message, cfg, n)
         return
 
+    # ── Calculadora de Burden — entrada de datos numéricos ───────────────────
+    burden_paso = ctx.user_data.get("burden_paso")
+    if burden_paso:
+        bd = ctx.user_data.setdefault("burden_data", {})
+        val_str, err = _validar_numero(txt, "valor de burden")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}")
+            return
+
+        if burden_paso == "nominal":
+            bd["nominal"] = val_str
+            tipo = bd.get("tipo", "tc")
+            if tipo == "tc":
+                ctx.user_data["burden_paso"] = "cable_long"
+                await update.message.reply_text(
+                    "🧮 Burden  —  Paso 2 de 4\n"
+                    "─────────────────────────\n\n"
+                    "¿Longitud total del cable de corriente? (metros)\n\n"
+                    "  Mide ida + vuelta desde el TC hasta el medidor.\n"
+                    "  Ejemplo: 30 m"
+                )
+            else:  # TP — sin cable
+                ctx.user_data["burden_paso"] = "med"
+                await update.message.reply_text(
+                    "🧮 Burden  —  Paso 2 de 3\n"
+                    "─────────────────────────\n\n"
+                    "¿Burden del medidor? (VA)\n\n"
+                    "  Medidor electrónico moderno: 1–3 VA\n"
+                    "  Ver placa o ficha técnica del medidor."
+                )
+
+        elif burden_paso == "cable_long":
+            bd["cable_long"] = val_str
+            ctx.user_data["burden_paso"] = "cable_sec"
+            await update.message.reply_text(
+                "🧮 Burden  —  Paso 3 de 4\n"
+                "─────────────────────────\n\n"
+                "¿Sección del cable de corriente? (mm²)\n\n"
+                "  AWG 12 ≈ 3.3 mm²  |  AWG 10 ≈ 5.3 mm²\n"
+                "  AWG 8  ≈ 8.4 mm²  |  4 mm²  |  6 mm²"
+            )
+
+        elif burden_paso == "cable_sec":
+            bd["cable_sec"] = val_str
+            ctx.user_data["burden_paso"] = "med"
+            await update.message.reply_text(
+                "🧮 Burden  —  Paso 4 de 4\n"
+                "─────────────────────────\n\n"
+                "¿Burden del medidor? (VA)\n\n"
+                "  Medidor electrónico moderno: 1–3 VA\n"
+                "  Ver placa o ficha técnica del medidor."
+            )
+
+        elif burden_paso == "med":
+            bd["s_med"] = val_str
+            ctx.user_data["burden_paso"] = None
+            kb = _kb([("✅ Sí tiene relé", "si"), ("— Sin relé", "no")], "burden_rele")
+            await update.message.reply_text(
+                "🧮 Burden  —  Último paso\n"
+                "─────────────────────────\n\n"
+                "¿Hay relé de medida conectado al TC/TP?",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
+        elif burden_paso == "rele":
+            bd["s_rele"] = val_str
+            ctx.user_data["burden_paso"] = None
+            await update.message.reply_text(_calcular_burden(bd))
+
+        return
+
     # ── Texto libre (consulta o diagrama rápido) ──────────────────────────────
     await _procesar_texto(update, update.message.text)
+
+# ── Handler de fotos (validación de conexiones) ───────────────────────────────
+async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.user_data.get("validando_foto"):
+        await update.message.reply_text(
+            "📷 Para analizar conexiones usa:\n"
+            "/menu → 📷 Validar cx"
+        )
+        return
+
+    ctx.user_data["validando_foto"] = False
+    tipo  = ctx.user_data.pop("val_tipo",  "no especificado")
+    norma = ctx.user_data.pop("val_norma", "no especificada")
+
+    await update.message.reply_chat_action("typing")
+    await update.message.reply_text(
+        "🔍 Analizando conexiones…\n"
+        "Esto puede tomar unos segundos."
+    )
+
+    # Descargar la foto en mayor resolución disponible
+    photo = update.message.photo[-1]
+    tg_file = await ctx.bot.get_file(photo.file_id)
+    import io
+    bio = io.BytesIO()
+    await tg_file.download_to_memory(bio)
+    image_bytes = bio.getvalue()
+
+    resultado = await _analizar_foto_cx(image_bytes, tipo, norma)
+    await update.message.reply_text(resultado)
+    await update.message.reply_text(
+        "¿Quieres generar el diagrama correcto? → /menu"
+    )
 
 # ── Arranque ──────────────────────────────────────────────────────────────────
 def main():
@@ -1202,6 +1530,7 @@ def main():
     app.add_handler(CommandHandler("clasificar", cmd_clasificar))
     app.add_handler(CommandHandler("cancelar",   cmd_cancelar))
     app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     log.info("Bot iniciado.")
 
