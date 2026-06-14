@@ -38,7 +38,19 @@ STORE_DISPLAY_NAME = "retie-2024"
 # Si ya tienes un store creado y solo quieres AGREGAR documentos nuevos,
 # pega aqui su nombre (ej: "fileSearchStores/abc123") y se reutilizara
 # en vez de crear uno nuevo.
-EXISTING_STORE_NAME = ""
+EXISTING_STORE_NAME = "fileSearchStores/retie2024-r0u1h57kkhhz"
+
+# Si EXISTING_STORE_NAME esta configurado y vas a AGREGAR documentos nuevos,
+# lista aqui los nombres de archivo (tal como aparecen en DOCS_DIR) que YA
+# fueron indexados anteriormente, para no volver a subirlos y duplicarlos.
+ARCHIVOS_YA_INDEXADOS = {
+    "2._Libro_1___Disposiciones_Generales.pdf",
+    "3._Libro_2_-_Productos.pdf",
+    "4._Libro_3_-_Instalaciones.pdf",
+    "5._Libro_4_-_Evaluación_de_la_conformidad.pdf",
+    "5._Libro_4_-_Evaluacion_de_la_conformidad.pdf",
+    "Creg038-2018.pdf",
+}
 
 # Extensiones soportadas por File Search (las mas comunes)
 EXTS_VALIDAS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".html", ".xml"}
@@ -69,6 +81,7 @@ def main():
     archivos = [
         f for f in sorted(docs_path.iterdir())
         if f.is_file() and f.suffix.lower() in EXTS_VALIDAS
+        and f.name not in ARCHIVOS_YA_INDEXADOS
     ]
     if not archivos:
         raise SystemExit(
