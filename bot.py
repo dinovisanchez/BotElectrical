@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re, asyncio
+import os, tempfile, logging, re, asyncio, json, time
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
@@ -20,6 +20,119 @@ GEMINI_MODEL = "gemini-2.5-flash"
 RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
 
 _genai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
+
+# ── Control de acceso — Google Sheets ─────────────────────────────────────────
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials as _GCreds
+    _GSPREAD_OK = True
+except ImportError:
+    _GSPREAD_OK = False
+
+SHEETS_CREDS_JSON = os.environ.get("GOOGLE_SHEETS_CREDS", "")
+SHEET_ID          = os.environ.get("GOOGLE_SHEET_ID", "")
+ADMIN_TG_ID       = int(os.environ.get("ADMIN_TELEGRAM_ID", "0"))
+
+_gs_client  = None
+_user_cache: dict = {}   # uid → {"nombre":str, "estado":str, "ts":float}
+_CACHE_TTL  = 300        # 5 minutos
+
+def _gs_get_client():
+    global _gs_client
+    if _gs_client is None and _GSPREAD_OK and SHEETS_CREDS_JSON and SHEET_ID:
+        try:
+            creds_dict = json.loads(SHEETS_CREDS_JSON)
+            creds = _GCreds.from_service_account_info(
+                creds_dict,
+                scopes=["https://www.googleapis.com/auth/spreadsheets"]
+            )
+            _gs_client = gspread.authorize(creds)
+        except Exception as e:
+            log.error(f"Error inicializando gspread: {e}")
+    return _gs_client
+
+def _gs_sync(user) -> tuple:
+    """Sync: busca al usuario en la hoja; si no existe, lo registra.
+    Devuelve (estado, nombre, es_nuevo)."""
+    client = _gs_get_client()
+    if client is None:
+        return "sin_sheets", (user.first_name or "Usuario"), False
+    try:
+        sheet = client.open_by_key(SHEET_ID).sheet1
+    except Exception as e:
+        log.error(f"Error abriendo sheet: {e}")
+        return "sin_sheets", (user.first_name or "Usuario"), False
+
+    uid  = str(user.id)
+    rows = sheet.get_all_records()
+
+    for row in rows:
+        if str(row.get("Telegram_ID", "")) == uid:
+            nombre = str(row.get("Nombre", user.first_name or "Usuario"))
+            estado = str(row.get("Estado", "Pendiente")).capitalize()
+            return estado, nombre, False
+
+    # Usuario nuevo → registrar
+    nombre   = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Usuario"
+    username = f"@{user.username}" if user.username else "—"
+    from datetime import datetime
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        sheet.append_row([uid, nombre, username, fecha, "Pendiente"])
+    except Exception as e:
+        log.error(f"Error registrando usuario: {e}")
+    return "Pendiente", nombre, True
+
+async def _check_user(user, force: bool = False) -> tuple:
+    """Async wrapper con caché. Devuelve (estado, nombre, es_nuevo)."""
+    uid = str(user.id)
+    now = time.time()
+    if not force and uid in _user_cache:
+        c = _user_cache[uid]
+        if now - c["ts"] < _CACHE_TTL:
+            return c["estado"], c["nombre"], False
+    loop = asyncio.get_event_loop()
+    try:
+        estado, nombre, es_nuevo = await loop.run_in_executor(None, lambda: _gs_sync(user))
+    except Exception as e:
+        log.error(f"Sheets error: {e}")
+        estado, nombre, es_nuevo = "sin_sheets", (user.first_name or "Usuario"), False
+    _user_cache[uid] = {"estado": estado, "nombre": nombre, "ts": now}
+    return estado, nombre, es_nuevo
+
+async def _access_ok(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Guarda de acceso. Devuelve False (y responde) si el usuario no puede operar."""
+    user = update.effective_user
+    if not user:
+        return True
+    estado, nombre, _ = await _check_user(user)
+    if estado == "Inactivo":
+        msg = (
+            f"⚠️ Hola, {nombre}.\n\n"
+            "Tu suscripción se encuentra suspendida.\n"
+            "Contacta al administrador para reactivarla."
+        )
+        if update.message:
+            await update.message.reply_text(msg)
+        elif update.callback_query:
+            await update.callback_query.answer(
+                "Suscripción suspendida. Contacta al administrador.", show_alert=True
+            )
+        return False
+    if estado == "Pendiente":
+        msg = (
+            f"⏳ Hola, {nombre}.\n\n"
+            "Tu registro está pendiente de activación.\n"
+            "Escribe /start cuando el administrador te habilite."
+        )
+        if update.message:
+            await update.message.reply_text(msg)
+        elif update.callback_query:
+            await update.callback_query.answer(
+                "Registro pendiente. Espera la activación.", show_alert=True
+            )
+        return False
+    return True   # Activo o sin_sheets (modo degradado)
 
 PROMPT_SISTEMA_RETIE = (
     "Eres un asistente tecnico experto en el sector electrico colombiano "
@@ -644,21 +757,52 @@ async def _procesar_texto(update, texto):
         await _consulta_retie(update, texto)
 
 # ── Comandos básicos ──────────────────────────────────────────────────────────
-_BIENVENIDA = (
-    "⚡ BotElectric\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Soy tu ingeniero de medida eléctrica.\n"
-    "Genero diagramas de conexiones y unifilares\n"
-    "conforme a CREG 038/2014 y RETIE 2024.\n\n"
-    "  📐 /menu        Configurar un diagrama\n"
-    "  🔍 /clasificar  Tipo de punto 1–5\n"
-    "  💬 Escríbeme    Consulta normativa\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    "¿Comenzamos? Pulsa /menu o escribe tu duda."
-)
-
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(_BIENVENIDA, reply_markup=REPLY_KEYBOARD)
+    user = update.effective_user
+    estado, nombre, es_nuevo = await _check_user(user, force=True)
+
+    if estado == "Inactivo":
+        await update.message.reply_text(
+            f"⚠️ Hola, {nombre}.\n\n"
+            "Tu suscripción se encuentra suspendida.\n"
+            "Contacta al administrador para reactivarla."
+        )
+        return
+
+    if estado == "Pendiente":
+        if es_nuevo and ADMIN_TG_ID:
+            try:
+                await ctx.bot.send_message(
+                    ADMIN_TG_ID,
+                    f"🆕 Nuevo usuario registrado\n"
+                    f"─────────────────────────\n"
+                    f"  Nombre:    {nombre}\n"
+                    f"  ID:        {user.id}\n"
+                    f"  Username:  @{user.username or '—'}\n\n"
+                    f"Actívalo en Google Sheets → columna Estado: Activo"
+                )
+            except Exception:
+                pass
+        await update.message.reply_text(
+            f"👋 Hola, {nombre}!\n\n"
+            "Tu registro está pendiente de activación.\n"
+            "Recibirás acceso una vez que el administrador\n"
+            "te habilite en el sistema.\n\n"
+            "Escribe /start nuevamente cuando te confirmen."
+        )
+        return
+
+    # Activo (o sin_sheets en modo degradado)
+    await update.message.reply_text(
+        f"⚡ Bienvenido, {nombre}!\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "¿En qué te ayudo hoy?\n\n"
+        "  📐 /menu        Configurar un diagrama\n"
+        "  🔍 /clasificar  Tipo de punto 1–5\n"
+        "  💬 Escríbeme   Consulta normativa\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        reply_markup=REPLY_KEYBOARD
+    )
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(AYUDA, reply_markup=REPLY_KEYBOARD)
@@ -674,6 +818,7 @@ async def cmd_cancelar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     texto = " ".join(ctx.args) if ctx.args else ""
     if not texto:
         await update.message.reply_text(
@@ -686,6 +831,7 @@ async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /clasificar — Clasificador de punto de medida (CREG 038/2014) ─────────────
 async def cmd_clasificar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     ctx.user_data["clasificando"] = True
     await update.message.reply_text(
         "🔍 Clasificador de punto de medida\n"
@@ -830,6 +976,7 @@ _MENU_TXT = (
 )
 
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     ctx.user_data.clear()
     ctx.user_data["cfg"] = dict(DEFAULT)
     ctx.user_data["paso_n"] = 1
@@ -837,6 +984,7 @@ async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── on_button: máquina de estados completa ────────────────────────────────────
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     q = update.callback_query
     await q.answer()
     cfg = ctx.user_data.setdefault("cfg", dict(DEFAULT))
@@ -1334,6 +1482,7 @@ async def _paso_confirmar(q, cfg):
 
 # ── on_text: entradas de texto durante el flujo guiado ───────────────────────
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     cfg = ctx.user_data.get("cfg", dict(DEFAULT))
     txt = update.message.text.strip()
     n   = ctx.user_data.get("paso_n", 1)
@@ -1532,6 +1681,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Handler de fotos (validación de conexiones) ───────────────────────────────
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
     if not ctx.user_data.get("validando_foto"):
         await update.message.reply_text(
             "📷 Para analizar conexiones usa:\n"

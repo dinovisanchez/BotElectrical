@@ -3,3 +3,4 @@ matplotlib
 numpy
 google-genai>=2.8.0
 httpx
+gspread>=6.0.0
