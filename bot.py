@@ -314,54 +314,123 @@ PROMPT_VALIDACION_CX = (
 )
 
 # ── Calculadora de Burden ─────────────────────────────────────────────────────
+# VA estimado por clase de exactitud del medidor (IEC 62053 / valores típicos campo)
+_METER_VA = {"0.2S": 2.0, "0.5S": 2.0, "1": 3.0, "2": 3.0}
+
+# Teclados reutilizables
+_KB_BD_NOMINAL = InlineKeyboardMarkup([
+    [InlineKeyboardButton("5 VA",  callback_data="bd_nominal:5"),
+     InlineKeyboardButton("10 VA", callback_data="bd_nominal:10"),
+     InlineKeyboardButton("15 VA", callback_data="bd_nominal:15")],
+    [InlineKeyboardButton("25 VA", callback_data="bd_nominal:25"),
+     InlineKeyboardButton("30 VA", callback_data="bd_nominal:30")],
+])
+_KB_BD_CABLE_LONG = InlineKeyboardMarkup([
+    [InlineKeyboardButton("10 m",  callback_data="bd_cl_long:10"),
+     InlineKeyboardButton("20 m",  callback_data="bd_cl_long:20"),
+     InlineKeyboardButton("30 m",  callback_data="bd_cl_long:30")],
+    [InlineKeyboardButton("50 m",  callback_data="bd_cl_long:50"),
+     InlineKeyboardButton("100 m", callback_data="bd_cl_long:100")],
+])
+_KB_BD_CABLE_SEC = InlineKeyboardMarkup([
+    [InlineKeyboardButton("2.5 mm²", callback_data="bd_cl_sec:2.5"),
+     InlineKeyboardButton("4 mm²",   callback_data="bd_cl_sec:4"),
+     InlineKeyboardButton("6 mm²",   callback_data="bd_cl_sec:6")],
+    [InlineKeyboardButton("10 mm²",  callback_data="bd_cl_sec:10"),
+     InlineKeyboardButton("16 mm²",  callback_data="bd_cl_sec:16")],
+])
+_KB_BD_MED_CLASE = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Clase 0.2S", callback_data="bd_med_clase:0.2S"),
+     InlineKeyboardButton("Clase 0.5S", callback_data="bd_med_clase:0.5S")],
+    [InlineKeyboardButton("Clase 1",    callback_data="bd_med_clase:1"),
+     InlineKeyboardButton("Clase 2",    callback_data="bd_med_clase:2")],
+])
+_KB_BD_RELE = InlineKeyboardMarkup([
+    [InlineKeyboardButton("— Sin relé", callback_data="bd_rele_va:0"),
+     InlineKeyboardButton("1 VA",        callback_data="bd_rele_va:1")],
+    [InlineKeyboardButton("2 VA",        callback_data="bd_rele_va:2"),
+     InlineKeyboardButton("5 VA",        callback_data="bd_rele_va:5")],
+])
+
+def _bd_txt_nominal(tipo_lbl, clase):
+    return (
+        f"🧮 Burden {tipo_lbl}  ·  Clase {clase}\n"
+        "─────────────────────────\n\n"
+        f"¿Burden nominal del {tipo_lbl}? (VA)\n\n"
+        "  Está en la placa del equipo.\n"
+        "  Pulsa o escribe el valor:"
+    )
+def _bd_txt_cable_long():
+    return (
+        "🧮 Burden TC  ·  Cable\n"
+        "─────────────────────────\n\n"
+        "¿Longitud total del cable de corriente? (m)\n\n"
+        "  Mide ida + vuelta: TC → medidor.\n"
+        "  Pulsa o escribe:"
+    )
+def _bd_txt_cable_sec():
+    return (
+        "🧮 Burden TC  ·  Cable\n"
+        "─────────────────────────\n\n"
+        "¿Sección del cable de corriente? (mm²)\n\n"
+        "  Pulsa o escribe:"
+    )
+def _bd_txt_med_clase():
+    return (
+        "🧮 Burden  ·  Medidor\n"
+        "─────────────────────────\n\n"
+        "¿Clase de exactitud del medidor?\n\n"
+        "  El burden VA se estima automáticamente:\n"
+        "  0.2S / 0.5S → 2 VA  ·  Clase 1 / 2 → 3 VA"
+    )
+def _bd_txt_rele():
+    return (
+        "🧮 Burden  ·  Relé\n"
+        "─────────────────────────\n\n"
+        "¿Hay relé de medida conectado al TC/TP?\n\n"
+        "  Pulsa o escribe el valor en VA:"
+    )
+
 def _calcular_burden(bd):
-    """Calcula burden total y evalúa cumplimiento. bd = burden_data dict."""
-    RHO   = 0.0172          # Ω·mm²/m cobre a 75 °C
-    I_n   = float(bd.get("i_n", 5))          # A secundario (default 5 A)
-    S_nom = float(bd["nominal"])              # VA nominal del TC/TP
-    S_med = float(bd.get("s_med", 0))        # VA medidor
-    S_rel = float(bd.get("s_rele", 0))       # VA relé
+    RHO   = 0.0172
+    I_n   = float(bd.get("i_n", 5))
+    S_nom = float(bd["nominal"])
+    S_med = float(bd.get("s_med", 0))
+    S_rel = float(bd.get("s_rele", 0))
     tipo  = bd.get("tipo", "tc")
+    clase_med = bd.get("med_clase", "")
 
     if tipo == "tc":
-        L   = float(bd.get("cable_long", 0))
-        A   = float(bd.get("cable_sec", 1))
-        R   = 2 * L * RHO / A               # Ω (ida + vuelta)
-        S_cable = I_n ** 2 * R              # VA
+        L = float(bd.get("cable_long", 0))
+        A = float(bd.get("cable_sec", 1))
+        R = 2 * L * RHO / A
+        S_cable = I_n ** 2 * R
     else:
-        S_cable = 0.0                        # TP: carga de cable despreciable
+        S_cable = 0.0
 
     S_total = S_cable + S_med + S_rel
     cumple  = S_total <= S_nom
     margen  = S_nom - S_total
     pct     = margen / S_nom * 100
 
-    lines = [
-        "🧮 RESULTADO DE BURDEN",
-        "─────────────────────────",
-        "",
-    ]
+    lines = ["🧮 RESULTADO DE BURDEN", "─────────────────────────", ""]
     if tipo == "tc":
-        lines.append(f"  Cable ({bd.get('cable_long','?')} m · {bd.get('cable_sec','?')} mm²)  {S_cable:.2f} VA")
-    lines.append(f"  Medidor                         {S_med:.2f} VA")
+        lines.append(f"  Cable ({bd.get('cable_long','?')} m · {bd.get('cable_sec','?')} mm²)   {S_cable:.2f} VA")
+    med_lbl = f"Medidor  clase {clase_med}" if clase_med else "Medidor"
+    lines.append(f"  {med_lbl:<30}  {S_med:.2f} VA*")
     if S_rel:
-        lines.append(f"  Relé                            {S_rel:.2f} VA")
+        lines.append(f"  Relé                              {S_rel:.2f} VA")
     lines += [
         "  ─────────────────────────",
-        f"  Total cargado                  {S_total:.2f} VA",
-        f"  Nominal {tipo.upper()}                    {S_nom:.2f} VA",
+        f"  Total cargado                    {S_total:.2f} VA",
+        f"  Nominal {tipo.upper()}                      {S_nom:.2f} VA",
         "",
         f"  {'✅ CUMPLE' if cumple else '❌ NO CUMPLE'}",
     ]
-
     if cumple:
-        lines.append(f"  Margen libre  {margen:.2f} VA  ({pct:.0f}%)")
+        lines.append(f"  Margen libre   {margen:.2f} VA  ({pct:.0f}%)")
         if pct < 25:
-            lines += [
-                "",
-                "  ⚠️ Margen < 25% — considera un",
-                f"     {tipo.upper()} de mayor burden para robustez.",
-            ]
+            lines += ["", f"  ⚠️ Margen < 25% — considera {tipo.upper()} de mayor burden."]
     else:
         lines += ["", "RECOMENDACIONES:"]
         S_cable_max = S_nom - S_med - S_rel
@@ -370,15 +439,17 @@ def _calcular_burden(bd):
             A = float(bd.get("cable_sec", 1))
             A_min = I_n**2 * 2 * L * RHO / S_cable_max
             L_max = S_cable_max * A / (I_n**2 * 2 * RHO)
-            lines.append(f"  1. Aumentar sección a ≥ {A_min:.1f} mm²")
-            lines.append(f"  2. Reducir longitud a ≤ {L_max:.1f} m (ida+vuelta)")
+            lines.append(f"  1. Sección de cable ≥ {A_min:.1f} mm²")
+            lines.append(f"  2. Longitud de cable ≤ {L_max:.1f} m")
         extra = max(S_total - S_nom, 0)
-        lines.append(f"  3. Seleccionar {tipo.upper()} con burden nominal ≥ {S_nom + extra + 2:.0f} VA")
+        lines.append(f"  3. Usar {tipo.upper()} con burden nominal ≥ {S_nom + extra + 2:.0f} VA")
 
     lines += [
         "",
+        "* VA medidor estimado por clase de exactitud.",
+        "  Verificar en placa o ficha técnica.",
         "─────────────────────────",
-        "CREG 038/2014 · IEC 61869-2",
+        "CREG 038/2014  ·  IEC 61869-2",
     ]
     return "\n".join(lines)
 
@@ -1112,48 +1183,61 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Burden — tipo TC/TP ───────────────────────────────────────────────────
     elif campo == "burden_tipo":
         ctx.user_data["burden_data"]["tipo"] = val
-        kb = _kb([
-            ("0.2S",    "0.2S"),
-            ("0.5S",    "0.5S"),
-            ("Clase 1", "1"),
-            ("Clase 3", "3"),
-        ], "burden_clase")
+        tipo_lbl = "TC — corriente" if val == "tc" else "TP — tensión"
+        kb = _kb([("0.2S","0.2S"),("0.5S","0.5S"),("Clase 1","1"),("Clase 2","2")], "burden_clase")
         await q.edit_message_text(
-            "🧮 Burden  —  "
-            f"{'TC corriente' if val == 'tc' else 'TP tensión'}\n"
+            f"🧮 Burden  ·  {tipo_lbl}\n"
             "─────────────────────────\n\n"
             "¿Clase de exactitud del equipo?\n\n"
             "  0.2S / 0.5S  medida de energía\n"
-            "  Clase 1 / 3  protección",
+            "  Clase 1 / 2  protección o uso general",
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
     elif campo == "burden_clase":
-        ctx.user_data["burden_data"]["clase"] = val
+        bd = ctx.user_data.setdefault("burden_data", {})
+        bd["clase"] = val
+        tipo_lbl = "TC" if bd.get("tipo") == "tc" else "TP"
         ctx.user_data["burden_paso"] = "nominal"
-        tipo_lbl = "TC" if ctx.user_data["burden_data"].get("tipo") == "tc" else "TP"
         await q.edit_message_text(
-            "🧮 Burden  —  Paso 1 de 4\n"
-            "─────────────────────────\n\n"
-            f"¿Burden nominal del {tipo_lbl}? (VA)\n\n"
-            "  Está en la placa del equipo.\n"
-            "  Valores comunes: 5 · 10 · 15 · 25 · 30 VA"
+            _bd_txt_nominal(tipo_lbl, val),
+            reply_markup=_KB_BD_NOMINAL
         )
 
-    elif campo == "burden_rele":
+    elif campo == "bd_nominal":
         bd = ctx.user_data.setdefault("burden_data", {})
-        if val == "si":
-            ctx.user_data["burden_paso"] = "rele"
-            await q.edit_message_text(
-                "🧮 Burden  —  Paso final\n"
-                "─────────────────────────\n\n"
-                "¿Burden del relé de medida? (VA)\n\n"
-                "  Valor en placa o catálogo del relé.\n"
-                "  Valores comunes: 1 · 2 · 5 VA"
-            )
+        bd["nominal"] = val
+        if bd.get("tipo") == "tc":
+            ctx.user_data["burden_paso"] = "cable_long"
+            await q.edit_message_text(_bd_txt_cable_long(), reply_markup=_KB_BD_CABLE_LONG)
         else:
-            bd["s_rele"] = 0
-            await q.edit_message_text(_calcular_burden(bd))
+            ctx.user_data["burden_paso"] = None
+            await q.edit_message_text(_bd_txt_med_clase(), reply_markup=_KB_BD_MED_CLASE)
+
+    elif campo == "bd_cl_long":
+        bd = ctx.user_data.setdefault("burden_data", {})
+        bd["cable_long"] = val
+        ctx.user_data["burden_paso"] = "cable_sec"
+        await q.edit_message_text(_bd_txt_cable_sec(), reply_markup=_KB_BD_CABLE_SEC)
+
+    elif campo == "bd_cl_sec":
+        bd = ctx.user_data.setdefault("burden_data", {})
+        bd["cable_sec"] = val
+        ctx.user_data["burden_paso"] = None
+        await q.edit_message_text(_bd_txt_med_clase(), reply_markup=_KB_BD_MED_CLASE)
+
+    elif campo == "bd_med_clase":
+        bd = ctx.user_data.setdefault("burden_data", {})
+        bd["med_clase"] = val
+        bd["s_med"] = str(_METER_VA.get(val, 2.0))
+        ctx.user_data["burden_paso"] = "rele"
+        await q.edit_message_text(_bd_txt_rele(), reply_markup=_KB_BD_RELE)
+
+    elif campo == "bd_rele_va":
+        bd = ctx.user_data.setdefault("burden_data", {})
+        bd["s_rele"] = val   # "0" = sin relé
+        ctx.user_data["burden_paso"] = None
+        await q.edit_message_text(_calcular_burden(bd))
 
     # ── Norma ─────────────────────────────────────────────────────────────────
     elif campo == "norma":
@@ -1408,69 +1492,33 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _kb_norma_msg(update.message, cfg, n)
         return
 
-    # ── Calculadora de Burden — entrada de datos numéricos ───────────────────
+    # ── Calculadora de Burden — entrada numérica por teclado ─────────────────
     burden_paso = ctx.user_data.get("burden_paso")
-    if burden_paso:
+    if burden_paso in ("nominal", "cable_long", "cable_sec", "rele"):
         bd = ctx.user_data.setdefault("burden_data", {})
-        val_str, err = _validar_numero(txt, "valor de burden")
+        val_str, err = _validar_numero(txt, "valor")
         if err:
             await update.message.reply_text(f"⚠️ {err}")
             return
 
         if burden_paso == "nominal":
             bd["nominal"] = val_str
-            tipo = bd.get("tipo", "tc")
-            if tipo == "tc":
+            if bd.get("tipo") == "tc":
                 ctx.user_data["burden_paso"] = "cable_long"
-                await update.message.reply_text(
-                    "🧮 Burden  —  Paso 2 de 4\n"
-                    "─────────────────────────\n\n"
-                    "¿Longitud total del cable de corriente? (metros)\n\n"
-                    "  Mide ida + vuelta desde el TC hasta el medidor.\n"
-                    "  Ejemplo: 30 m"
-                )
-            else:  # TP — sin cable
-                ctx.user_data["burden_paso"] = "med"
-                await update.message.reply_text(
-                    "🧮 Burden  —  Paso 2 de 3\n"
-                    "─────────────────────────\n\n"
-                    "¿Burden del medidor? (VA)\n\n"
-                    "  Medidor electrónico moderno: 1–3 VA\n"
-                    "  Ver placa o ficha técnica del medidor."
-                )
+                await update.message.reply_text(_bd_txt_cable_long(), reply_markup=_KB_BD_CABLE_LONG)
+            else:
+                ctx.user_data["burden_paso"] = None
+                await update.message.reply_text(_bd_txt_med_clase(), reply_markup=_KB_BD_MED_CLASE)
 
         elif burden_paso == "cable_long":
             bd["cable_long"] = val_str
             ctx.user_data["burden_paso"] = "cable_sec"
-            await update.message.reply_text(
-                "🧮 Burden  —  Paso 3 de 4\n"
-                "─────────────────────────\n\n"
-                "¿Sección del cable de corriente? (mm²)\n\n"
-                "  AWG 12 ≈ 3.3 mm²  |  AWG 10 ≈ 5.3 mm²\n"
-                "  AWG 8  ≈ 8.4 mm²  |  4 mm²  |  6 mm²"
-            )
+            await update.message.reply_text(_bd_txt_cable_sec(), reply_markup=_KB_BD_CABLE_SEC)
 
         elif burden_paso == "cable_sec":
             bd["cable_sec"] = val_str
-            ctx.user_data["burden_paso"] = "med"
-            await update.message.reply_text(
-                "🧮 Burden  —  Paso 4 de 4\n"
-                "─────────────────────────\n\n"
-                "¿Burden del medidor? (VA)\n\n"
-                "  Medidor electrónico moderno: 1–3 VA\n"
-                "  Ver placa o ficha técnica del medidor."
-            )
-
-        elif burden_paso == "med":
-            bd["s_med"] = val_str
             ctx.user_data["burden_paso"] = None
-            kb = _kb([("✅ Sí tiene relé", "si"), ("— Sin relé", "no")], "burden_rele")
-            await update.message.reply_text(
-                "🧮 Burden  —  Último paso\n"
-                "─────────────────────────\n\n"
-                "¿Hay relé de medida conectado al TC/TP?",
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
+            await update.message.reply_text(_bd_txt_med_clase(), reply_markup=_KB_BD_MED_CLASE)
 
         elif burden_paso == "rele":
             bd["s_rele"] = val_str
