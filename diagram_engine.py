@@ -136,9 +136,11 @@ def _ground(ax, x, y, s=1.0):
         ax.plot([x-w*s,x+w*s],[y-(1.2+0.5*i)*s]*2,color=COL["G"],lw=1.4)
 
 # ============================================================
-#  DIAGRAMA DE CONEXIONES
+#  DIAGRAMA DE CONEXIONES (OBSOLETO — usar draw_conexiones_retie)
 # ============================================================
 def draw(cfg, out_path):
+    """OBSOLETO: esta función se mantiene solo por compatibilidad.
+    En producción se usa draw_conexiones_retie(). Actualizar tests."""
     sistema=cfg.get("sistema","tri4h"); tipo=cfg.get("tipo","indirecta")
     respaldo=bool(cfg.get("respaldo",False)); norma=cfg.get("norma","RA8")
     rel_tc=cfg.get("rel_tc",""); rel_tp=cfg.get("rel_tp",""); proyecto=cfg.get("proyecto","")
@@ -271,8 +273,8 @@ def draw(cfg, out_path):
          Line2D([0],[0],color=COL["S"],lw=3,label="Fase S"),
          Line2D([0],[0],color=COL["T"],lw=3,label="Fase T"),
          Line2D([0],[0],color=COL["N"],lw=2,ls=(0,(6,3)),label="Neutro"),
-         Line2D([0],[0],color="#2B2B2B",lw=3.2,label="Cuchilla de corriente (corto)"),
-         Line2D([0],[0],color="#9AA3AD",lw=1.6,label="Link de tension")]
+         Line2D([0],[0],color="#2B2B2B",lw=3.2,label="Cortocircuitador de corriente"),
+         Line2D([0],[0],color="#9AA3AD",lw=1.6,label="Puente de tension (aislador)")]
     ax.legend(handles=leg,loc="lower left",bbox_to_anchor=(0.005,0.005),fontsize=8.5,
               framealpha=0.96,ncol=3,title="Convencion")
     plt.tight_layout(); plt.savefig(out_path,dpi=160,bbox_inches="tight",facecolor="white"); plt.close(fig)
@@ -331,9 +333,11 @@ def _u_meter(ax,x,y,w=22,h=12):
             family="monospace",zorder=6)
 
 # ============================================================
-#  DIAGRAMA UNIFILAR  (IEC 60617 + plano de simbologia)
+#  DIAGRAMA UNIFILAR (OBSOLETO — usar draw_unifilar_generico)
 # ============================================================
 def draw_unifilar(cfg, out_path):
+    """OBSOLETO: esta función se mantiene solo por compatibilidad.
+    En producción se usa draw_unifilar_generico()."""
     tipo=cfg.get("tipo","indirecta"); sistema=cfg.get("sistema","tri4h")
     norma=cfg.get("norma","RA8"); rel_tc=cfg.get("rel_tc",""); rel_tp=cfg.get("rel_tp","")
     proyecto=cfg.get("proyecto",""); tension=cfg.get("tension","")
@@ -461,9 +465,11 @@ def draw_unifilar(cfg, out_path):
 
 
 # ============================================================
-#  UNIFILAR "REAL" : Trafo en MT  ->  medicion semidirecta secundaria
+#  UNIFILAR "REAL" (OBSOLETO — lógica integrada en draw_unifilar_generico)
 # ============================================================
 def draw_unifilar_trafo(cfg, out_path):
+    """OBSOLETO: esta función se mantiene solo por compatibilidad.
+    En producción se usa draw_unifilar_generico() con instalacion='trafo'."""
     """
     MT -> N cortacircuitos -> transformador -> barra BT -> N TC -> medidor
                                                          -> interruptor/totalizador -> carga
@@ -799,9 +805,12 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     if has_tc:
         for ph in cur_ph: _ct(ax,tc_x,y_ph[ph],COL[ph],f"TC-{ph}")
     # TP en paralelo (fase->neutro)
+    # G4: Aron (tri3h) usa solo 2 TP (fases R y T), no 3.
+    # CREG 038/2014: medida 2 elementos = 2 TC + 2 TP.
+    tp_phases = current_phases(sistema) if sistema == "tri3h" else all_ph
     tp_c={}
     if has_tp:
-        for i,ph in enumerate(all_ph):
+        for i,ph in enumerate(tp_phases):
             cx=22+i*6.5; tp_c[ph]=cx
             yref=y_N if show_N else min(y_ph.values())-5
             _pt(ax,cx,y_ph[ph],yref,COL[ph],f"TP-{ph}")
@@ -1097,8 +1106,8 @@ def _draw_semi_indirecta_retie(cfg, out_path):
          Line2D([0],[0],color=COL["S"],lw=3,label="Fase S"),
          Line2D([0],[0],color=COL["T"],lw=3,label="Fase T"),
          Line2D([0],[0],color=COL["N"],lw=2,ls=(0,(6,3)),label="Neutro"),
-         Line2D([0],[0],color="#2B2B2B",lw=3.2,label="Cuchilla de corriente (corto)"),
-         Line2D([0],[0],color="#9AA3AD",lw=1.6,label="Link de tension")]
+         Line2D([0],[0],color="#2B2B2B",lw=3.2,label="Cortocircuitador de corriente"),
+         Line2D([0],[0],color="#9AA3AD",lw=1.6,label="Puente de tension (aislador)")]
     ax.legend(handles=leg,loc="lower left",bbox_to_anchor=(0.005,0.005),fontsize=8.5,
               framealpha=0.96,ncol=3,title="Convencion")
 

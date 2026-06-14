@@ -4,10 +4,9 @@ import re
 
 DEFAULT = dict(sistema="tri4h", tipo="indirecta", respaldo=False,
                norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="",
-               # Nuevos parámetros para precisión
-               asimetrico=False,  # Solo para directa: asimétrico vs simétrico
-               trafo_presente=False,  # Unifilar: tiene transformador
-               interruptor_pos="antes",  # Unifilar: "antes", "despues", "ambos"
+               asimetrico=False,
+               trafo_presente=False,
+               interruptor_pos=None,   # G5: era "antes", forzaba elemento falso en diagramas
                interruptor_antes_kva="", interruptor_despues_kva="")
 
 def _norm(s):
@@ -25,7 +24,7 @@ def parse_spec(text):
     """
     if not text or not isinstance(text, str):
         raise ValueError("Especificacion vacia o invalida")
-    
+
     cfg = dict(DEFAULT)
     t = _norm(text)
     entendido = []
@@ -35,17 +34,16 @@ def parse_spec(text):
     if "tipo" in kv: t += " " + kv["tipo"]
     if "sistema" in kv: t += " " + kv["sistema"]
     if "norma" in kv: t += " " + kv["norma"]
-    if kv.get("rtc"): 
+    if kv.get("rtc"):
         cfg["rel_tc"] = kv["rtc"]
         entendido.append(f"RTC {kv['rtc']}")
-    if kv.get("rtp"): 
+    if kv.get("rtp"):
         cfg["rel_tp"] = kv["rtp"]
         entendido.append(f"RTP {kv['rtp']}")
-    if kv.get("respaldo") in ("si","true","1","yes"): 
+    if kv.get("respaldo") in ("si","true","1","yes"):
         cfg["respaldo"] = True
 
     # --- TIPO ---
-    # Usar regex con word boundaries para evitar false positives
     tipo_count = 0
     if re.search(r"\bdirecta\b", t) and not re.search(r"(semi|indirect)", t):
         cfg["tipo"] = "directa"
@@ -56,27 +54,33 @@ def parse_spec(text):
     if re.search(r"indirect", t):
         cfg["tipo"] = "indirecta"
         tipo_count += 1
-    
+
     if tipo_count > 1:
-        raise ValueError(f"Tipo ambiguo. Especifica UNO: directa, semidirecta, indirecta")
-    
+        raise ValueError("Tipo ambiguo. Especifica UNO: directa, semidirecta, indirecta")
+
     entendido.append(f"Tipo: {cfg['tipo']}")
 
     # --- SISTEMA ---
-    sistema_patterns = [
-        (["monofasic", "mono"], "mono"),
-        (["bifasic", "bi"], "bifasico"),
-        (["2 element", "dos element", "3 hilos", "trifilar", "aron"], "tri3h"),
-        (["3 element", "tres element", "4 hilos", "tetrafilar", "trifasic"], "tri4h"),
-    ]
-    
-    detected_sistemas = [sys_val for patterns, sys_val in sistema_patterns 
-                         if any(p in t for p in patterns)]
+    # G3: patrones específicos ("3 hilos", "4 hilos", "aron") tienen prioridad
+    # sobre el genérico "trifasic" para evitar ambigüedad en "trifasica 3 hilos".
+    tri3h_especificos = ["2 element", "dos element", "3 hilos", "trifilar", "aron"]
+    tri4h_especificos = ["3 element", "tres element", "4 hilos", "tetrafilar"]
+
+    tiene_tri3h = any(p in t for p in tri3h_especificos)
+    tiene_tri4h = any(p in t for p in tri4h_especificos) or \
+                  ("trifasic" in t and not tiene_tri3h)
+
+    detected_sistemas = []
+    if any(p in t for p in ["monofasic", "mono"]): detected_sistemas.append("mono")
+    if any(p in t for p in ["bifasic", "bi"]):      detected_sistemas.append("bifasico")
+    if tiene_tri3h: detected_sistemas.append("tri3h")
+    if tiene_tri4h: detected_sistemas.append("tri4h")
+
     if len(detected_sistemas) > 1:
         raise ValueError(f"Sistema ambiguo: {detected_sistemas}. Especifica UNO: mono, bifasico, tri3h, tri4h")
     elif detected_sistemas:
         cfg["sistema"] = detected_sistemas[0]
-    
+
     sis_txt = {"mono":"monofasica","bifasico":"bifasica",
                "tri3h":"trifasica 3 hilos (2 elem.)","tri4h":"trifasica 4 hilos (3 elem.)"}
     entendido.append(f"Sistema: {sis_txt[cfg['sistema']]}")
@@ -90,10 +94,10 @@ def parse_spec(text):
     norma_count = sum(1 for x in ["cens", "ra8", "ra-8"] if x in t)
     if norma_count > 1:
         raise ValueError("Norma ambigua: especifica CENS o RA8")
-    
-    if "cens" in t: 
+
+    if "cens" in t:
         cfg["norma"] = "CENS"
-    elif "ra8" in t or "ra-8" in t or "nacional" in t: 
+    elif "ra8" in t or "ra-8" in t or "nacional" in t:
         cfg["norma"] = "RA8"
     entendido.append(f"Norma: {cfg['norma']}")
 
@@ -104,26 +108,26 @@ def parse_spec(text):
             try:
                 b_int = int(b)
                 if b_int in (1, 5):
-                    if not cfg["rel_tc"]: 
+                    if not cfg["rel_tc"]:
                         cfg["rel_tc"] = f"{a}/{b}"
                         entendido.append(f"RTC {a}/{b}")
                 elif b_int in (100, 110, 120, 230, 240):
-                    if not cfg["rel_tp"]: 
+                    if not cfg["rel_tp"]:
                         cfg["rel_tp"] = f"{a}/{b}"
                         entendido.append(f"RTP {a}/{b}")
-            except:
+            except Exception:
                 pass
 
     # --- DIAGRAMA ---
     if "unifilar" in t or "unilineal" in t or "unilinear" in t:
         cfg["salida"] = "ambos" if ("conexion" in t or "ambos" in t or "los dos" in t) else "unifilar"
         entendido.append(f"Diagrama: {cfg['salida']}")
-    
+
     # --- TENSION ---
     m = re.search(r"(\d+(?:[.,]\d+)?)\s*kv", t)
-    if m: 
+    if m:
         cfg["tension"] = m.group(1).replace(",", ".") + " kV"
-    
+
     # --- PROTECCIONES ---
     if "rele" in t or "proteccion" in t or "ansi" in t:
         cfg["rele"] = True
@@ -154,20 +158,30 @@ def parse_spec(text):
         faltante.append("relacion de TC (ej. 200/5)")
     if cfg["tipo"] == "indirecta" and not cfg["rel_tp"]:
         faltante.append("relacion de TP (ej. 13200/120)")
-    
+    # M4: semidirecta tambien necesita RTC para etiquetar correctamente el diagrama
+    if cfg["tipo"] == "semidirecta" and not cfg["rel_tc"]:
+        faltante.append("relacion de TC (ej. 200/5)")
+
     return cfg, entendido, faltante
 
 
 if __name__ == "__main__":
     tests = [
         "diagrama indirecta trifasica 3 elementos norma CENS rtc 200/5 rtp 13200/120",
-        "semidirecta 3 elementos 300/5 norma ra8",
-        "indirecta 2 elementos aron con respaldo 100/5 7620/120",
+        "semidirecta 3 elementos norma RA8 300/5",
+        "indirecta 2 elementos aron 100/5 7620/120",
         "medida monofasica directa",
         "tipo=indirecta sistema=tri4h norma=RA8 rtc=200/5 rtp=13200/120 respaldo=si",
+        # G3: estos dos casos deben resolverse sin ambiguedad
+        "trifasica 3 hilos indirecta CENS 200/5 13200/120",
+        "trifasica 4 hilos semidirecta RA8 300/5",
     ]
     for x in tests:
-        cfg, ent, falt = parse_spec(x)
-        print("IN :", x)
-        print("CFG:", cfg)
-        print("FAL:", falt, "\n")
+        try:
+            cfg, ent, falt = parse_spec(x)
+            print(f"IN : {x}")
+            print(f"CFG: tipo={cfg['tipo']} sistema={cfg['sistema']} norma={cfg['norma']}")
+            print(f"FAL: {falt}\n")
+        except ValueError as e:
+            print(f"IN : {x}")
+            print(f"ERR: {e}\n")
