@@ -222,6 +222,7 @@ def _caption(tipo_diagrama, cfg):
         "━━━━━━━━━━━━━━━━━━━━",
         f"🔌 {tipo}  ·  {sis}  ·  {norma}",
     ]
+    if cfg.get("conexion"): lineas.append(f"🔁 Conexión: {cfg['conexion'].capitalize()}")
     if cfg.get("rel_tc"):  lineas.append(f"🔄 TC: {cfg['rel_tc']}")
     if cfg.get("rel_tp"):  lineas.append(f"📊 TP: {cfg['rel_tp']}")
     if cfg.get("respaldo"): lineas.append("👥 Principal + Chequeo")
@@ -638,11 +639,23 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                 "  Formato: primario/secundario\n"
                                 "  Ejemplo: 200/5   o   400/5")
             )
-        elif val in ("unifilar", "ambos"):
-            # directa + unifilar → preguntar instalación
+        elif tipo == "directa" and val in ("conexiones", "ambos"):
+            # Directa con diagrama de conexiones → preguntar tipo de conexión del medidor
             kb = _kb([
-                ("🏗️ Barraje BT",        "barraje"),
-                ("🔧 Transformador MT",  "trafo"),
+                ("🔁 Simétrica   (americana)", "simetrica"),
+                ("↕️ Asimétrica  (europea)",   "asimetrica"),
+            ], "conexion")
+            await q.edit_message_text(
+                _header(n, cfg, "¿Tipo de conexión del medidor?\n\n"
+                                "  🔁 Simétrica  — corriente y tensión al mismo lado del medidor\n"
+                                "  ↕️ Asimétrica — corriente entra por un lado, tensión por el otro"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        elif val in ("unifilar", "ambos"):
+            # directa + solo unifilar → preguntar instalación
+            kb = _kb([
+                ("🏗️ Barraje BT",       "barraje"),
+                ("🔧 Transformador MT", "trafo"),
             ], "instalacion")
             await q.edit_message_text(
                 _header(n, cfg, "¿Cómo está conectada la instalación?\n\n"
@@ -651,7 +664,27 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         else:
-            # directa + solo conexiones → respaldo
+            # directa + solo conexiones (sin simétrica/asimétrica, no debería llegar aquí)
+            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
+            await q.edit_message_text(
+                _header(n, cfg, "¿Lleva medidor de respaldo?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
+    # ── conexion del medidor (directa) ────────────────────────────────────────
+    elif campo == "conexion":
+        cfg["conexion"] = val
+        n += 1; ctx.user_data["paso_n"] = n
+        if cfg.get("salida") in ("unifilar", "ambos"):
+            kb = _kb([
+                ("🏗️ Barraje BT",       "barraje"),
+                ("🔧 Transformador MT", "trafo"),
+            ], "instalacion")
+            await q.edit_message_text(
+                _header(n, cfg, "¿Cómo está conectada la instalación?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        else:
             kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
             await q.edit_message_text(
                 _header(n, cfg, "¿Lleva medidor de respaldo?\n\n"
@@ -734,8 +767,9 @@ async def _paso_confirmar(q, cfg):
         f"  📋 Norma:    {norma}",
         f"  📐 Diagrama: {sal.get(cfg.get('salida','conexiones'),'Conexiones')}",
     ]
-    if cfg.get("rel_tc"): lines.append(f"  🔄 TC:       {cfg['rel_tc']}")
-    if cfg.get("rel_tp"): lines.append(f"  📊 TP:       {cfg['rel_tp']}")
+    if cfg.get("conexion"): lines.append(f"  🔁 Conexión: {cfg['conexion'].capitalize()}")
+    if cfg.get("rel_tc"):  lines.append(f"  🔄 TC:       {cfg['rel_tc']}")
+    if cfg.get("rel_tp"):  lines.append(f"  📊 TP:       {cfg['rel_tp']}")
     inst = cfg.get("instalacion","")
     if inst == "barraje":
         lines.append("  🏗️ Instalación: Barraje BT")
