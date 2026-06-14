@@ -188,17 +188,22 @@ def _mini(cfg):
     if cfg.get("sistema"): p.append(SIS_TXT.get(cfg["sistema"], cfg["sistema"]))
     if cfg.get("norma"):   p.append(cfg["norma"])
     if cfg.get("salida"):  p.append(cfg["salida"].capitalize())
-    if cfg.get("rel_tc"):  p.append(f"TC {cfg['rel_tc']}")
-    if cfg.get("rel_tp"):  p.append(f"TP {cfg['rel_tp']}")
+    if cfg.get("conexion"): p.append(cfg["conexion"].capitalize())
     inst = cfg.get("instalacion", "")
     if inst == "barraje":
-        p.append("Barraje BT")
+        t_bt = cfg.get("tension_bt", "")
+        p.append(f"Barraje {t_bt} V".strip() if t_bt else "Barraje BT")
     elif inst == "trafo":
-        kva = cfg.get("trafo_kva", "")
-        tt  = cfg.get("trafo_tipo", "")
-        p.append(f"Trafo {kva} kVA {tt}".strip())
-    if cfg.get("respaldo"):
-        p.append("Con respaldo")
+        trafo_p = ["Trafo"]
+        if cfg.get("trafo_kva"): trafo_p.append(f"{cfg['trafo_kva']} kVA")
+        if cfg.get("trafo_uso"): trafo_p.append(f"({cfg['trafo_uso']})")
+        p.append(" ".join(trafo_p))
+    if cfg.get("seccionador"): p.append(f"Secc. {cfg['seccionador']}")
+    if cfg.get("rel_tc"):       p.append(f"TC {cfg['rel_tc']}")
+    if cfg.get("rel_tp"):       p.append(f"TP {cfg['rel_tp']}")
+    if cfg.get("proteccion_amp"): p.append(f"Prot. {cfg['proteccion_amp']} A")
+    if cfg.get("calibre_conductor"): p.append(f"Calibre {cfg['calibre_conductor']}")
+    if cfg.get("respaldo"): p.append("Principal + Respaldo")
     return "\n".join(f"  ▸ {x}" for x in p)
 
 def _header(n, cfg, titulo):
@@ -214,21 +219,28 @@ def _header(n, cfg, titulo):
 
 def _caption(tipo_diagrama, cfg):
     """Caption enriquecido para la imagen del diagrama."""
-    sis  = SIS_TXT.get(cfg.get("sistema", "tri4h"), "Trifásica")
-    tipo = cfg.get("tipo", "indirecta").capitalize()
+    sis   = SIS_TXT.get(cfg.get("sistema", "tri4h"), "Trifásica")
+    tipo  = cfg.get("tipo", "indirecta").capitalize()
     norma = cfg.get("norma", "RA8")
     lineas = [
         f"📐 {tipo_diagrama}",
         "━━━━━━━━━━━━━━━━━━━━",
         f"🔌 {tipo}  ·  {sis}  ·  {norma}",
     ]
-    if cfg.get("conexion"): lineas.append(f"🔁 Conexión: {cfg['conexion'].capitalize()}")
-    if cfg.get("rel_tc"):  lineas.append(f"🔄 TC: {cfg['rel_tc']}")
-    if cfg.get("rel_tp"):  lineas.append(f"📊 TP: {cfg['rel_tp']}")
-    if cfg.get("respaldo"): lineas.append("👥 Principal + Chequeo")
-    if cfg.get("trafo_kva"):
-        tt = cfg.get("trafo_tipo", "")
-        lineas.append(f"🔧 Trafo: {cfg['trafo_kva']} kVA {tt}".rstrip())
+    if cfg.get("conexion"):       lineas.append(f"🔁 Conexión: {cfg['conexion'].capitalize()}")
+    inst = cfg.get("instalacion","")
+    if inst == "trafo":
+        kva = cfg.get("trafo_kva",""); uso = cfg.get("trafo_uso","")
+        lineas.append(f"🔧 Trafo: {kva} kVA {uso}".strip())
+    elif inst == "barraje":
+        t_bt = cfg.get("tension_bt","")
+        lineas.append(f"🏗️ Barraje: {t_bt} V" if t_bt else "🏗️ Barraje BT")
+    if cfg.get("seccionador"):    lineas.append(f"🔀 Seccionador: {cfg['seccionador']} de medida")
+    if cfg.get("rel_tc"):         lineas.append(f"🔄 TC: {cfg['rel_tc']}")
+    if cfg.get("rel_tp"):         lineas.append(f"📊 TP: {cfg['rel_tp']}")
+    if cfg.get("proteccion_amp"): lineas.append(f"🔐 Protección: {cfg['proteccion_amp']} A")
+    if cfg.get("calibre_conductor"): lineas.append(f"🔗 Calibre: {cfg['calibre_conductor']}")
+    if cfg.get("respaldo"):       lineas.append("👥 Principal + Respaldo")
     lineas += ["━━━━━━━━━━━━━━━━━━━━", "✅ Conforme a CREG 038/2014"]
     return "\n".join(lineas)
 
@@ -529,7 +541,7 @@ async def _hacer_clasificacion(update, txt):
     )
     await update.message.reply_text(resp)
 
-# ── Menú guiado rediseñado ────────────────────────────────────────────────────
+# ── Menú guiado v3 ────────────────────────────────────────────────────────────
 def _kb(opciones, prefijo):
     btns = [InlineKeyboardButton(txt, callback_data=f"{prefijo}:{val}") for txt, val in opciones]
     return [btns[i:i+2] for i in range(0, len(btns), 2)]
@@ -550,24 +562,56 @@ def _validar_relacion(txt, nombre):
         return None, f"Formato inválido para {nombre}. Escribe como 200/5 o 13200/120."
     return f"{m.group(1)}/{m.group(2)}", None
 
+# ── Helpers de navegación ──────────────────────────────────────────────────────
+async def _kb_norma_q(q, cfg, n):
+    kb = _kb([("CENS — distribuidora local","CENS"),("RA8 — nacional / OR","RA8")], "norma")
+    await q.edit_message_text(
+        _header(n, cfg, "¿Norma de medida?\n\n"
+                        "  CENS — Empresa de distribución local\n"
+                        "  RA8  — Nivel nacional (OR / STR)"),
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def _kb_norma_msg(msg, cfg, n):
+    kb = _kb([("CENS — distribuidora local","CENS"),("RA8 — nacional / OR","RA8")], "norma")
+    await msg.reply_text(
+        _header(n, cfg, "¿Norma de medida?\n\n"
+                        "  CENS — Empresa de distribución local\n"
+                        "  RA8  — Nivel nacional (OR / STR)"),
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def _kb_respaldo_q(q, cfg, n):
+    kb = _kb([("Principal","no"),("✅ Principal + Respaldo","si")], "respaldo")
+    await q.edit_message_text(
+        _header(n, cfg, "¿Principal o Principal + Respaldo?\n\n"
+                        "  Principal            — un solo medidor\n"
+                        "  Principal + Respaldo — principal + chequeo en mismo bloque"),
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def _kb_respaldo_msg(msg, cfg, n):
+    kb = _kb([("Principal","no"),("✅ Principal + Respaldo","si")], "respaldo")
+    await msg.reply_text(
+        _header(n, cfg, "¿Principal o Principal + Respaldo?"),
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+# ── cmd_menu ──────────────────────────────────────────────────────────────────
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
     ctx.user_data["cfg"] = dict(DEFAULT)
     ctx.user_data["paso_n"] = 1
-    kb = _kb([
-        ("⬇️ Directa   — sin TC/TP",  "directa"),
-        ("⚡ Semidirecta — solo TC",   "semidirecta"),
-        ("🔭 Indirecta  — TC + TP",   "indirecta"),
-    ], "tipo")
+    kb = [
+        [InlineKeyboardButton("📐  Diagramas eléctricos", callback_data="inicio:diagramas")],
+        [InlineKeyboardButton("💬  Consultas normativas",  callback_data="inicio:consultas")],
+    ]
     await update.message.reply_text(
-        _header(1, {}, "¿Cuál es el tipo de medida?\n\n"
-                       "  ⬇️ Directa     — V e I directos al medidor\n"
-                       "  ⚡ Semidirecta — V directo, I por TC\n"
-                       "  🔭 Indirecta  — V por TP, I por TC  (MT/AT)"),
+        _header(1, {}, "Bienvenido. ¿Qué deseas hacer?"),
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
-# ── on_button: máquina de estados del menú guiado ────────────────────────────
+# ── on_button: máquina de estados completa ────────────────────────────────────
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -575,159 +619,298 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     n   = ctx.user_data.get("paso_n", 1)
     campo, val = q.data.split(":", 1)
 
-    # ── Paso 1: tipo ─────────────────────────────────────────────────────────
-    if campo == "tipo":
+    def _adv():
+        nonlocal n
+        n += 1
+        ctx.user_data["paso_n"] = n
+
+    # ── Inicio: Diagramas o Consultas ────────────────────────────────────────
+    if campo == "inicio":
+        if val == "consultas":
+            ctx.user_data["modo_consulta"] = True
+            await q.edit_message_text(
+                "💬 CONSULTAS NORMATIVAS\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Escribe tu pregunta y la respondo con base en:\n"
+                "RETIE 2024 · CREG 038/2014 · CREG 015/2014\n\n"
+                "  ej: ¿Clase de exactitud punto Tipo 3?\n"
+                "  ej: Distancias mínimas tablero BT\n"
+                "  ej: ¿Cuándo es obligatoria la medida indirecta?"
+            )
+        else:
+            _adv()
+            kb = _kb([
+                ("⬇️ Directa   — sin TC/TP", "directa"),
+                ("⚡ Semidirecta — solo TC",  "semidirecta"),
+                ("🔭 Indirecta  — TC + TP",  "indirecta"),
+            ], "tipo")
+            await q.edit_message_text(
+                _header(n, cfg, "¿Tipo de medida?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
+    # ── Tipo ─────────────────────────────────────────────────────────────────
+    elif campo == "tipo":
         cfg["tipo"] = val
-        n += 1; ctx.user_data["paso_n"] = n
-        kb = _kb([
-            ("1F — Monofásica",        "mono"),
-            ("2F — Bifásica",          "bifasico"),
-            ("3H — Trifásica Aron",    "tri3h"),
-            ("4H — Trifásica 3 elem.", "tri4h"),
-        ], "sistema")
-        await q.edit_message_text(
-            _header(n, cfg, "¿Cuál es el sistema eléctrico?\n\n"
-                            "  1F — Monofásica\n"
-                            "  2F — Bifásica\n"
-                            "  3H — Trifásica Aron (2 TC, 2 TP)\n"
-                            "  4H — Trifásica 3 elementos (3 TC, 3 TP)"),
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
-
-    # ── Paso 2: sistema ───────────────────────────────────────────────────────
-    elif campo == "sistema":
-        cfg["sistema"] = val
-        n += 1; ctx.user_data["paso_n"] = n
-        kb = _kb([
-            ("CENS — distribuidora local", "CENS"),
-            ("RA8  — nacional / OR",       "RA8"),
-        ], "norma")
-        await q.edit_message_text(
-            _header(n, cfg, "¿Cuál es la norma de medida?\n\n"
-                            "  CENS — Empresas de distribución local\n"
-                            "  RA8  — Nivel nacional (OR / STR)"),
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
-
-    # ── Paso 3: norma ─────────────────────────────────────────────────────────
-    elif campo == "norma":
-        cfg["norma"] = val
-        n += 1; ctx.user_data["paso_n"] = n
+        _adv()
         kb = _kb([
             ("📐 Conexiones",  "conexiones"),
             ("📊 Unifilar",    "unifilar"),
             ("📋 Ambos",       "ambos"),
         ], "salida")
         await q.edit_message_text(
-            _header(n, cfg, "¿Qué diagrama necesitas?\n\n"
-                            "  📐 Conexiones — bloque de pruebas y terminales\n"
-                            "  📊 Unifilar   — esquema de la instalación\n"
-                            "  📋 Ambos      — los dos diagramas"),
+            _header(n, cfg, "¿Qué diagrama necesitas?"),
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-    # ── Paso 4: salida ────────────────────────────────────────────────────────
+    # ── Salida ────────────────────────────────────────────────────────────────
     elif campo == "salida":
         cfg["salida"] = val
-        n += 1; ctx.user_data["paso_n"] = n
+        _adv()
         tipo = cfg["tipo"]
+        incluye_cx = val in ("conexiones", "ambos")
 
-        if tipo in ("semidirecta", "indirecta"):
-            ctx.user_data["esperando_rel_tc"] = True
-            await q.edit_message_text(
-                _header(n, cfg, "Escribe la relación del TC:\n\n"
-                                "  Formato: primario/secundario\n"
-                                "  Ejemplo: 200/5   o   400/5")
-            )
-        elif tipo == "directa" and val in ("conexiones", "ambos"):
-            # Directa con diagrama de conexiones → preguntar tipo de conexión del medidor
+        if tipo == "directa":
+            if incluye_cx:
+                kb = _kb([
+                    ("1F — Monofásica",  "mono"),
+                    ("2F — Bifásica",    "bifasico"),
+                    ("3F — Trifásica",   "tri4h"),
+                ], "sistema")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Sistema eléctrico?"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+            else:  # unifilar solo — va directo a instalacion
+                kb = _kb([
+                    ("🔧 Transformador MT", "trafo"),
+                    ("🏗️ Barraje BT",      "barraje"),
+                ], "instalacion")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Punto de conexión de la medida?"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+
+        elif tipo == "semidirecta":
+            if incluye_cx:
+                kb = _kb([
+                    ("2F — Bifásica",   "bifasico"),
+                    ("3F — Trifásica",  "tri4h"),
+                ], "sistema")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Sistema eléctrico?"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+            else:
+                kb = _kb([
+                    ("🔧 Transformador MT", "trafo"),
+                    ("🏗️ Barraje BT",      "barraje"),
+                ], "instalacion")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Punto de conexión de la medida?"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+
+        else:  # indirecta
+            if incluye_cx:
+                kb = _kb([
+                    ("2F — Bifásica",   "bifasico"),
+                    ("3F — Trifásica",  "tri_pend"),
+                ], "sistema")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Sistema eléctrico?"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+            else:
+                # unifilar indirecta → trafo siempre
+                cfg["instalacion"] = "trafo"
+                ctx.user_data["esperando_kva"] = True
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                    "  Escribe solo el número (ej: 50 o 150)")
+                )
+
+    # ── Sistema ───────────────────────────────────────────────────────────────
+    elif campo == "sistema":
+        if val == "tri_pend":
+            _adv()
             kb = _kb([
-                ("🔁 Simétrica   (americana)", "simetrica"),
-                ("↕️ Asimétrica  (europea)",   "asimetrica"),
-            ], "conexion")
+                ("3 Elementos — forma 9S",  "tri4h"),
+                ("Tipo Aron   — forma 5S",  "tri3h"),
+            ], "subtipo")
             await q.edit_message_text(
-                _header(n, cfg, "¿Tipo de conexión del medidor?\n\n"
-                                "  🔁 Simétrica  — corriente y tensión al mismo lado del medidor\n"
-                                "  ↕️ Asimétrica — corriente entra por un lado, tensión por el otro"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        elif val in ("unifilar", "ambos"):
-            # directa + solo unifilar → preguntar instalación
-            kb = _kb([
-                ("🏗️ Barraje BT",       "barraje"),
-                ("🔧 Transformador MT", "trafo"),
-            ], "instalacion")
-            await q.edit_message_text(
-                _header(n, cfg, "¿Cómo está conectada la instalación?\n\n"
-                                "  🏗️ Barraje BT  — red de baja tensión\n"
-                                "  🔧 Trafo MT    — a través de transformador MT/BT"),
+                _header(n, cfg, "¿Tipo de sistema trifásico?\n\n"
+                                "  3 Elementos — 3 TC + 3 TP (medidor 9 terminales)\n"
+                                "  Tipo Aron   — 2 TC + 2 TP (medidor 5 terminales)"),
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         else:
-            # directa + solo conexiones (sin simétrica/asimétrica, no debería llegar aquí)
-            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
-            await q.edit_message_text(
-                _header(n, cfg, "¿Lleva medidor de respaldo?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
+            cfg["sistema"] = val
+            _adv()
+            tipo = cfg["tipo"]
+            if tipo == "directa" and cfg.get("salida") in ("conexiones", "ambos"):
+                # Directa + conexiones → conexión del medidor (sim/asim)
+                kb = _kb([
+                    ("🔁 Simétrica  — I y V al mismo lado",     "simetrica"),
+                    ("↕️ Asimétrica — I y V en lados opuestos", "asimetrica"),
+                ], "conexion")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Tipo de conexión del medidor?\n\n"
+                                    "  🔁 Simétrica  — corriente y tensión al mismo lado\n"
+                                    "  ↕️ Asimétrica — corriente y tensión en lados opuestos"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+            elif tipo == "indirecta":
+                # Indirecta SIEMPRE usa transformador
+                cfg["instalacion"] = "trafo"
+                ctx.user_data["esperando_kva"] = True
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                    "  Escribe solo el número (ej: 50 o 150)")
+                )
+            else:
+                # Semidirecta o directa-unifilar → punto de conexión (trafo o barraje)
+                kb = _kb([
+                    ("🔧 Transformador MT", "trafo"),
+                    ("🏗️ Barraje BT",      "barraje"),
+                ], "instalacion")
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Punto de conexión de la medida?\n\n"
+                                    "  🔧 Transformador — medida en secundario del trafo\n"
+                                    "  🏗️ Barraje BT   — medida directo en la barra BT"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
 
-    # ── conexion del medidor (directa) ────────────────────────────────────────
+    # ── Subtipo trifásica (indirecta) ─────────────────────────────────────────
+    elif campo == "subtipo":
+        cfg["sistema"] = val
+        _adv()
+        # Indirecta → punto de conexión siempre trafo
+        cfg["instalacion"] = "trafo"
+        ctx.user_data["esperando_kva"] = True
+        await q.edit_message_text(
+            _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                            "  Escribe solo el número (ej: 50 o 150)")
+        )
+
+    # ── Conexión del medidor (directa) ────────────────────────────────────────
     elif campo == "conexion":
         cfg["conexion"] = val
-        n += 1; ctx.user_data["paso_n"] = n
-        if cfg.get("salida") in ("unifilar", "ambos"):
-            kb = _kb([
-                ("🏗️ Barraje BT",       "barraje"),
-                ("🔧 Transformador MT", "trafo"),
-            ], "instalacion")
-            await q.edit_message_text(
-                _header(n, cfg, "¿Cómo está conectada la instalación?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        else:
-            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
-            await q.edit_message_text(
-                _header(n, cfg, "¿Lleva medidor de respaldo?\n\n"
-                                "  Sin respaldo — un solo medidor\n"
-                                "  Con respaldo — principal + chequeo en mismo bloque"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-
-    # ── instalacion (paso variable) ───────────────────────────────────────────
-    elif campo == "instalacion":
-        cfg["instalacion"] = val
-        n += 1; ctx.user_data["paso_n"] = n
-        if val == "trafo":
-            ctx.user_data["esperando_kva"] = True
-            await q.edit_message_text(
-                _header(n, cfg, "¿Cuántos kVA tiene el transformador?\n\n"
-                                "  Escribe solo el número (ej: 50 o 150)")
-            )
-        else:
-            # barraje → respaldo
-            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
-            await q.edit_message_text(
-                _header(n, cfg, "¿Lleva medidor de respaldo?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-
-    # ── tipo de trafo (paso variable) ─────────────────────────────────────────
-    elif campo == "trafo_tipo":
-        cfg["trafo_tipo"] = val
-        n += 1; ctx.user_data["paso_n"] = n
-        kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
+        _adv()
+        kb = _kb([
+            ("🔧 Transformador MT", "trafo"),
+            ("🏗️ Barraje BT",      "barraje"),
+        ], "instalacion")
         await q.edit_message_text(
-            _header(n, cfg, "¿Lleva medidor de respaldo?"),
+            _header(n, cfg, "¿Punto de conexión de la medida?\n\n"
+                            "  🔧 Transformador — medida en secundario del trafo\n"
+                            "  🏗️ Barraje BT   — medida directo en la barra BT"),
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-    # ── respaldo → confirmación ───────────────────────────────────────────────
+    # ── Instalación (directa/semidirecta) ────────────────────────────────────
+    elif campo == "instalacion":
+        cfg["instalacion"] = val
+        _adv()
+        if val == "trafo":
+            kb = _kb([
+                ("🔒 Exclusivo  — un solo usuario",  "exclusivo"),
+                ("👥 Compartido — varios / OR",      "compartido"),
+            ], "trafo_uso")
+            await q.edit_message_text(
+                _header(n, cfg, "¿El transformador es exclusivo o compartido?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        else:  # barraje
+            kb = _kb([("🔌 220 V","220"),("⚡ 440 V","440")], "tension_bt")
+            await q.edit_message_text(
+                _header(n, cfg, "¿Tensión del barraje?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+
+    # ── Uso del trafo ─────────────────────────────────────────────────────────
+    elif campo == "trafo_uso":
+        cfg["trafo_uso"] = val
+        _adv()
+        ctx.user_data["esperando_kva"] = True
+        await q.edit_message_text(
+            _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                            "  Escribe solo el número (ej: 50 o 150)")
+        )
+
+    # ── Tensión del barraje ───────────────────────────────────────────────────
+    elif campo == "tension_bt":
+        cfg["tension_bt"] = val
+        cfg["tension"] = f"{val} V"
+        _adv()
+        kb = _kb([
+            ("✅ Sí, tiene protección", "si"),
+            ("❌ No tiene protección",  "no"),
+        ], "proteccion")
+        await q.edit_message_text(
+            _header(n, cfg, "¿El circuito tiene protección?\n\n"
+                            "  Breaker o fusible después del medidor (lado carga)"),
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    # ── Protección (directa/semidirecta con barraje) ──────────────────────────
+    elif campo == "proteccion":
+        cfg["tiene_proteccion"] = (val == "si")
+        _adv()
+        if val == "si":
+            ctx.user_data["esperando_prot_amp"] = True
+            await q.edit_message_text(
+                _header(n, cfg, "¿De cuántos amperios es la protección?\n\n"
+                                "  Escribe solo el número (ej: 100 o 60)")
+            )
+        else:
+            # Sin protección → siguiente según tipo
+            tipo = cfg["tipo"]
+            if tipo == "directa":
+                await _kb_norma_q(q, cfg, n)
+            else:  # semidirecta
+                ctx.user_data["esperando_rel_tc"] = True
+                await q.edit_message_text(
+                    _header(n, cfg, "¿Cuánto son los TCs? (relación)\n\n"
+                                    "  Formato: primario/secundario\n"
+                                    "  Ejemplo: 200/5   o   400/5")
+                )
+
+    # ── Posición protección (semidirecta) ────────────────────────────────────
+    elif campo == "proteccion_pos":
+        cfg["proteccion_pos"] = val
+        _adv()
+        ctx.user_data["esperando_rel_tc"] = True
+        await q.edit_message_text(
+            _header(n, cfg, "¿Cuánto son los TCs? (relación)\n\n"
+                            "  Formato: primario/secundario\n"
+                            "  Ejemplo: 200/5   o   400/5")
+        )
+
+    # ── Seccionador (indirecta) ───────────────────────────────────────────────
+    elif campo == "seccionador":
+        cfg["seccionador"] = val
+        _adv()
+        ctx.user_data["esperando_rel_tc"] = True
+        await q.edit_message_text(
+            _header(n, cfg, "¿Cuál es la relación de los TCs?\n\n"
+                            "  Formato: primario/secundario\n"
+                            "  Ejemplo: 200/5   o   400/5")
+        )
+
+    # ── Norma ─────────────────────────────────────────────────────────────────
+    elif campo == "norma":
+        cfg["norma"] = val
+        _adv()
+        await _kb_respaldo_q(q, cfg, n)
+
+    # ── Respaldo → confirmación ───────────────────────────────────────────────
     elif campo == "respaldo":
         cfg["respaldo"] = (val == "si")
-        n += 1; ctx.user_data["paso_n"] = n
+        _adv()
         await _paso_confirmar(q, cfg)
 
-    # ── confirmación → generar ────────────────────────────────────────────────
+    # ── Confirmación → generar ────────────────────────────────────────────────
     elif campo == "generar":
         if val == "si":
             await q.edit_message_text("⏳ Generando tu diagrama…")
@@ -736,48 +919,56 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 log.error(f"Error diagrama: {e}")
                 await q.message.reply_text(
-                    "⚠️ No pude generar el diagrama. Intenta de nuevo o usa /menu."
+                    "⚠️ No pude generar el diagrama. Usa /menu para intentar de nuevo."
                 )
         else:
-            # Reiniciar
             ctx.user_data.clear()
             ctx.user_data["cfg"] = dict(DEFAULT)
             ctx.user_data["paso_n"] = 1
-            kb = _kb([
-                ("⬇️ Directa   — sin TC/TP",  "directa"),
-                ("⚡ Semidirecta — solo TC",   "semidirecta"),
-                ("🔭 Indirecta  — TC + TP",   "indirecta"),
-            ], "tipo")
+            kb = [
+                [InlineKeyboardButton("📐  Diagramas eléctricos", callback_data="inicio:diagramas")],
+                [InlineKeyboardButton("💬  Consultas normativas",  callback_data="inicio:consultas")],
+            ]
             await q.edit_message_text(
-                _header(1, {}, "¿Cuál es el tipo de medida?"),
+                _header(1, {}, "Bienvenido. ¿Qué deseas hacer?"),
                 reply_markup=InlineKeyboardMarkup(kb)
             )
 
+# ── Pantalla de confirmación ──────────────────────────────────────────────────
 async def _paso_confirmar(q, cfg):
-    """Resumen final con botón de generación."""
-    sis  = SIS_TXT.get(cfg.get("sistema","tri4h"), "Trifásica")
-    tipo = cfg.get("tipo","indirecta").capitalize()
-    norma= cfg.get("norma","RA8")
-    sal  = {"conexiones":"📐 Conexiones","unifilar":"📊 Unifilar","ambos":"📋 Ambos"}
+    sis   = SIS_TXT.get(cfg.get("sistema","tri4h"), "Trifásica")
+    tipo  = cfg.get("tipo","indirecta").capitalize()
+    norma = cfg.get("norma","RA8")
+    sal   = {"conexiones":"📐 Conexiones","unifilar":"📊 Unifilar","ambos":"📋 Ambos"}
     lines = [
-        "✅ TODO LISTO — REVISA TU CONFIGURACIÓN",
+        "✅ REVISA TU CONFIGURACIÓN",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"  🔌 Tipo:     {tipo}",
-        f"  ⚡ Sistema:  {sis}",
-        f"  📋 Norma:    {norma}",
-        f"  📐 Diagrama: {sal.get(cfg.get('salida','conexiones'),'Conexiones')}",
+        f"  🔌 Tipo:      {tipo}",
+        f"  ⚡ Sistema:   {sis}",
+        f"  📋 Norma:     {norma}",
+        f"  📐 Diagrama:  {sal.get(cfg.get('salida','conexiones'),'Conexiones')}",
     ]
-    if cfg.get("conexion"): lines.append(f"  🔁 Conexión: {cfg['conexion'].capitalize()}")
-    if cfg.get("rel_tc"):  lines.append(f"  🔄 TC:       {cfg['rel_tc']}")
-    if cfg.get("rel_tp"):  lines.append(f"  📊 TP:       {cfg['rel_tp']}")
+    if cfg.get("conexion"):
+        lines.append(f"  🔁 Conexión:  {cfg['conexion'].capitalize()}")
     inst = cfg.get("instalacion","")
-    if inst == "barraje":
-        lines.append("  🏗️ Instalación: Barraje BT")
-    elif inst == "trafo":
-        kva = cfg.get("trafo_kva",""); tt = cfg.get("trafo_tipo","")
-        lines.append(f"  🔧 Trafo:    {kva} kVA {tt}".rstrip())
-    if cfg.get("respaldo"):
-        lines.append("  👥 Respaldo: Principal + Chequeo")
+    if inst == "trafo":
+        kva = cfg.get("trafo_kva",""); uso = cfg.get("trafo_uso","")
+        lines.append(f"  🔧 Trafo:     {kva} kVA  ({uso})".rstrip("  ()"))
+    elif inst == "barraje":
+        t_bt = cfg.get("tension_bt","")
+        lines.append(f"  🏗️ Barraje:   {t_bt} V" if t_bt else "  🏗️ Barraje BT")
+    if cfg.get("tiene_proteccion"):
+        pmap = {"antes_tc":"antes de los TCs","despues_tc":"después de los TCs","ambos_tc":"ambos lados"}
+        pos  = pmap.get(cfg.get("proteccion_pos",""), "después del medidor")
+        lines.append(f"  🔐 Protec.:   {cfg.get('proteccion_amp','')} A  ({pos})")
+    if cfg.get("seccionador"):
+        lines.append(f"  🔀 Seccion.:  {cfg['seccionador']} de la medida")
+    if cfg.get("rel_tc"):  lines.append(f"  🔄 TC:        {cfg['rel_tc']}")
+    if cfg.get("rel_tp"):  lines.append(f"  📊 TP:        {cfg['rel_tp']}")
+    if cfg.get("calibre_conductor"):
+        lines.append(f"  🔗 Calibre:   {cfg['calibre_conductor']}")
+    cfg_final = "Principal + Respaldo" if cfg.get("respaldo") else "Solo Principal"
+    lines.append(f"  👥 Config.:   {cfg_final}")
     lines += ["━━━━━━━━━━━━━━━━━━━━"]
     kb = [[
         InlineKeyboardButton("🚀 Generar diagrama", callback_data="generar:si"),
@@ -791,79 +982,19 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     n   = ctx.user_data.get("paso_n", 1)
 
-    # --- Clasificador de punto de medida ---
+    # ── Modo consulta (seleccionado desde /menu) ──────────────────────────────
+    if ctx.user_data.get("modo_consulta"):
+        ctx.user_data["modo_consulta"] = False
+        await _consulta_retie(update, txt)
+        return
+
+    # ── Clasificador ──────────────────────────────────────────────────────────
     if ctx.user_data.get("clasificando"):
         ctx.user_data["clasificando"] = False
         await _hacer_clasificacion(update, txt)
         return
 
-    # --- Relación TC ---
-    if ctx.user_data.get("esperando_rel_tc"):
-        rel, err = _validar_relacion(txt, "relación TC")
-        if err:
-            await update.message.reply_text(f"⚠️ {err}\n\nEscribe como 200/5 o 400/5:")
-            return
-        ctx.user_data["esperando_rel_tc"] = False
-        cfg["rel_tc"] = rel
-        # Derivar tc_amp automáticamente del numerador de RTC
-        m = re.match(r"^(\d+)/", rel)
-        if m: cfg["tc_amp"] = m.group(1)
-        ctx.user_data["cfg"] = cfg
-        n += 1; ctx.user_data["paso_n"] = n
-
-        if cfg["tipo"] == "indirecta":
-            ctx.user_data["esperando_rel_tp"] = True
-            await update.message.reply_text(
-                _header(n, cfg, "Escribe la relación del TP:\n\n"
-                                "  Formato: primario/secundario\n"
-                                "  Ejemplo: 13200/120   o   7620/120")
-            )
-        elif cfg.get("salida") in ("unifilar", "ambos"):
-            kb = _kb([
-                ("🏗️ Barraje BT",       "barraje"),
-                ("🔧 Transformador MT", "trafo"),
-            ], "instalacion")
-            await update.message.reply_text(
-                _header(n, cfg, "¿Cómo está conectada la instalación?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        else:
-            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
-            await update.message.reply_text(
-                _header(n, cfg, "¿Lleva medidor de respaldo?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        return
-
-    # --- Relación TP ---
-    if ctx.user_data.get("esperando_rel_tp"):
-        rel, err = _validar_relacion(txt, "relación TP")
-        if err:
-            await update.message.reply_text(f"⚠️ {err}\n\nEscribe como 13200/120:")
-            return
-        ctx.user_data["esperando_rel_tp"] = False
-        cfg["rel_tp"] = rel
-        ctx.user_data["cfg"] = cfg
-        n += 1; ctx.user_data["paso_n"] = n
-
-        if cfg.get("salida") in ("unifilar", "ambos"):
-            kb = _kb([
-                ("🏗️ Barraje BT",       "barraje"),
-                ("🔧 Transformador MT", "trafo"),
-            ], "instalacion")
-            await update.message.reply_text(
-                _header(n, cfg, "¿Cómo está conectada la instalación?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        else:
-            kb = _kb([("Sin respaldo","no"),("✅ Con respaldo","si")], "respaldo")
-            await update.message.reply_text(
-                _header(n, cfg, "¿Lleva medidor de respaldo?"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
-        return
-
-    # --- kVA del transformador ---
+    # ── kVA del transformador ─────────────────────────────────────────────────
     if ctx.user_data.get("esperando_kva"):
         val_str, err = _validar_numero(txt, "kVA del transformador")
         if err:
@@ -873,18 +1004,145 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cfg["trafo_kva"] = val_str
         ctx.user_data["cfg"] = cfg
         n += 1; ctx.user_data["paso_n"] = n
-        kb = _kb([
-            ("Monofásico", "monofasico"),
-            ("Bifásico",   "bifasico"),
-            ("Trifásico",  "trifasico"),
-        ], "trafo_tipo")
+        tipo = cfg["tipo"]
+
+        if tipo == "indirecta":
+            # Trafo indirecta → seccionador
+            kb = _kb([
+                ("Antes de la medida",   "antes"),
+                ("Después de la medida", "despues"),
+            ], "seccionador")
+            await update.message.reply_text(
+                _header(n, cfg, "¿El seccionador está antes o después de la medida?\n\n"
+                                "  Antes  — seccionador en el lado de red (MT)\n"
+                                "  Después — seccionador en el lado de carga (BT)"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        elif tipo == "directa":
+            # Trafo directa → norma → respaldo
+            await _kb_norma_msg(update.message, cfg, n)
+        else:
+            # Trafo semidirecta → relación TCs
+            ctx.user_data["esperando_rel_tc"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Cuánto son los TCs? (relación)\n\n"
+                                "  Formato: primario/secundario\n"
+                                "  Ejemplo: 200/5   o   400/5")
+            )
+        return
+
+    # ── Amperios de protección (directa/semidirecta con barraje) ─────────────
+    if ctx.user_data.get("esperando_prot_amp"):
+        val_str, err = _validar_numero(txt, "amperios de protección")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}")
+            return
+        ctx.user_data["esperando_prot_amp"] = False
+        cfg["proteccion_amp"] = val_str
+        cfg["interruptor"] = f"{val_str} A"
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        tipo = cfg["tipo"]
+
+        if tipo == "directa":
+            # Directa: posición fija (después del medidor) → norma
+            cfg["proteccion_pos"] = "despues_medidor"
+            await _kb_norma_msg(update.message, cfg, n)
+        else:
+            # Semidirecta: preguntar posición respecto a los TCs
+            kb = _kb([
+                ("Antes de los TCs",   "antes_tc"),
+                ("Después de los TCs", "despues_tc"),
+                ("Ambos lados",        "ambos_tc"),
+            ], "proteccion_pos")
+            await update.message.reply_text(
+                _header(n, cfg, "¿La protección va antes o después de los TCs?"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        return
+
+    # ── Relación TCs ──────────────────────────────────────────────────────────
+    if ctx.user_data.get("esperando_rel_tc"):
+        rel, err = _validar_relacion(txt, "relación TC")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}\n\nEscribe como 200/5:")
+            return
+        ctx.user_data["esperando_rel_tc"] = False
+        cfg["rel_tc"] = rel
+        m = re.match(r"^(\d+)/", rel)
+        if m: cfg["tc_amp"] = m.group(1)
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        tipo = cfg["tipo"]
+
+        if tipo == "indirecta":
+            ctx.user_data["esperando_rel_tp"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Cuál es la relación de los TPs?\n\n"
+                                "  Formato: primario/secundario\n"
+                                "  Ejemplo: 13200/120   o   7620/120")
+            )
+        else:
+            # Semidirecta → calibre conductor
+            ctx.user_data["esperando_calibre"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Cuál es el calibre del conductor?\n\n"
+                                "  Escribe el calibre (ej: AWG 12 · #10 · 4 mm²)")
+            )
+        return
+
+    # ── Relación TPs (indirecta) ──────────────────────────────────────────────
+    if ctx.user_data.get("esperando_rel_tp"):
+        rel, err = _validar_relacion(txt, "relación TP")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}\n\nEscribe como 13200/120:")
+            return
+        ctx.user_data["esperando_rel_tp"] = False
+        cfg["rel_tp"] = rel
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        # Indirecta → protección (amp)
+        ctx.user_data["esperando_prot_amp_ind"] = True
         await update.message.reply_text(
-            _header(n, cfg, "¿El transformador es mono, bifásico o trifásico?"),
-            reply_markup=InlineKeyboardMarkup(kb)
+            _header(n, cfg, "¿De cuántos amperios es la protección?\n\n"
+                            "  Escribe solo el número (ej: 100 o 60)")
         )
         return
 
-    # --- Texto libre (consulta o diagrama rápido) ---
+    # ── Amperios protección indirecta ─────────────────────────────────────────
+    if ctx.user_data.get("esperando_prot_amp_ind"):
+        val_str, err = _validar_numero(txt, "amperios de protección")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}")
+            return
+        ctx.user_data["esperando_prot_amp_ind"] = False
+        cfg["proteccion_amp"] = val_str
+        cfg["interruptor"] = f"{val_str} A"
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        # Indirecta → calibre conductor
+        ctx.user_data["esperando_calibre"] = True
+        await update.message.reply_text(
+            _header(n, cfg, "¿Cuál es el calibre del conductor?\n\n"
+                            "  Escribe el calibre (ej: AWG 12 · #10 · 4 mm²)")
+        )
+        return
+
+    # ── Calibre del conductor (semidirecta/indirecta) ─────────────────────────
+    if ctx.user_data.get("esperando_calibre"):
+        if not txt or len(txt) > 30:
+            await update.message.reply_text(
+                "⚠️ Escribe el calibre del conductor (ej: AWG 12 o 4 mm²)."
+            )
+            return
+        ctx.user_data["esperando_calibre"] = False
+        cfg["calibre_conductor"] = txt
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        await _kb_norma_msg(update.message, cfg, n)
+        return
+
+    # ── Texto libre (consulta o diagrama rápido) ──────────────────────────────
     await _procesar_texto(update, update.message.text)
 
 # ── Arranque ──────────────────────────────────────────────────────────────────
