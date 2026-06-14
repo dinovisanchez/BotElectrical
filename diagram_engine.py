@@ -25,76 +25,93 @@ INK = "#1F2A37"
 # ---------- definicion de terminales del medidor ----------
 def meter_terminals(sistema, norma):
     """
-    Orden RETIE del Bloque de Prueba:
-      Tension1, Tension2, Tension3, Neutro, Cierre, Corriente1,
-      Cierre+Corriente2, Cierre+Corriente3
-    Cada terminal de Corriente representa el par entrada/salida (in/out)
-    de esa fase; "Cierre" indica el puente/cuchilla de corto.
+    Orden REAL de la bornera del medidor (confirmado por el usuario):
+
+    3 elementos (tri4h):
+      1=I-R(corriente R, viene del borne DERECHO del bloque - salida hacia carga)
+      2=V-R (tension R, viene del secundario TP-R)
+      3=Cierre-R (viene del borne IZQUIERDO del bloque - entrada de corriente)
+      4=I-S, 5=V-S, 6=Cierre-S  (idem para fase S)
+      7=I-T, 8=V-T, 9=Cierre-T  (idem para fase T)
+      11=N (neutro, secundario b/n de los TPs -> BN)
+
+    2 elementos Aron (tri3h) - indirecta trifasica con 2TC y 2TP:
+      1=I-R  2=V-R  3=Cierre-R  (fase R)
+      4=Cierre-T (los 2 cierres del bloque llegan aqui, o puenteados)
+      5=N
+      6=I-T  7=V-T  8=Cierre-T  (fase T)
+      Puente interno en medidor: 3-6-9 (borneras de cierre puenteadas entre si)
+      Nota: el bloque puede enviar 2 lineas a bornera 4, o puentearlas en el bloque
+
+    Cada tupla: (num_bornera, etiqueta, tipo, fase, rol)
+      tipo: "I"=corriente, "V"=tension
+      rol:  "in"=entrada corriente(borne der bloque->carga),
+            "cierre"=entrada cierre(borne izq bloque),
+            "puente"=bornera puenteada internamente (no requiere cable propio),
+            None=tension
     """
     if sistema == "mono":
-        # V, N, Cierre, I (in/out)
-        return [("1","VA","V","R",None),
-                ("2","N","V","N",None),
-                ("3","Cierre","I","R","cierre"),
-                ("4","IA","I","R","in"),
-                ("5","IA","I","R","out")]
-    if sistema == "bifasico":
-        # V1, V2, N, Cierre, I1(in/out), Cierre+I2(in/out)
-        return [("1","VA","V","R",None),
-                ("2","VB","V","S",None),
-                ("3","N","V","N",None),
-                ("4","Cierre","I","R","cierre"),
-                ("5","IA","I","R","in"),
-                ("6","IA","I","R","out"),
-                ("7","Cierre","I","S","cierre"),
-                ("8","IB","I","S","in"),
-                ("9","IB","I","S","out")]
-    if sistema == "tri3h":
-        # Medida a 2 elementos (fases R y T, sin TC en S).
-        # Orden confirmado por el usuario (bornera real del medidor 2 elementos):
-        #  1=I-R(in)  2=V-R  3=Cierre-R (puente interno a 6 y 9)
-        #  4=Cierre-T (cierre extra que va al bloque)  5=N
-        #  6=I-R(out, puenteado desde 3)  7=I-T(in)  8=V-T
-        #  9=I-T(out, puenteado desde 3 y 4)
-        # "puente_de": indica que ese terminal recibe un puente interno desde
-        # el terminal indicado (no requiere ruteo propio hacia el medidor).
         return [("1","IA","I","R","in"),
                 ("2","VA","V","R",None),
                 ("3","Cierre","I","R","cierre"),
-                ("4","Cierre","I","T","cierre"),
-                ("5","N","V","N",None),
-                ("6","IA","I","R","puente3"),
-                ("7","IC","I","T","in"),
-                ("8","VC","V","T",None),
-                ("9","IC","I","T","puente34")]
-    # tri4h: V1, V2, V3, N, Cierre+I1, Cierre+I2, Cierre+I3 (3 elementos)
-    return [("1","VA","V","R",None),
-            ("2","VB","V","S",None),
-            ("3","VC","V","T",None),
-            ("4","N","V","N",None),
-            ("5","Cierre","I","R","cierre"),
-            ("6","IA","I","R","in"),
-            ("7","IA","I","R","out"),
-            ("8","Cierre","I","S","cierre"),
-            ("9","IB","I","S","in"),
-            ("10","IB","I","S","out"),
-            ("11","Cierre","I","T","cierre"),
-            ("12","IC","I","T","in"),
-            ("13","IC","I","T","out")]
+                ("4","N","V","N",None)]
+
+    if sistema == "bifasico":
+        return [("1","IA","I","R","in"),
+                ("2","VA","V","R",None),
+                ("3","Cierre-R","I","R","cierre"),
+                ("4","IB","I","S","in"),
+                ("5","VB","V","S",None),
+                ("6","Cierre-S","I","S","cierre"),
+                ("7","N","V","N",None)]
+
+    if sistema == "tri3h":
+        # 2 elementos Aron: R y T, sin elemento en S
+        # Borne 4 = recibe los 2 cierres (C1 del TC-R y C3 del TC-T)
+        # Borne 5 = neutro
+        # Puentes internos en medidor: 3-6-9
+        # Con respaldo: B3 bloque -> B1 chequeo
+        #               borne 4 chequeo -> borne 6 principal
+        return [("1","IA","I","R","in"),
+                ("2","VA","V","R",None),
+                ("3","Cierre-R","I","R","cierre"),
+                ("4","C1+C3","I","N","cierre_aron"),   # 2 cierres (TC-R y TC-T)
+                ("5","N","V","N",None),                 # neutro
+                ("6","IC","I","T","in"),
+                ("7","VC","V","T",None),
+                ("8","Cierre-T","I","T","puente_3"),    # puenteado con 3
+                ("9","Cierre","I","R","puente_3")]      # puenteado con 3
+
+    # tri4h: 3 elementos, orden real 1-2-3 / 4-5-6 / 7-8-9 / 11
+    return [("1","IA","I","R","in"),
+            ("2","VA","V","R",None),
+            ("3","Cierre-R","I","R","cierre"),
+            ("4","IB","I","S","in"),
+            ("5","VB","V","S",None),
+            ("6","Cierre-S","I","S","cierre"),
+            ("7","IC","I","T","in"),
+            ("8","VC","V","T",None),
+            ("9","Cierre-T","I","T","cierre"),
+            ("11","N","V","N",None)]
 
 def meter_bridges(sistema):
     """
-    Devuelve lista de (origen, [destinos]) para puentes internos del
-    bloque de prueba (cuchillas de corto que conectan varios terminales
-    de corriente entre si, sin pasar por el medidor cada uno por separado).
-    Solo aplica para tri3h (2 elementos).
+    Puentes INTERNOS en la bornera del medidor.
+    tri3h (Aron): borneras 3, 8 y 9 se puentean entre si dentro del medidor.
+    Con respaldo Aron:
+      - B3 bloque -> B1 medidor CHEQUEO  (cable externo, se maneja en ruteo)
+      - borne 4 CHEQUEO -> borne 6 PRINCIPAL (cable externo, se maneja en ruteo)
     """
     if sistema == "tri3h":
-        return [("3", ["6"]), ("3", ["9"]), ("4", ["9"])]
+        # (origen, [destinos]) - puentes internos dentro de cada medidor
+        return [("3", ["8", "9"])]
     return []
 
-def phases_of(s):       return {"mono":["R"],"bifasico":["R","S"],"tri3h":["R","S","T"],"tri4h":["R","S","T"]}[s]
-def current_phases(s):  return {"mono":["R"],"bifasico":["R","S"],"tri3h":["R","T"],"tri4h":["R","S","T"]}[s]
+def phases_of(s):
+    return {"mono":["R"],"bifasico":["R","S"],"tri3h":["R","S","T"],"tri4h":["R","S","T"]}[s]
+
+def current_phases(s):
+    return {"mono":["R"],"bifasico":["R","S"],"tri3h":["R","T"],"tri4h":["R","S","T"]}[s]
 
 SIS_TXT = {"mono":"MONOFASICA","bifasico":"BIFASICA",
            "tri3h":"TRIFASICA 3 HILOS (2 elementos)","tri4h":"TRIFASICA 4 HILOS (3 elementos)"}
@@ -685,6 +702,23 @@ def _draw_directa_retie(cfg, out_path):
         ax.plot([4, W-4], [fyN, fyN], color=COL["N"], lw=1.8, ls=(0,(6,3)), zorder=2)
         ax.text(2, fyN, "Neutro", ha="right", va="center", fontsize=10, fontweight="bold", color=COL["N"])
         ax.text(W-2, fyN, "Neutro", ha="left", va="center", fontsize=10, fontweight="bold", color=COL["N"])
+
+        # ASIMETRICA: neutro sube a los ultimos 2 terminales (t3 y t4 de la
+        # ultima fase). En SIMETRICA el neutro queda en el centro (t2-t3)
+        # de cada bloque y no requiere conexion individual a bornera.
+        if conexion == "asimetrica":
+            # ancho de un bloque completo = t1..t4 = 5.5+9.0+5.5 = 20 unidades
+            # mas el gap entre bloques (5.5). x_cursor tras el ultimo bloque:
+            # bx0+5 + (n_ph-1)*(20+5.5) + 20
+            bloque_w = 5.5 + 9.0 + 5.5   # t1 a t4
+            gap_w    = 5.5                 # espacio entre bloques
+            t3_last  = bx0 + 5 + (n_ph-1)*(bloque_w + gap_w) + 5.5
+            t4_last  = t3_last + 5.5
+            for tx_n in (t3_last, t4_last):
+                ax.plot([tx_n, tx_n], [fyN, term_y-1.5],
+                        color=COL["N"], lw=1.8, ls=(0,(6,3)), zorder=2)
+                ax.add_patch(Circle((tx_n, term_y), 1.5,
+                             fill=False, ec=COL["N"], lw=1.6, zorder=4))
     else:
         fyN = fy1
 
@@ -703,6 +737,8 @@ def _draw_directa_retie(cfg, out_path):
     if cfg.get("interruptor"):
         pos = cfg.get("interruptor_pos","")
         notas.append(f"Interruptor {cfg['interruptor']}" + (f" ({pos} del medidor)" if pos else ""))
+    if cfg.get("calibre_acometida"):
+        notas.append(f"Acometida: {cfg['calibre_acometida']}")
     if notas:
         ax.text(W/2, fyN-3, "  |  ".join(notas), ha="center", va="top", fontsize=8.5, color="#555")
 
@@ -724,8 +760,11 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     terms = meter_terminals(sistema, norma); n = len(terms)
     cur_ph = current_phases(sistema); all_ph = phases_of(sistema)
 
-    fig, ax = plt.subplots(figsize=(18,11))
-    ax.set_xlim(0,190); ax.set_ylim(0,116); ax.axis("off")
+    # Canvas: mas ancho cuando hay respaldo + Aron (cables entre medidores)
+    fig_w = 22 if (respaldo and sistema == "tri3h") else 18
+    fig, ax = plt.subplots(figsize=(fig_w,11))
+    xlim = 210 if (respaldo and sistema == "tri3h") else 190
+    ax.set_xlim(0,xlim); ax.set_ylim(0,116); ax.axis("off")
 
     titulo = f"DIAGRAMA DE CONEXIONES   ·   MEDIDA {tipo.upper()}   ·   {SIS_TXT[sistema]}"
     if respaldo: titulo += "   ·   PRINCIPAL + CHEQUEO"
@@ -733,6 +772,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     sub = f"Norma {norma}"
     if rel_tc: sub += f"      RTC {rel_tc}"
     if rel_tp: sub += f"      RTP {rel_tp}"
+    if cfg.get("calibre_acometida"): sub += f"      Acometida {cfg['calibre_acometida']}"
     if cfg.get("seccionamiento") or cfg.get("interruptor"):
         amp = cfg.get("interruptor") or cfg.get("tc_amp","")
         if amp: sub += f"      Seccionador {amp}" + ("" if "A" in str(amp) else " A")
@@ -787,6 +827,12 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         ax.text((xL+xR)/2,y-1.9,rot,ha="center",va="top",fontsize=7.5,color=c,fontweight="bold")
 
     # ---------- MEDIDOR(ES) ----------
+    # IMPORTANTE: las posiciones Y de los terminales del medidor deben usar
+    # la MISMA escala/orden 'ys' que el bloque de pruebas (variable 'row'),
+    # para que cada cable Bloque->Medidor sea una linea predominantemente
+    # HORIZONTAL (fiel a los diagramas del Anexo I del PDF EPM), evitando
+    # el "espagueti" de cruces en diagonal que se producia al usar una
+    # escala Y independiente para el medidor.
     def draw_meter(mx0,mx1,my0,my1,etq):
         ax.add_patch(FancyBboxPatch((mx0,my0),mx1-mx0,my1-my0,boxstyle="round,pad=0.6,rounding_size=3",
                      fill=True,fc=INK,ec="#0B0F14",lw=2,zorder=2))
@@ -794,7 +840,14 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         ax.add_patch(Rectangle((mx0+6,my1-17),(mx1-mx0)-12,7,fc="#0B3D2E",ec="#0A5",lw=1))
         ax.text((mx0+mx1)/2,my1-13.5,"kWh   kvarh",ha="center",va="center",fontsize=8.5,
                 color="#36df8f",family="monospace")
-        m_y={}; ty=np.linspace(my0+5,my0+5+(n-1)*3.3,n)[::-1]; mxr=mx0+2.4
+        # Reescala 'ys' (rango by0..by1, escala del bloque) al rango my0..my1
+        # del medidor, manteniendo el MISMO orden relativo (misma fila).
+        y_lo, y_hi = ys.min(), ys.max()
+        span = (y_hi - y_lo) if (y_hi - y_lo) > 1e-9 else 1.0
+        pad = (my1 - my0) * 0.08
+        ty = my0 + pad + (ys - y_lo) * ((my1 - my0 - 2*pad) / span)
+        mxr=mx0+2.4
+        m_y={}
         for (tlbl,rot,kind,ph,io),yy in zip(terms,ty):
             c=COL[ph]
             ax.add_patch(Circle((mxr,yy),0.85,fc="white",ec=c,lw=1.7,zorder=5))
@@ -802,82 +855,156 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             m_y[tlbl]=yy
         return m_y,mxr
     mh=max(n*3.3+24,42); my1=98
+    # Con respaldo Aron: medidores más a la derecha para dar espacio a cables inter-medidores
+    mx0 = 136 if (respaldo and sistema == "tri3h") else 132
+    mx1 = mx0 + 32
     if not respaldo:
-        meters=[draw_meter(132,164,my1-mh,my1,"MEDIDOR")]
+        meters=[draw_meter(mx0,mx1,my1-mh,my1,"MEDIDOR")]
     else:
         h=mh*0.5
-        meters=[draw_meter(134,164,60,60+h,"PRINCIPAL"),
-                draw_meter(134,164,10,10+h,"CHEQUEO")]
+        meters=[draw_meter(mx0,mx1,60,60+h,"PRINCIPAL"),
+                draw_meter(mx0,mx1,10,10+h,"CHEQUEO")]
 
     # ---------- RUTEO ACOMETIDA -> BLOQUE ----------
-    # Terminales "puente*" no van hacia la acometida: reciben un puente
-    # interno dentro del bloque desde otro terminal (ver meter_bridges).
+    # Reglas confirmadas por el usuario:
+    #   "in"      : corriente viene del BORNE DERECHO del TC (salida hacia carga)
+    #               -> se conecta al borne DERECHO del bloque (xR)
+    #   "cierre"  : viene del BORNE IZQUIERDO del TC (entrada de corriente)
+    #               -> se conecta al borne IZQUIERDO del bloque (xL)
+    #   "cierre_aron": bornera 4 del Aron recibe los 2 cierres (TC-R y TC-T)
+    #   tension V : viene del secundario del TP correspondiente
+    #   neutro N  : viene del secundario b/n de los TPs -> BN
+    #   "puente"  : se puentea internamente en el medidor, NO recibe cable propio
     src={}
     for (tlbl,rot,kind,ph,io) in terms:
-        if io and io.startswith("puente"):
-            continue
-        if kind=="I" and has_tc:
-            sx=tc_x-1.0 if io=="in" else tc_x+1.0
-            src[tlbl]=(sx,y_ph[ph]-1.3)
+        if io == "puente":
+            continue   # bornera puenteada internamente, sin cable al bloque
+        if kind=="I" and io=="in" and has_tc:
+            # Corriente: borne derecho del TC (salida) -> borne derecho del bloque
+            sx=tc_x+1.0
+            src[tlbl]=(sx, y_ph[ph]+1.3)
+        elif kind=="I" and io=="cierre" and has_tc:
+            # Cierre: borne izquierdo del TC (entrada) -> borne izquierdo del bloque
+            sx=tc_x-1.0
+            src[tlbl]=(sx, y_ph[ph]-1.3)
+        elif kind=="I" and io=="cierre_aron" and has_tc:
+            # Aron bornera 4: recibe los 2 cierres (TC-R y TC-T)
+            # Se traza desde ambos TCs al mismo punto de la bornera
+            src[tlbl]=(tc_x-1.0, y_ph["R"]-1.3)   # principal desde TC-R
+            src[tlbl+"_T"]=(tc_x-1.0, y_ph["T"]-1.3)  # segundo desde TC-T
         elif kind=="I":
-            src[tlbl]=(tc_x,y_ph[ph])
+            src[tlbl]=(tc_x, y_ph.get(ph, list(y_ph.values())[0]))
         elif kind=="V" and ph=="N":
-            src[tlbl]=(20,y_N if show_N else min(y_ph.values())-5)
-        elif kind=="V" and has_tp:
+            src[tlbl]=(20, y_N if show_N else min(y_ph.values())-5)
+        elif kind=="V" and has_tp and ph in tp_c:
             cx=tp_c[ph]; yref=y_N if show_N else min(y_ph.values())-5
             src[tlbl]=(cx,(y_ph[ph]+yref)/2)
         else:
-            src[tlbl]=(tc_x+(1.0 if has_tc else 0),y_ph[ph])
-    order=[t[0] for t in terms if not (t[4] and t[4].startswith("puente"))]
+            src[tlbl]=(tc_x+(1.0 if has_tc else 0), y_ph.get(ph, list(y_ph.values())[0]))
+
+    order=[t[0] for t in terms if t[4] not in ("puente","puente_3")]
     lane_x=dict(zip(order,np.linspace(46,68,len(order))))
     rail_y=dict(zip(order,np.linspace(by1-3,by0+3,len(order))))
     for tlbl in order:
+        if tlbl not in src:
+            continue
         sx,sy=src[tlbl]; lx=lane_x[tlbl]; ry=rail_y[tlbl]
-        ty=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
+        by=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
+        io=row[tlbl][4]
         ls=(0,(6,3)) if ph=="N" else "-"
         w=2.3 if row[tlbl][2]=="I" else 1.7
+        # Corriente "in" sale del borne DERECHO del bloque (xR)
+        # Cierre sale del borne IZQUIERDO del bloque (xL)
+        bx = xR if io=="in" else xL
         ax.plot([sx,sx],[sy,ry],color=c,lw=w,ls=ls)
         ax.plot([sx,lx],[ry,ry],color=c,lw=w,ls=ls)
-        ax.plot([lx,lx],[ry,ty],color=c,lw=w,ls=ls)
-        ax.plot([lx,xL],[ty,ty],color=c,lw=w,ls=ls)
+        ax.plot([lx,lx],[ry,by],color=c,lw=w,ls=ls)
+        ax.plot([lx,bx],[by,by],color=c,lw=w,ls=ls)
+        # Aron: segundo cierre desde TC-T a la misma bornera 4
+        if io=="cierre_aron" and tlbl+"_T" in src:
+            sx2,sy2=src[tlbl+"_T"]; lx2=lx-2
+            ax.plot([sx2,sx2],[sy2,ry-1],color=COL["T"],lw=w)
+            ax.plot([sx2,lx2],[ry-1,ry-1],color=COL["T"],lw=w)
+            ax.plot([lx2,lx2],[ry-1,by],color=COL["T"],lw=w)
+            ax.plot([lx2,bx],[by,by],color=COL["T"],lw=w)
 
-    # ---------- PUENTES INTERNOS DEL BLOQUE (tri3h) ----------
-    # Dibuja cuchillas de puente horizontal dentro del bloque conectando
-    # un terminal "puente*" con su terminal origen (misma fila visual del
-    # circuito de corriente). El terminal puente queda al mismo potencial
-    # que su origen, por lo que comparte la conexion hacia el medidor.
-    # meter_bridges devuelve (terminal_origen, [terminales_destino_puenteados])
+    # ---------- PUENTES INTERNOS DEL MEDIDOR (tri3h Aron) ----------
+    # Las borneras 3/8/9 se puentean DENTRO del medidor (no en el bloque).
+    # Se dibujan como lineas verticales en el lado izquierdo del medidor
+    # conectando los terminales puenteados entre si.
     for tlbl_src, destinos in meter_bridges(sistema):
         if tlbl_src not in row:
             continue
-        y_src = row[tlbl_src][0]
-        for tlbl_dest in destinos:
-            if tlbl_dest not in row:
+        for mi, (m_y, mxr) in enumerate(meters):
+            if tlbl_src not in m_y:
                 continue
-            y_dest = row[tlbl_dest][0]
-            ax.plot([xR+1.0, xR+1.0], [y_src, y_dest], color="#2B2B2B", lw=2.2, zorder=3)
-            ax.plot([xR-0.95, xR+1.0], [y_src, y_src], color="#2B2B2B", lw=2.2, zorder=3)
-            ax.plot([xR-0.95, xR+1.0], [y_dest, y_dest], color="#2B2B2B", lw=2.2, zorder=3)
+            y_src = m_y[tlbl_src]
+            for tlbl_dest in destinos:
+                if tlbl_dest not in m_y:
+                    continue
+                y_dest = m_y[tlbl_dest]
+                # Puente interno: linea vertical en el borde izquierdo del medidor
+                px = mxr - 0.5
+                ax.plot([px, px], [y_src, y_dest], color="#2B2B2B", lw=2.0, zorder=6)
+                ax.plot([mxr, px], [y_src, y_src], color="#2B2B2B", lw=2.0, zorder=6)
+                ax.plot([mxr, px], [y_dest, y_dest], color="#2B2B2B", lw=2.0, zorder=6)
 
     # ---------- BLOQUE -> MEDIDOR(ES) ----------
-    xfan=np.linspace(108,130,len(order))
-    for idx,tlbl in enumerate(order):
-        yb=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
-        ls=(0,(6,3)) if ph=="N" else "-"; xm=xfan[idx]
-        ax.plot([xR,xm],[yb,yb],color=c,lw=1.7,ls=ls)
-        for (m_y,mxr) in meters:
+    # m_y usa la MISMA escala que 'row' -> cables casi horizontales.
+    # Con respaldo: cada medidor tiene su propia banda de columnas.
+    # Aron con respaldo: cables especiales B3->B1chequeo y b4chequeo->b6principal.
+    n_meters = len(meters)
+    fan_lo, fan_hi = 106, 130
+    for mi, (m_y, mxr) in enumerate(meters):
+        band_lo = fan_lo + (fan_hi-fan_lo) * mi / n_meters
+        band_hi = fan_lo + (fan_hi-fan_lo) * (mi+1) / n_meters
+        xfan = np.linspace(band_lo, band_hi, len(order))
+        for idx, tlbl in enumerate(order):
+            yb=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
+            ls=(0,(6,3)) if ph=="N" else "-"; xm=xfan[idx]
             ym=m_y[tlbl]
+            ax.plot([xR,xm],[yb,yb],color=c,lw=1.7,ls=ls)
             ax.plot([xm,xm],[yb,ym],color=c,lw=1.5,ls=ls)
             ax.plot([xm,mxr],[ym,ym],color=c,lw=1.5,ls=ls)
-            # Si hay terminales "puente" que apuntan a este tlbl, tambien
-            # se conectan al medidor desde el mismo punto xm/ym
+            # Puentes internos del medidor (ej: Aron 3->8,9)
             for tlbl_src, destinos in meter_bridges(sistema):
                 if tlbl == tlbl_src:
                     for tlbl_dest in destinos:
                         if tlbl_dest in m_y:
                             yd = m_y[tlbl_dest]
-                            ax.plot([xm,xm],[yb,yd],color=c,lw=1.5,ls=ls)
+                            ax.plot([xm,xm],[ym,yd],color=c,lw=1.5,ls=ls)
                             ax.plot([xm,mxr],[yd,yd],color=c,lw=1.5,ls=ls)
+
+    # Aron con respaldo: cables externos especiales entre medidores
+    # 1) B3 del bloque -> borne 1 del CHEQUEO  (corriente R)
+    # 2) borne 4 del CHEQUEO -> borne 6 del PRINCIPAL (cierre_aron)
+    if sistema == "tri3h" and respaldo and len(meters) == 2:
+        m_y_princ, mxr_princ = meters[0]   # PRINCIPAL (mi=0)
+        m_y_cheq,  mxr_cheq  = meters[1]   # CHEQUEO   (mi=1)
+
+        # 1) B3 bloque (borne "3" corriente R, xR) -> borne "1" del CHEQUEO
+        if "3" in row and "1" in m_y_cheq:
+            yb3   = row["3"][0]
+            y1ch  = m_y_cheq["1"]
+            xmid  = fan_hi + 2          # columna intermedia extra a la derecha
+            c_r   = COL["R"]
+            ax.plot([xR, xmid],[yb3, yb3], color=c_r, lw=1.7)
+            ax.plot([xmid, xmid],[yb3, y1ch], color=c_r, lw=1.5)
+            ax.plot([xmid, mxr_cheq],[y1ch, y1ch], color=c_r, lw=1.5)
+            ax.text(xmid+0.5,(yb3+y1ch)/2,"B3→1",fontsize=6.5,color=c_r,
+                    ha="left",va="center",style="italic")
+
+        # 2) borne 4 del CHEQUEO -> borne 6 del PRINCIPAL
+        if "4" in m_y_cheq and "6" in m_y_princ:
+            y4ch  = m_y_cheq["4"]
+            y6pr  = m_y_princ["6"]
+            xlink = fan_hi + 5          # columna aun más a la derecha
+            c_n   = COL["N"]            # neutro/gris porque son los cierres
+            ax.plot([mxr_cheq, xlink],[y4ch, y4ch], color=c_n, lw=1.5, ls=(0,(4,2)))
+            ax.plot([xlink, xlink],[y4ch, y6pr],    color=c_n, lw=1.5, ls=(0,(4,2)))
+            ax.plot([xlink, mxr_princ],[y6pr, y6pr],color=c_n, lw=1.5, ls=(0,(4,2)))
+            ax.text(xlink+0.5,(y4ch+y6pr)/2,"4→6",fontsize=6.5,color=c_n,
+                    ha="left",va="center",style="italic")
 
     # ---------- SALIDA A CARGA (linea de potencia, solo fases de corriente) ----------
     cx0 = 164
@@ -974,7 +1101,16 @@ def draw_unifilar_generico(cfg, out_path):
         nodo = y
         ax.add_patch(Circle((xc, nodo), 0.8, fc=INK, ec=INK, zorder=4))
 
-        # TC en serie en MT (justo bajo la red)
+        # Seccionador ANTES de TC/TP (si aplica)
+        sec_pos = cfg.get("sec_pos", "")  # "antes" | "despues" | ""
+        if sec_pos == "antes":
+            _u_disc(ax, xc, nodo-2.5, INK, 0.9)
+            ax.text(xc+4, nodo-2.5, "Seccionador\n(antes TC/TP)",
+                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
+            y = nodo - 5; vline(nodo, y); nodo = y
+            ax.add_patch(Circle((xc, nodo), 0.8, fc=INK, ec=INK, zorder=4))
+
+        # TC en serie en MT (justo bajo la red / bajo el seccionador)
         _u_ct(ax, xc, nodo-3.5, COL["R"], 0.85)
         ax.text(xc+4, nodo-3.5, f"TC (MT)\n{rel_tc or '—'}", ha="left", va="center",
                 fontsize=8, color=COL["R"], fontweight="bold")
@@ -991,6 +1127,13 @@ def draw_unifilar_generico(cfg, out_path):
         y = nodo - 9.5
         vline(nodo, y)
 
+        # Seccionador DESPUES de TC/TP (si aplica)
+        if sec_pos == "despues":
+            _u_disc(ax, xc, y-2.5, INK, 0.9)
+            ax.text(xc+4, y-2.5, "Seccionador\n(después TC/TP)",
+                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
+            y2 = y - 5; vline(y, y2); y = y2
+
         # Medidor a la izquierda, debajo del nivel del TP, con señales desde TC y TP en MT
         my = tpy - 7
         _u_meter(ax, 2, my, 18, 9)
@@ -1003,8 +1146,15 @@ def draw_unifilar_generico(cfg, out_path):
     # ============================================================
     # Transformador(es) - DESPUES de TC/TP en indirecta;
     # primer elemento si es directa/semidirecta con instalacion=trafo
+    # SEMIDIRECTA: seccionador SIEMPRE antes del trafo (fijo, sin preguntar)
     # ============================================================
     if instalacion == "trafo":
+        # Seccionador fijo antes del trafo para semidirecta
+        if tipo == "semidirecta":
+            _u_disc(ax, xc, y-2.5, INK, 0.9)
+            ax.text(xc+4, y-2.5, "Seccionador",
+                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
+            y2 = y - 5; vline(y, y2); y = y2
         kva   = cfg.get("trafo_kva", "")
         ttipo = cfg.get("trafo_tipo", "trifasico")
         uso   = cfg.get("trafo_uso", "")
