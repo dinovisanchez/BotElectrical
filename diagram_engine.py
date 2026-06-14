@@ -66,21 +66,17 @@ def meter_terminals(sistema, norma):
                 ("7","N","V","N",None)]
 
     if sistema == "tri3h":
-        # Orden bloque Aron:
-        # VA(2), VC(8), N(5) = tensiones
-        # C1+C3(4) = los 2 cierres se unen punteados en el bloque -> borne 4 medidor
-        # IA(1), IC(7) = corrientes
-        # 3, 6, 9 = solo cuchilla en el bloque, SIN cable al medidor
-        #           el puente 3-6-9 es INTERNO del medidor
+        # C1(3) va al bloque como cierre normal desde TC-R
+        # El puente C1->C2 en la bornera y el cable al borne 4 se manejan aparte
+        # C2(6), C3(9) sin cable al medidor
         return [("2","VA","V","R",None),
                 ("8","VC","V","T",None),
                 ("5","N","V","N",None),
-                ("4","C1+C3","I","N","cierre_aron"),
-                ("1","IA","I","R","in"),
-                ("7","IC","I","T","in"),
-                ("3","Cierre-R","I","R","puente_3"),
-                ("6","Cierre-T","I","T","puente_3"),
-                ("9","Cierre","I","R","puente_3")]
+                ("3","C1","I","R","cierre"),
+                ("1","I1","I","R","in"),
+                ("6","C2","I","T","puente_3"),
+                ("7","I2","I","T","in"),
+                ("9","C3","I","R","puente_3")]
 
     # tri4h: 3 elementos, orden real del bloque de pruebas:
     # V1, V2, V3, N, C1, I1, C2, I2, C3, I3
@@ -833,6 +829,18 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         ax.text((xL+xR)/2,y+1.7,tlbl,ha="center",va="bottom",fontsize=8,color=INK,fontweight="bold")
         ax.text((xL+xR)/2,y-1.9,rot,ha="center",va="top",fontsize=7.5,color=c,fontweight="bold")
 
+    # Puente tri3h Aron: C1(3) -> C2(6) en el lado derecho de la bornera
+    # y de ese punto sale cable al borne 4 del medidor
+    if sistema == "tri3h":
+        idx3 = next((i for i,(t,*_) in enumerate(terms) if t=="3"), None)
+        idx6 = next((i for i,(t,*_) in enumerate(terms) if t=="6"), None)
+        if idx3 is not None and idx6 is not None:
+            y3 = ys[idx3]; y6 = ys[idx6]
+            yp = (y3+y6)/2
+            # puente vertical entre C1 y C2 en xR
+            ax.plot([xR, xR],[y3, y6], color=INK, lw=2.2, zorder=5)
+            ax.add_patch(Circle((xR, yp), 0.7, fc=INK, ec=INK, zorder=6))
+
     # ---------- MEDIDOR(ES) ----------
     # El medidor muestra sus bornes en ORDEN FISICO (1,2,3,4,5,6,7,8,9,11)
     # de arriba a abajo, independiente del orden del bloque.
@@ -884,10 +892,28 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             m_y[tlbl] = yy
         return m_y, mxr
 
+    # Puente EN LA BORNERA del medidor (tri3h): bornes 3, 6 y 9
+    # Se dibuja en draw_meter después de que m_y esté construido
+    def draw_meter_bridges(m_y, mxr):
+        for tlbl_src, destinos in meter_bridges(sistema):
+            if tlbl_src not in m_y:
+                continue
+            ys_b = [m_y[tlbl_src]] + [m_y[d] for d in destinos if d in m_y]
+            if len(ys_b) < 2:
+                continue
+            # puente en el lado IZQUIERDO de la bornera del medidor (mxr)
+            # línea vertical conectando los bornes, sin salir hacia afuera
+            xp = mxr - 2.0
+            for yy in ys_b:
+                ax.plot([mxr, xp],[yy, yy], color="white", lw=1.8, zorder=7)
+            ax.plot([xp, xp],[min(ys_b), max(ys_b)], color="white", lw=1.8, zorder=7)
+
     # Posición vertical: el medidor empieza en la misma Y que el bloque (by1-step*0.7)
     meter_top = by1 - step*0.7
     if not respaldo:
-        meters = [draw_meter(132, 164, meter_top, "MEDIDOR")]
+        m_y0, mxr0 = draw_meter(132, 164, meter_top, "MEDIDOR")
+        draw_meter_bridges(m_y0, mxr0)
+        meters = [(m_y0, mxr0)]
     else:
         n_m     = len(meter_order)
         meter_h = n_m * step + 18
@@ -896,8 +922,11 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         top_cheq  = top_princ - meter_h - gap
         mx0 = 136 if sistema == "tri3h" else 132
         mx1 = mx0 + 32
-        meters = [draw_meter(mx0, mx1, top_princ, "PRINCIPAL"),
-                  draw_meter(mx0, mx1, top_cheq,  "CHEQUEO")]
+        m_yp, mxrp = draw_meter(mx0, mx1, top_princ, "PRINCIPAL")
+        m_yc, mxrc = draw_meter(mx0, mx1, top_cheq,  "CHEQUEO")
+        draw_meter_bridges(m_yp, mxrp)
+        draw_meter_bridges(m_yc, mxrc)
+        meters = [(m_yp, mxrp), (m_yc, mxrc)]
 
     # ---------- RUTEO ACOMETIDA -> BLOQUE ----------
     # Reglas confirmadas por el usuario:
@@ -954,34 +983,8 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         ax.plot([sx,lx],[ry,ry],color=c,lw=w,ls=ls)
         ax.plot([lx,lx],[ry,by],color=c,lw=w,ls=ls)
         ax.plot([lx,bx],[by,by],color=c,lw=w,ls=ls)
-        # Aron: segundo cierre desde TC-T a la misma bornera 4
-        if io=="cierre_aron" and tlbl+"_T" in src:
-            sx2,sy2=src[tlbl+"_T"]; lx2=lx-2
-            ax.plot([sx2,sx2],[sy2,ry-1],color=COL["T"],lw=w)
-            ax.plot([sx2,lx2],[ry-1,ry-1],color=COL["T"],lw=w)
-            ax.plot([lx2,lx2],[ry-1,by],color=COL["T"],lw=w)
-            ax.plot([lx2,bx],[by,by],color=COL["T"],lw=w)
-
-    # ---------- PUENTES INTERNOS DEL MEDIDOR (tri3h Aron) ----------
-    # Las borneras 3/8/9 se puentean DENTRO del medidor (no en el bloque).
-    # Se dibujan como lineas verticales en el lado izquierdo del medidor
-    # conectando los terminales puenteados entre si.
-    for tlbl_src, destinos in meter_bridges(sistema):
-        if tlbl_src not in row:
-            continue
-        for mi, (m_y, mxr) in enumerate(meters):
-            if tlbl_src not in m_y:
-                continue
-            y_src = m_y[tlbl_src]
-            for tlbl_dest in destinos:
-                if tlbl_dest not in m_y:
-                    continue
-                y_dest = m_y[tlbl_dest]
-                # Puente interno: linea vertical en el borde izquierdo del medidor
-                px = mxr - 0.5
-                ax.plot([px, px], [y_src, y_dest], color="#2B2B2B", lw=2.0, zorder=6)
-                ax.plot([mxr, px], [y_src, y_src], color="#2B2B2B", lw=2.0, zorder=6)
-                ax.plot([mxr, px], [y_dest, y_dest], color="#2B2B2B", lw=2.0, zorder=6)
+        # Aron: segundo cierre (TC-T) también llega al borne 4 vía el puente de bornera
+        # No se traza cable separado — el puente C1-C2 en la bornera lo une
 
     # ---------- BLOQUE -> MEDIDOR(ES) ----------
     # Cada borne N del bloque -> mismo borne N del medidor.
@@ -997,6 +1000,9 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         for tlbl in order:
             if tlbl not in m_y or tlbl not in row:
                 continue
+            # tri3h: borne 3 (C1) va al borne 4 via cable especial, no directo
+            if sistema == "tri3h" and tlbl == "3":
+                continue
             yb = row[tlbl][0]   # Y en el bloque
             ym = m_y[tlbl]      # Y en el medidor (orden físico)
             ph = row[tlbl][1]; c = COL[ph]
@@ -1006,6 +1012,30 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             ax.plot([xR, xm],[yb, yb], color=c, lw=lw, ls=ls)   # horizontal desde bloque
             ax.plot([xm, xm],[yb, ym], color=c, lw=lw, ls=ls)   # vertical
             ax.plot([xm, mxr],[ym, ym], color=c, lw=lw, ls=ls)  # horizontal al medidor
+
+    # tri3h: puente C1->C2 en bornera (solo puntos en C1 y C2, no en el medio)
+    # y cable desde C1 al borne 4 del medidor
+    if sistema == "tri3h":
+        idx3 = next((i for i,(t,*_) in enumerate(terms) if t=="3"), None)
+        idx6 = next((i for i,(t,*_) in enumerate(terms) if t=="6"), None)
+        if idx3 is not None and idx6 is not None:
+            y3 = ys[idx3]; y6 = ys[idx6]
+            xp = xR + 1.5  # justo afuera del borde derecho de la bornera
+            # línea vertical entre C1 y C2 fuera del borde
+            ax.plot([xp, xp],[y3, y6], color=INK, lw=2.2, zorder=5)
+            # puntos solo en C1 y C2, no en el medio
+            ax.plot([xR, xp],[y3, y3], color=INK, lw=2.2, zorder=5)
+            ax.plot([xR, xp],[y6, y6], color=INK, lw=2.2, zorder=5)
+            ax.add_patch(Circle((xp, y3), 0.7, fc=INK, ec=INK, zorder=6))
+            ax.add_patch(Circle((xp, y6), 0.7, fc=INK, ec=INK, zorder=6))
+            # cable desde C1 (xp, y3) al borne 4 del medidor
+            for m_y, mxr in meters:
+                if "4" in m_y:
+                    ym4 = m_y["4"]
+                    xm4 = 115
+                    ax.plot([xp, xm4],[y3, y3], color=INK, lw=1.7)
+                    ax.plot([xm4, xm4],[y3, ym4], color=INK, lw=1.7)
+                    ax.plot([xm4, mxr],[ym4, ym4], color=INK, lw=1.7)
 
     # Aron con respaldo: cables externos especiales entre medidores
     if sistema == "tri3h" and respaldo and len(meters) == 2:
