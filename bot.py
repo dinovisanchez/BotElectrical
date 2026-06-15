@@ -1231,10 +1231,14 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 cfg["instalacion"] = "trafo"
-                ctx.user_data["esperando_kva"] = True
+                _adv()
+                kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3")], "n_trafos")
                 await q.edit_message_text(
-                    _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                                    "  Escribe solo el número  ej: 50 o 150")
+                    _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
+                                    "  1  — un transformador trifásico\n"
+                                    "  2  — banco de 2 monofásicos\n"
+                                    "  3  — banco de 3 monofásicos"),
+                    reply_markup=InlineKeyboardMarkup(kb)
                 )
 
     # ── Sistema ───────────────────────────────────────────────────────────────
@@ -1278,10 +1282,14 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     cfg["instalacion"] = "trafo"
-                    ctx.user_data["esperando_kva"] = True
+                    _adv()
+                    kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3")], "n_trafos")
                     await q.edit_message_text(
-                        _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                                        "  Escribe solo el número  ej: 50 o 150")
+                        _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
+                                        "  1  — un transformador trifásico\n"
+                                        "  2  — banco de 2 monofásicos\n"
+                                        "  3  — banco de 3 monofásicos"),
+                        reply_markup=InlineKeyboardMarkup(kb)
                     )
             else:  # semidirecta
                 if cfg.get("salida") == "conexiones":
@@ -1316,10 +1324,14 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         else:
             cfg["instalacion"] = "trafo"
-            ctx.user_data["esperando_kva"] = True
+            _adv()
+            kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3")], "n_trafos")
             await q.edit_message_text(
-                _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                                "  Escribe solo el número  ej: 50 o 150")
+                _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
+                                "  1  — un transformador trifásico\n"
+                                "  2  — banco de 2 monofásicos\n"
+                                "  3  — banco de 3 monofásicos"),
+                reply_markup=InlineKeyboardMarkup(kb)
             )
 
     # ── Conexión del medidor (directa) ────────────────────────────────────────

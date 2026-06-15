@@ -1160,9 +1160,12 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         xp_cols = np.linspace(mxrp+2, mx0_c-2, max(len(bornes_I_out), 1))
         xp_map  = dict(zip(bornes_I_out.keys(), xp_cols))
 
-        for (tlbl_out, ph), tlbl_in in zip(bornes_I_out.items(), bornes_I_in.keys()):
+        # Y de bus inferior para cables de retorno (por debajo del bloque)
+        bot_bus_base = by0 - 6
+
+        for ci, ((tlbl_out, ph), tlbl_in) in enumerate(zip(bornes_I_out.items(), bornes_I_in.keys())):
             c = COL[ph]
-            # PRINCIPAL borne salida -> puente vertical -> CHEQUEO borne entrada
+            # PRINCIPAL borne salida -> puente -> CHEQUEO borne entrada
             if tlbl_out in m_yp:
                 ym_out = m_yp[tlbl_out]
                 xp = xp_map[tlbl_out]
@@ -1172,20 +1175,21 @@ def _draw_semi_indirecta_retie(cfg, out_path):
                     ym_in = m_yc[tlbl_in]
                     ax.plot([xp, xp],[ym_out, ym_in], color=c, lw=1.8)
                     ax.plot([xp, mxrc],[ym_in, ym_in], color=c, lw=1.8)
-                    ax.text(xp, (ym_out+ym_in)/2, f"  {tlbl_out}->{tlbl_in}",
+                    ax.text(xp, (ym_out+ym_in)/2, f"  {tlbl_out}→{tlbl_in}",
                             fontsize=6, color=c, va="center", ha="left", style="italic")
                     ax.add_patch(Circle((xp, ym_out), 0.55, fc=c, ec=c, zorder=6))
                     ax.add_patch(Circle((xp, ym_in), 0.55, fc=c, ec=c, zorder=6))
 
-            # CHEQUEO borne salida -> bloque cierre (cable de retorno, linea punteada)
+            # CHEQUEO borne salida -> bloque cierre via bus INFERIOR (sin cruzar PRINCIPAL)
             if tlbl_out in m_yc and tlbl_out in row:
                 yb_cierre = row[tlbl_out][0]
                 ym_cout = m_yc[tlbl_out]
-                xq = xR - 3  # columna de retorno a la izquierda del bloque
-                ax.plot([mxrc, mxrc-2],[ym_cout, ym_cout], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([mxrc-2, xq],[ym_cout, ym_cout], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([xq, xq],[ym_cout, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([xq, xL],[yb_cierre, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
+                y_bus = bot_bus_base - ci * 3   # escalonado por fase
+                xret  = xL - 2 - ci * 2         # columna escalonada junto al bloque
+                ax.plot([mxrc, mxrc],[ym_cout, y_bus], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([mxrc, xret],[y_bus, y_bus], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([xret, xret],[y_bus, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([xret, xL],[yb_cierre, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
 
         # 3. TENSION PARALELO (bloque -> T-junction -> PRINCIPAL borne_V y CHEQUEO borne_V)
         all_V = {**bornes_V, **bornes_N}
@@ -1342,6 +1346,8 @@ def draw_unifilar_generico(cfg, out_path):
     if rel_tc:  sub_parts.append(f"RTC {rel_tc}")
     if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
     if respaldo: sub_parts.append("Principal + Respaldo")
+    cal = cfg.get("calibre_conductor") or cfg.get("calibre_acometida")
+    if cal: sub_parts.append(f"Calibre {cal}")
     ax.text(W/2, H-6, "  .  ".join(sub_parts),
             ha="center", fontsize=8.5, color="#666")
 
@@ -1437,14 +1443,7 @@ def draw_unifilar_generico(cfg, out_path):
     # ── INDIRECTA: TC + TP en MT antes del trafo ──────────────────────────────
     if tipo == "indirecta":
         node_dot(y)
-
-        # TP a la izquierda (en paralelo)
-        tpx = xc - 18
-        ax.plot([xc, tpx], [y, y], color=COL["S"], lw=1.5)
-        ax.plot([tpx, tpx], [y, y-5], color=COL["S"], lw=1.5)
-        _u_vt(ax, tpx, y-5, COL["S"], 0.85, ground=True)
-        ax.text(tpx-2, y-5, f"TP (M.T.)\n{rel_tp or '---'}",
-                ha="right", va="center", fontsize=8, color=COL["S"], fontweight="bold")
+        vline(y, y-4)
 
         # TC en la linea principal
         tc_y = y - 4
@@ -1452,7 +1451,16 @@ def draw_unifilar_generico(cfg, out_path):
         ax.text(xc-4, tc_y, f"TC (M.T.)\n{rel_tc or '---'}",
                 ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
 
-        # Caja de medida a la DERECHA del TC
+        # TP al mismo nivel del TC — rama izquierda desde el mismo nodo de medida
+        node_dot(tc_y)
+        tpx = xc - 18
+        ax.plot([xc, tpx], [tc_y, tc_y], color=COL["S"], lw=1.5)
+        ax.plot([tpx, tpx], [tc_y, tc_y-6], color=COL["S"], lw=1.5)
+        _u_vt(ax, tpx, tc_y-6, COL["S"], 0.85, ground=True)
+        ax.text(tpx-2, tc_y-6, f"TP (M.T.)\n{rel_tp or '---'}",
+                ha="right", va="center", fontsize=8, color=COL["S"], fontweight="bold")
+
+        # Caja de medida a la DERECHA del TC (TC+TP secundarios al circuito)
         draw_medida_box(tc_y)
 
         vline(y, y-9); y -= 9
