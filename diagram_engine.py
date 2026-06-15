@@ -694,140 +694,132 @@ def _draw_directa_retie(cfg, out_path):
         ph_terms.append((ta, tb, tc, td))
 
     # Dibujar circulos de terminal y etiquetas
+    # Labels correctos segun norma colombiana (RETIE):
+    #   Simetrica : [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]  ← patron ESPEJO
+    #   Asimetrica: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]  ← patron SECUENCIAL
     for pi, ph in enumerate(all_ph):
         ta, tb, tc, td = ph_terms[pi]
         for tx in (ta, tb, tc, td):
             ax.add_patch(Circle((tx, TERM_Y), TR,
                          fill=True, fc="white", ec="#333", lw=1.4, zorder=5))
-        # Etiquetas de funcion debajo de cada terminal
         if conexion == "simetrica":
-            lbls = ["I_in", "V+", "V-", "I_out"]
+            lbls = ["1-Fent", "2-Nsal", "3-Nent", "4-Fsal"]
         else:
-            lbls = ["I_in", "I_out", "V+", "V-"]
+            lbls = ["1-Fent", "2-Fsal", "3-Nent", "4-Nsal"]
         for tx, lbl in zip((ta, tb, tc, td), lbls):
             ax.text(tx, TB_Y0 - 0.4, lbl, ha="center", va="top",
                     fontsize=5.5, color="#666")
 
     # ── Bobinas y cableado interno ──────────────────────────────────────────
-    # Zona coils: entre TB_Y1 y BOX_TOP
     CZ_BOT = TB_Y1 + 1.5
     CZ_TOP = BOX_TOP - 1.0
     CZ_H   = CZ_TOP - CZ_BOT
 
-    # Bobina I (serie, corriente): en la mitad superior
-    I_CY = CZ_BOT + CZ_H * 0.72
-    # Bobina V (paralelo, tension): en la mitad inferior
-    V_CY = CZ_BOT + CZ_H * 0.28
+    I_CY   = CZ_BOT + CZ_H * 0.72
+    V_CY   = CZ_BOT + CZ_H * 0.28
     COIL_H = min(CZ_H * 0.35, 7)
 
     for pi, ph in enumerate(all_ph):
-        c = COL[ph]
+        c  = COL[ph]
         ta, tb, tc, td = ph_terms[pi]
 
+        # ── Asignacion de terminales (norma colombiana RETIE) ───────────
         if conexion == "simetrica":
-            # Terminales: ta=I_in, tb=V+, tc=V-, td=I_out
-            T_iin  = ta; T_vpos = tb; T_vneg = tc; T_iout = td
+            # Bornera: [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]
+            # La fase entra por borne 1 y sale por borne 4 (patron espejo/cruzado).
+            # El neutro entra por borne 3 y sale por borne 2.
+            # Tap de tension V+ en borne 1 (lado acometida).
+            T_fin  = ta   # borne 1: Fase entrada
+            T_nout = tb   # borne 2: Neutro salida (hacia carga)
+            T_nin  = tc   # borne 3: Neutro entrada (de la red)
+            T_fout = td   # borne 4: Fase salida
+            T_vpos = ta   # V+ tap: mismo borne que Fase entrada
+            T_vneg = tc   # V- ref: Neutro entrada
         else:
-            # Terminales: ta=I_in, tb=I_out, tc=V+, td=V-
-            T_iin  = ta; T_iout = tb; T_vpos = tc; T_vneg = td
+            # Bornera: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]
+            # La fase entra por borne 1 y sale por borne 2 (contiguos).
+            # El neutro entra por borne 3 y sale por borne 4 (contiguos).
+            # Tap de tension V+ en borne 2 (lado carga).
+            T_fin  = ta   # borne 1: Fase entrada
+            T_fout = tb   # borne 2: Fase salida
+            T_nin  = tc   # borne 3: Neutro entrada (de la red)
+            T_nout = td   # borne 4: Neutro salida (hacia carga)
+            T_vpos = tb   # V+ tap: mismo borne que Fase salida
+            T_vneg = tc   # V- ref: Neutro entrada
 
-        # ── Bobina I (serie en camino de corriente) ─────────────────────
-        icx   = (T_iin + T_iout) / 2
-        ic_w  = abs(T_iout - T_iin) - 2
-        ic_w  = max(ic_w, 8)
+        # ── Bobina I (serie, camino de corriente): T_fin → T_fout ──────
+        icx   = (T_fin + T_fout) / 2
+        ic_w  = max(abs(T_fout - T_fin) - 2, 8)
         ic_x0 = icx - ic_w / 2
         ic_x1 = icx + ic_w / 2
         ic_y0 = I_CY - COIL_H / 2
-        ic_y1 = I_CY + COIL_H / 2
         ax.add_patch(Rectangle((ic_x0, ic_y0), ic_w, COIL_H,
                      fill=True, fc="#FFFDE7", ec=c, lw=1.3, zorder=3))
         ax.text(icx, I_CY, "I", ha="center", va="center",
                 fontsize=8, fontweight="bold", color=c, zorder=4)
 
         # ── Bobina V (paralelo, medida de tension) ──────────────────────
+        # V+ toma del mismo borne que la fase (T_vpos = T_fin o T_fout).
+        # V- referencia al neutro (T_vneg = T_nin).
         vcx   = (T_vpos + T_vneg) / 2
-        vc_w  = abs(T_vneg - T_vpos) + 2
-        vc_w  = max(vc_w, 8)
+        vc_w  = max(abs(T_vneg - T_vpos) - 2, 8)
         vc_x0 = vcx - vc_w / 2
         vc_x1 = vcx + vc_w / 2
         vc_y0 = V_CY - COIL_H / 2
-        vc_y1 = V_CY + COIL_H / 2
         ax.add_patch(Rectangle((vc_x0, vc_y0), vc_w, COIL_H,
                      fill=True, fc="#E3F2FD", ec=c, lw=1.3, ls=(0,(3,2)), zorder=3))
         ax.text(vcx, V_CY, "V", ha="center", va="center",
                 fontsize=8, fontweight="bold", color=c, zorder=4)
 
-        # ── Cableado interno: terminal → bobina ─────────────────────────
-        def _wire_up(tx, coil_edge_x, coil_y, col, lw=1.4):
-            # sube del terminal a la altura de la bobina y va horizontal a ella
-            ax.plot([tx, tx], [TERM_Y + TR, coil_y], color=col, lw=lw, zorder=2)
-            ax.plot([tx, coil_edge_x], [coil_y, coil_y], color=col, lw=lw, zorder=2)
+        # ── Cableado interno: terminales → bobinas ──────────────────────
+        def _wire_up(tx, ex, ey, col, lw=1.4):
+            ax.plot([tx, tx], [TERM_Y + TR, ey], color=col, lw=lw, zorder=2)
+            ax.plot([tx, ex], [ey, ey], color=col, lw=lw, zorder=2)
 
-        _wire_up(T_iin,  ic_x0, ic_y0, c)          # T_iin  → lado izq. bobina I
-        _wire_up(T_iout, ic_x1, ic_y0, c)          # T_iout → lado der. bobina I
-        _wire_up(T_vpos, vc_x0, vc_y0, c)          # T_vpos → lado izq. bobina V
-        _wire_up(T_vneg, vc_x1, vc_y0, COL["N"], lw=1.2)  # T_vneg → neutro bobina V
+        # Fase → I_coil (serie)
+        _wire_up(T_fin,  ic_x0, ic_y0, c)
+        _wire_up(T_fout, ic_x1, ic_y0, c)
 
-        # ── Lineas de fase externas (debajo de la bornera) ──────────────
+        # V+ tap: desde T_vpos (mismo hilo de fase) → V_coil lado V+
+        # Nodo de union en el hilo de fase a la altura de la bobina V
+        vc_vplus_edge = vc_x0 if T_vpos <= vcx else vc_x1
+        _wire_up(T_vpos, vc_vplus_edge, vc_y0, c, lw=1.2)
+        # Punto de nodo (●) sobre el hilo de fase en vc_y0
+        ax.add_patch(Circle((T_vpos, vc_y0), 1.0, fc=c, ec=c, zorder=6))
+
+        # Neutro pass-through interno: T_nin ──── T_nout (con cruce en simetrica)
+        N_PASS_Y = vc_y0 - 2.2
+        ax.plot([T_nin,  T_nin],  [TERM_Y + TR, N_PASS_Y], color=COL["N"], lw=1.2, zorder=2)
+        ax.plot([T_nin,  T_nout], [N_PASS_Y,    N_PASS_Y], color=COL["N"], lw=1.2, zorder=2)
+        ax.plot([T_nout, T_nout], [N_PASS_Y, TERM_Y + TR], color=COL["N"], lw=1.2, zorder=2)
+
+        # V- referencia: nodo en el hilo de neutro interno → V_coil lado V-
+        vc_vminus_edge = vc_x1 if T_vpos <= T_vneg else vc_x0
+        ax.add_patch(Circle((T_nin, N_PASS_Y), 1.0, fc=COL["N"], ec=COL["N"], zorder=6))
+        ax.plot([T_nin, T_nin],         [N_PASS_Y, vc_y0],         color=COL["N"], lw=1.2, ls=(0,(3,2)), zorder=2)
+        ax.plot([T_nin, vc_vminus_edge], [vc_y0,   vc_y0],         color=COL["N"], lw=1.2, ls=(0,(3,2)), zorder=2)
+
+        # ── Conductores externos: fase ──────────────────────────────────
         py = PH_YS[pi]
+        ax.plot([X_SACOM, T_fin],   [py, py], color=c, lw=2.5, zorder=2)
+        ax.plot([T_fin,   T_fin],   [py, TERM_Y - TR], color=c, lw=2.5, zorder=2)
+        ax.plot([T_fout,  T_fout],  [TERM_Y - TR, py], color=c, lw=2.5, zorder=2)
+        ax.plot([T_fout,  X_CARGA], [py, py], color=c, lw=2.5, zorder=2)
 
-        # Acometida → T_iin
-        ax.plot([X_SACOM, T_iin], [py, py], color=c, lw=2.5, zorder=2)
-        ax.plot([T_iin, T_iin],   [py, TERM_Y - TR], color=c, lw=2.5, zorder=2)
+        # ── Conductores externos: neutro (ramas a T_nin y T_nout) ───────
+        ax.plot([T_nin,  T_nin],  [Y_N, TERM_Y - TR], color=COL["N"], lw=1.8, ls=(0,(5,2)), zorder=2)
+        ax.plot([T_nout, T_nout], [Y_N, TERM_Y - TR], color=COL["N"], lw=1.8, ls=(0,(5,2)), zorder=2)
 
-        # T_iout → Carga
-        ax.plot([T_iout, T_iout], [TERM_Y - TR, py], color=c, lw=2.5, zorder=2)
-        ax.plot([T_iout, X_CARGA], [py, py], color=c, lw=2.5, zorder=2)
-
-        # T_vneg → neutro (linea discontinua gris)
-        ax.plot([T_vneg, T_vneg], [TERM_Y - TR, Y_N],
-                color=COL["N"], lw=1.6, ls=(0,(5,2)), zorder=2)
-
-        # ── PUENTE DE TENSION (diferencia clave entre simetrica/asimetrica)
-        #
-        # Simetrica : puente entre T_iin (ta) y T_vpos (tb) → LADO IZQUIERDO
-        #             La acometida alimenta tanto la bobina I como la bobina V.
-        #             Nodo de tension = lado de entrada (antes de la bobina I).
-        #
-        # Asimetrica: puente entre T_iout (tb) y T_vpos (tc) → LADO DERECHO
-        #             La carga alimenta la bobina V.
-        #             Nodo de tension = lado de salida (despues de la bobina I).
-        #
-        BP_Y = TERM_Y - TR - 2.5   # y del arco del puente
-
-        if conexion == "simetrica":
-            bx_a = T_iin   # ta
-            bx_b = T_vpos  # tb
-        else:
-            bx_a = T_iout  # tb
-            bx_b = T_vpos  # tc
-
-        # Arco del puente (trazo discontinuo verde-oliva para distinguir)
-        PUENTE_COL = "#558B2F"
-        ax.plot([bx_a, bx_a, bx_b, bx_b],
-                [TERM_Y - TR, BP_Y, BP_Y, TERM_Y - TR],
-                color=PUENTE_COL, lw=1.6, ls="--", zorder=3)
-        # Punto de nodo en la linea de fase
-        ax.add_patch(Circle((bx_a, py), 1.4, fc=c, ec=c, zorder=5))
-        # Rama del puente que baja desde bx_a hasta la linea de fase
-        ax.plot([bx_a, bx_a], [TERM_Y - TR, py],
-                color=PUENTE_COL, lw=1.6, ls="--", zorder=3)
-
-        lado_txt = "acometida" if conexion == "simetrica" else "carga"
-        ax.text((bx_a + bx_b) / 2, BP_Y - 0.5,
-                f"puente ({lado_txt})", ha="center", va="top",
-                fontsize=5.5, color=PUENTE_COL, style="italic")
-
-        # Etiqueta de fase
-        ax.text(XSL + 0.5, py, f"Fase {ph}", ha="left", va="center",
+        # ── Etiquetas de fase ───────────────────────────────────────────
+        ax.text(XSL + 0.5, py, f"Fase {ph}", ha="left",  va="center",
                 fontsize=9, fontweight="bold", color=c)
         ax.text(XLL - 0.5, py, f"Fase {ph}", ha="right", va="center",
                 fontsize=9, fontweight="bold", color=c)
 
-    # ── Linea de neutro ─────────────────────────────────────────────────────
+    # ── Bus de neutro ───────────────────────────────────────────────────────
     ax.plot([X_SACOM, X_CARGA], [Y_N, Y_N],
             color=COL["N"], lw=2.0, ls=(0,(6,3)), zorder=2)
-    ax.text(XSL + 0.5, Y_N, "Neutro", ha="left", va="center",
+    ax.text(XSL + 0.5, Y_N, "Neutro", ha="left",  va="center",
             fontsize=9, fontweight="bold", color=COL["N"])
     ax.text(XLL - 0.5, Y_N, "Neutro", ha="right", va="center",
             fontsize=9, fontweight="bold", color=COL["N"])
@@ -837,22 +829,20 @@ def _draw_directa_retie(cfg, out_path):
     bus_bot = Y_N
     ax.plot([X_SACOM, X_SACOM], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
     ax.plot([X_CARGA, X_CARGA], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
-    ax.text(X_SACOM - 1, (bus_top+bus_bot)/2, "ACOMETIDA",
+    ax.text(X_SACOM - 1, (bus_top + bus_bot) / 2, "ACOMETIDA",
             ha="right", va="center", fontsize=7.5, fontweight="bold",
             color="#555", rotation=90)
-    ax.text(X_CARGA + 1, (bus_top+bus_bot)/2, "CARGA",
+    ax.text(X_CARGA + 1, (bus_top + bus_bot) / 2, "CARGA",
             ha="left", va="center", fontsize=7.5, fontweight="bold",
             color="#555", rotation=90)
 
     # ── Nota explicativa ────────────────────────────────────────────────────
     if conexion == "simetrica":
-        nota = ("Tap de tension en la ACOMETIDA  |  "
-                "Bobina V mide V de suministro  |  "
-                "Conexion ANTES de la bobina I")
+        nota = ("Bornera: [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]  ·  "
+                "Patron ESPEJO — tap V en borne 1 (acometida)")
     else:
-        nota = ("Tap de tension en la CARGA  |  "
-                "Bobina V mide V en bornes de carga  |  "
-                "Conexion DESPUES de la bobina I")
+        nota = ("Bornera: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]  ·  "
+                "Patron SECUENCIAL — tap V en borne 2 (carga)")
     ax.text(W/2, Y_N - 2.5, nota, ha="center", va="top",
             fontsize=7, color="#666", style="italic")
 
