@@ -1091,35 +1091,126 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     #   vertical hasta Y del borne en el medidor,
     #   horizontal hasta mxr (medidor).
     # Columnas xm separadas para no solaparse (una por borne del order)
-    # Columnas de ruteo separadas por medidor para evitar solapamiento
     if not respaldo:
-        xm_cols_p = np.linspace(106, 120, len(order))
-        xm_map_p  = {tlbl: xm_cols_p[i] for i, tlbl in enumerate(order)}
-        meter_routing = [(meters[0], xm_map_p, 1.8)]
-    else:
-        # PRINCIPAL: columnas 106-121 (entre bloque bx1=104 y PRINCIPAL en 124)
-        xm_cols_p = np.linspace(106, 121, len(order))
-        xm_map_p  = {tlbl: xm_cols_p[i] for i, tlbl in enumerate(order)}
-        # CHEQUEO: columnas 107.5-122.5, offset +1.5 para que sean visualmente distintos
-        xm_cols_c = np.linspace(107.5, 122.5, len(order))
-        xm_map_c  = {tlbl: xm_cols_c[i] for i, tlbl in enumerate(order)}
-        meter_routing = [(meters[0], xm_map_p, 1.8), (meters[1], xm_map_c, 1.5)]
-
-    for (m_y, mxr), xm_map, lw in meter_routing:
+        # Sin respaldo: ruteo simple bloque->medidor
+        xm_cols = np.linspace(106, 120, len(order))
+        xm_map  = {tlbl: xm_cols[i] for i, tlbl in enumerate(order)}
+        m_y, mxr = meters[0]
         for tlbl in order:
             if tlbl not in m_y or tlbl not in row:
                 continue
-            # tri3h: borne 3 (C1) va al borne 4 via cable especial, no directo
             if sistema == "tri3h" and tlbl == "3":
                 continue
-            yb = row[tlbl][0]   # Y en el bloque
-            ym = m_y[tlbl]      # Y en el medidor (orden fisico)
+            yb = row[tlbl][0]; ym = m_y[tlbl]
             ph = row[tlbl][1]; c = COL[ph]
             ls = (0,(6,3)) if ph=="N" else "-"
             xm = xm_map[tlbl]
-            ax.plot([xR, xm],[yb, yb], color=c, lw=lw, ls=ls)   # horizontal desde bloque
-            ax.plot([xm, xm],[yb, ym], color=c, lw=lw, ls=ls)   # vertical
-            ax.plot([xm, mxr],[ym, ym], color=c, lw=lw, ls=ls)  # horizontal al medidor
+            ax.plot([xR, xm],[yb, yb], color=c, lw=1.8, ls=ls)
+            ax.plot([xm, xm],[yb, ym], color=c, lw=1.8, ls=ls)
+            ax.plot([xm, mxr],[ym, ym], color=c, lw=1.8, ls=ls)
+    else:
+        # CON RESPALDO: puentes correctos segun norma colombiana
+        # Corriente: SERIE (bloque->PRINCIPAL->puente->CHEQUEO->bloque_cierre)
+        # Tension/Neutro: PARALELO (bloque->T-junction->ambos medidores)
+        m_yp, mxrp = meters[0]  # PRINCIPAL
+        m_yc, mxrc = meters[1]  # CHEQUEO
+
+        # Bornes de corriente por sistema
+        if sistema == "tri4h":
+            bornes_I_in  = {"1":"R","4":"S","7":"T"}
+            bornes_I_out = {"3":"R","6":"S","9":"T"}
+            bornes_V     = {"2":"R","5":"S","8":"T"}
+            bornes_N     = {"11":"N"}
+        elif sistema == "tri3h":
+            bornes_I_in  = {"1":"R","7":"T"}
+            bornes_I_out = {"3":"R","9":"T"}
+            bornes_V     = {"2":"R","4":"S","8":"T"}
+            bornes_N     = {}
+        elif sistema == "bifasico":
+            bornes_I_in  = {"1":"R","4":"S"}
+            bornes_I_out = {"3":"R","6":"S"}
+            bornes_V     = {"2":"R","5":"S"}
+            bornes_N     = {"7":"N"}
+        else:  # mono
+            bornes_I_in  = {"1":"R"}
+            bornes_I_out = {"3":"R"}
+            bornes_V     = {"2":"R"}
+            bornes_N     = {"4":"N"}
+
+        # Columnas de ruteo entre bloque (xR~104) y PRINCIPAL (mxrp)
+        n_terms_total = len(order)
+        xm_cols = np.linspace(106, 120, n_terms_total)
+        xm_map  = {tlbl: xm_cols[i] for i, tlbl in enumerate(order)}
+
+        # 1. CORRIENTE ENTRADA (bloque -> PRINCIPAL, solo bornes I_in)
+        for tlbl, ph in bornes_I_in.items():
+            if tlbl not in m_yp or tlbl not in row:
+                continue
+            yb = row[tlbl][0]; ym = m_yp[tlbl]
+            c = COL[ph]; xm = xm_map.get(tlbl, 106)
+            ax.plot([xR, xm],[yb, yb], color=c, lw=2.0)
+            ax.plot([xm, xm],[yb, ym], color=c, lw=2.0)
+            ax.plot([xm, mxrp],[ym, ym], color=c, lw=2.0)
+
+        # 2. CORRIENTE SALIDA + PUENTES (PRINCIPAL borne_out -> CHEQUEO borne_in -> cierre bloque)
+        out_to_in = dict(zip(bornes_I_out.keys(), bornes_I_in.keys()))
+
+        # Columnas de puente (entre PRINCIPAL mxrp y CHEQUEO mx0_c)
+        mx0_c = mx0_c if 'mx0_c' in dir() else mxrp + 10
+        xp_cols = np.linspace(mxrp+2, mx0_c-2, max(len(bornes_I_out), 1))
+        xp_map  = dict(zip(bornes_I_out.keys(), xp_cols))
+
+        for (tlbl_out, ph), tlbl_in in zip(bornes_I_out.items(), bornes_I_in.keys()):
+            c = COL[ph]
+            # PRINCIPAL borne salida -> puente vertical -> CHEQUEO borne entrada
+            if tlbl_out in m_yp:
+                ym_out = m_yp[tlbl_out]
+                xp = xp_map[tlbl_out]
+                ax.plot([mxrp, xp],[ym_out, ym_out], color=c, lw=1.8)
+
+                if tlbl_in in m_yc:
+                    ym_in = m_yc[tlbl_in]
+                    ax.plot([xp, xp],[ym_out, ym_in], color=c, lw=1.8)
+                    ax.plot([xp, mxrc],[ym_in, ym_in], color=c, lw=1.8)
+                    ax.text(xp, (ym_out+ym_in)/2, f"  {tlbl_out}->{tlbl_in}",
+                            fontsize=6, color=c, va="center", ha="left", style="italic")
+                    ax.add_patch(Circle((xp, ym_out), 0.55, fc=c, ec=c, zorder=6))
+                    ax.add_patch(Circle((xp, ym_in), 0.55, fc=c, ec=c, zorder=6))
+
+            # CHEQUEO borne salida -> bloque cierre (cable de retorno, linea punteada)
+            if tlbl_out in m_yc and tlbl_out in row:
+                yb_cierre = row[tlbl_out][0]
+                ym_cout = m_yc[tlbl_out]
+                xq = xR - 3  # columna de retorno a la izquierda del bloque
+                ax.plot([mxrc, mxrc-2],[ym_cout, ym_cout], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([mxrc-2, xq],[ym_cout, ym_cout], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([xq, xq],[ym_cout, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
+                ax.plot([xq, xL],[yb_cierre, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
+
+        # 3. TENSION PARALELO (bloque -> T-junction -> PRINCIPAL borne_V y CHEQUEO borne_V)
+        all_V = {**bornes_V, **bornes_N}
+        xv_cols = np.linspace(106, 120, max(len(all_V), 1))
+        vi = 0
+        for tlbl, ph in all_V.items():
+            if tlbl not in row:
+                vi += 1; continue
+            c = COL[ph]; ls = (0,(6,3)) if ph=="N" else "-"
+            yb = row[tlbl][0]; xv = xv_cols[vi]; vi += 1
+            # Rama horizontal desde bloque
+            ax.plot([xR, xv],[yb, yb], color=c, lw=1.6, ls=ls)
+            jy = yb
+            # Al PRINCIPAL
+            if tlbl in m_yp:
+                ym_p = m_yp[tlbl]
+                ax.plot([xv, xv],[jy, ym_p], color=c, lw=1.5, ls=ls)
+                ax.plot([xv, mxrp],[ym_p, ym_p], color=c, lw=1.5, ls=ls)
+            # Al CHEQUEO (misma vertical, continua)
+            if tlbl in m_yc:
+                ym_c = m_yc[tlbl]
+                ax.plot([xv, xv],[jy, ym_c], color=c, lw=1.3, ls=ls)
+                ax.plot([xv, mxrc],[ym_c, ym_c], color=c, lw=1.3, ls=ls)
+            # Dot de bifurcacion en bloque
+            ax.add_patch(Circle((xv, jy), 0.5, fc=c, ec=c, zorder=6))
 
     # tri3h: puente C1->C2 en bornera (solo puntos en C1 y C2, no en el medio)
     # y cable desde C1 al borne 4 del medidor
@@ -1220,8 +1311,9 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 # ============================================================
 def draw_unifilar_generico(cfg, out_path):
     """
-    Flujo vertical: RED -> seccionador/cortacircuito -> trafo -> barra BT
-                         -> (TC si semi) -> Bloque Prueba -> Medidor(es) -> CARGA
+    Linea principal vertical (xc=28): RED -> cortacircuito/seccionador -> trafo -> barra BT
+                                           -> TC (BT si semidirecta) -> CARGA
+    Circuito de medida (caja punteada a la DERECHA): sale del TC/nodo hacia la derecha.
     Panel derecho: plano de simbologia IEC/UNE 60617.
     """
     tipo        = cfg.get("tipo", "directa")
@@ -1232,18 +1324,18 @@ def draw_unifilar_generico(cfg, out_path):
     instalacion = cfg.get("instalacion", "barraje")
     respaldo    = bool(cfg.get("respaldo", False))
     kva         = cfg.get("trafo_kva", "")
-    trafo_uso   = cfg.get("trafo_uso", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
+    n_trafos    = int(cfg.get("n_trafos", 1))
     interruptor = cfg.get("interruptor", "")
 
-    fig, ax = plt.subplots(figsize=(13, 11))
-    W, H = 130, 120
+    fig, ax = plt.subplots(figsize=(14, 11))
+    W, H = 135, 115
     ax.set_xlim(0, W); ax.set_ylim(0, H)
     ax.set_aspect("equal"); ax.axis("off")
 
-    # --- Titulo ---
+    # Titulo
     ax.text(W/2, H-2, "DIAGRAMA UNIFILAR DE MEDIDA",
-            ha="center", fontsize=14, fontweight="bold", color=INK)
+            ha="center", fontsize=13, fontweight="bold", color=INK)
     tipo_txt = {"directa":"Directa","semidirecta":"Semidirecta","indirecta":"Indirecta"}[tipo]
     sis_short = SIS_TXT[sistema].split(" (")[0].title()
     sub_parts = [f"Medida {tipo_txt}", sis_short, f"Norma {norma}"]
@@ -1251,10 +1343,10 @@ def draw_unifilar_generico(cfg, out_path):
     if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
     if respaldo: sub_parts.append("Principal + Respaldo")
     ax.text(W/2, H-6, "  .  ".join(sub_parts),
-            ha="center", fontsize=9, color="#666")
+            ha="center", fontsize=8.5, color="#666")
 
-    xc = 48   # eje del unifilar
-    y  = H - 12  # inicio del flow (debajo del titulo)
+    xc = 28   # eje del unifilar
+    y  = H - 12
 
     def vline(ya, yb, lw=2.6):
         ax.plot([xc, xc], [ya, yb], color=INK, lw=lw, zorder=2)
@@ -1262,178 +1354,201 @@ def draw_unifilar_generico(cfg, out_path):
     def node_dot(yy):
         ax.add_patch(Circle((xc, yy), 0.85, fc=INK, ec=INK, zorder=4))
 
-    def busbar(yy, label, sub=""):
-        ax.plot([xc-16, xc+16], [yy, yy], color=INK, lw=4.5, zorder=2)
-        ax.text(xc-18, yy, label, ha="right", va="center",
+    def busbar(yy, label):
+        ax.plot([xc-13, xc+13], [yy, yy], color=INK, lw=4.5, zorder=2)
+        ax.text(xc-15, yy, label, ha="right", va="center",
                 fontsize=9.5, fontweight="bold", color=INK)
-        if sub:
-            ax.text(xc+18, yy, sub, ha="left", va="center",
-                    fontsize=7.5, color="#666")
 
-    # -- RED / Barra principal --
+    def draw_medida_box(tap_y):
+        """Caja punteada a la derecha con bloque de prueba + medidor(es).
+        La caja se centra en tap_y y NO se extiende hacia abajo del nivel TC,
+        para evitar solaparse con el trafo o la carga que están debajo."""
+        bx0 = xc + 5
+        med_w = 16; bp_w = 10
+        bx1 = bx0 + bp_w + 4 + med_w + 8
+
+        # Centro de los elementos al mismo nivel que el TC
+        bp_mid = tap_y
+        # Altura de la caja centrada en tap_y
+        half_h = 8 if not respaldo else 16
+        by0 = tap_y - half_h   # solo sube/baja simétricamente
+        by1 = tap_y + half_h
+
+        # Rama horizontal (línea de señal desde TC secundario al circuito)
+        ax.plot([xc, bx0], [tap_y, tap_y], color=INK, lw=1.8, zorder=2)
+
+        # Caja punteada (circuito de medida)
+        ax.add_patch(Rectangle((bx0, by0), bx1-bx0, by1-by0,
+                     fill=False, ec="#555", lw=1.3, ls=(0,(5,3)), zorder=2))
+        ax.text(bx0+1.5, by1-1, "Circuito de medida",
+                fontsize=6, va="top", ha="left", color="#555", style="italic")
+
+        # Bloque de prueba (centrado en tap_y)
+        bp_x = bx0 + 3
+        bp_h = min(12, half_h * 2 - 4)   # ajusta al espacio de la caja
+        ax.add_patch(FancyBboxPatch((bp_x, bp_mid - bp_h/2), bp_w, bp_h,
+                     boxstyle="round,pad=0.3,rounding_size=1",
+                     fill=True, fc="#E8EFF7", ec="#444", lw=1.1, zorder=3))
+        ax.text(bp_x+bp_w/2, bp_mid, f"BLOQUE\n{norma}",
+                ha="center", va="center", fontsize=6, color="#222", fontweight="bold")
+
+        # Alambre de bloque al medidor
+        med_x0 = bp_x + bp_w + 3
+
+        if not respaldo:
+            ax.plot([bp_x+bp_w, med_x0], [bp_mid, bp_mid], color=INK, lw=1.3, zorder=3)
+            med_h = min(12, half_h * 2 - 4)
+            ax.add_patch(FancyBboxPatch((med_x0, bp_mid - med_h/2), med_w, med_h,
+                         boxstyle="round,pad=0.3,rounding_size=1.5",
+                         fill=True, fc=INK, ec="#0B0F14", lw=1.3, zorder=3))
+            ax.text(med_x0+med_w/2, bp_mid+1.5, "MEDIDOR",
+                    ha="center", va="center", fontsize=6.5, fontweight="bold", color="white")
+            ax.add_patch(Rectangle((med_x0+2, bp_mid - med_h/2 + 1), med_w-4, 4,
+                         fc="#0B3D2E", ec="#0A5", lw=0.7, zorder=4))
+            ax.text(med_x0+med_w/2, bp_mid - med_h/2 + 3, "kWh",
+                    ha="center", va="center", fontsize=5.5, color="#36df8f",
+                    family="monospace", zorder=5)
+        else:
+            # PRINCIPAL arriba, CHEQUEO abajo, dentro de la caja
+            sep = half_h - 2
+            y_p = bp_mid + sep/2
+            y_c = bp_mid - sep/2
+            med_h = min(9, sep - 2)
+
+            jx = med_x0 - 1
+            ax.plot([bp_x+bp_w, jx], [bp_mid, bp_mid], color=INK, lw=1.2, zorder=3)
+            ax.plot([jx, jx], [y_p, y_c], color=INK, lw=1.2, zorder=3)
+            ax.plot([jx, med_x0], [y_p, y_p], color=INK, lw=1.2, zorder=3)
+            ax.plot([jx, med_x0], [y_c, y_c], color=INK, lw=1.0, ls=(0,(3,2)), zorder=3)
+
+            for etq, my, fc in [("PRINCIPAL", y_p, INK), ("CHEQUEO", y_c, "#1a3a6a")]:
+                ax.add_patch(FancyBboxPatch((med_x0, my - med_h/2), med_w, med_h,
+                             boxstyle="round,pad=0.3,rounding_size=1.5",
+                             fill=True, fc=fc, ec="#0B0F14", lw=1.2, zorder=3))
+                ax.text(med_x0+med_w/2, my, etq,
+                        ha="center", va="center", fontsize=5.5,
+                        fontweight="bold", color="white")
+
+    # ── RED / Barra principal ──────────────────────────────────────────────────
     red_lbl = "RED (M.T.)" if tipo == "indirecta" else "RED (B.T.)"
     busbar(y, red_lbl)
     vline(y, y-6); y -= 6
 
-    # -- INDIRECTA: TC + TP en MT, antes del trafo --
+    # ── INDIRECTA: TC + TP en MT antes del trafo ──────────────────────────────
     if tipo == "indirecta":
+        node_dot(y)
+
+        # TP a la izquierda (en paralelo)
+        tpx = xc - 18
+        ax.plot([xc, tpx], [y, y], color=COL["S"], lw=1.5)
+        ax.plot([tpx, tpx], [y, y-5], color=COL["S"], lw=1.5)
+        _u_vt(ax, tpx, y-5, COL["S"], 0.85, ground=True)
+        ax.text(tpx-2, y-5, f"TP (M.T.)\n{rel_tp or '---'}",
+                ha="right", va="center", fontsize=8, color=COL["S"], fontweight="bold")
+
+        # TC en la linea principal
+        tc_y = y - 4
+        _u_ct(ax, xc, tc_y, COL["R"], 1.0)
+        ax.text(xc-4, tc_y, f"TC (M.T.)\n{rel_tc or '---'}",
+                ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
+
+        # Caja de medida a la DERECHA del TC
+        draw_medida_box(tc_y)
+
+        vline(y, y-9); y -= 9
+
+    # ── TRAFO (instalacion=trafo) ──────────────────────────────────────────────
+    if instalacion == "trafo":
+        if tipo == "semidirecta":
+            _u_disc(ax, xc, y-3, INK, 1.0)
+            ax.text(xc-6, y-3, "Seccionador", ha="right", va="center",
+                    fontsize=8, color=INK, fontweight="bold")
+            vline(y, y-6); y -= 6
+
+        trafo_y = y - 5
+        if n_trafos == 3:
+            # Banco de 3 trafos (simbolos lado a lado)
+            for dx in [-4.5, 0, 4.5]:
+                ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
+                ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
+            trafo_lbl = f"Banco 3 x trafo\n3 x {kva} kVA" if kva else "Banco 3 x trafo"
+        elif n_trafos == 2:
+            for dx in [-2.5, 2.5]:
+                ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
+                ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
+            trafo_lbl = f"Banco 2 x trafo\n2 x {kva} kVA" if kva else "Banco 2 x trafo"
+        else:
+            _u_xfmr(ax, xc, trafo_y, INK, 1.25)
+            trafo_lbl = f"Trafo {trafo_tipo}"
+            if kva: trafo_lbl += f"\n{kva} kVA"
+
+        ax.text(xc-8, trafo_y, trafo_lbl,
+                ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
+        vline(y, trafo_y-5); y = trafo_y - 6
+
+        busbar(y, "BARRA B.T.")
+        vline(y, y-5); y -= 5
+
+    # ── TC en BT (semidirecta) ────────────────────────────────────────────────
+    if tipo == "semidirecta":
         node_dot(y)
         tc_y = y - 4
         _u_ct(ax, xc, tc_y, COL["R"], 1.0)
-        ax.text(xc+6, tc_y, f"TC (M.T.)\n{rel_tc or '---'}",
-                ha="left", va="center", fontsize=9, color=COL["R"], fontweight="bold")
-        vline(y, tc_y - 5)
+        ax.text(xc-4, tc_y, f"TC (B.T.)\n{rel_tc or '---'}",
+                ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
 
-        # TP en paralelo, a la izquierda
-        tp_node_y = y - 2
-        tpx = xc - 18
-        tpy = tc_y - 1
-        ax.plot([xc, tpx], [tp_node_y, tp_node_y], color=COL["S"], lw=1.6)
-        ax.plot([tpx, tpx], [tp_node_y, tpy - 3], color=COL["S"], lw=1.6)
-        _u_vt(ax, tpx, tpy - 3, COL["S"], 0.9, ground=True)
-        ax.text(tpx - 2, tpy - 3, f"TP (M.T.)\n{rel_tp or '---'}",
-                ha="right", va="center", fontsize=8.5, color=COL["S"], fontweight="bold")
-        y = tc_y - 6
+        # Caja de medida a la DERECHA del TC
+        draw_medida_box(tc_y)
 
-    # -- TRAFO (instalacion=trafo) --
-    if instalacion == "trafo":
-        if tipo == "semidirecta":
-            # Seccionador antes del trafo
-            _u_disc(ax, xc, y - 3, INK, 1.0)
-            ax.text(xc+6, y-3, "Seccionador", ha="left", va="center",
-                    fontsize=9, color=INK, fontweight="bold")
-            vline(y, y - 6); y -= 6
+        vline(y, y-9); y -= 9
 
-        trafo_y = y - 5
-        _u_xfmr(ax, xc, trafo_y, INK, 1.3)
-        lbl_parts = [f"Trafo {trafo_tipo}"]
-        if trafo_uso: lbl_parts.append(f"({trafo_uso})")
-        if kva: lbl_parts.append(f"{kva} kVA")
-        ax.text(xc+7, trafo_y, "\n".join(lbl_parts),
-                ha="left", va="center", fontsize=9, color=INK, fontweight="bold")
-        vline(y, trafo_y - 5); y = trafo_y - 6
+    # ── DIRECTA: caja de medida directa ──────────────────────────────────────
+    if tipo == "directa":
+        draw_medida_box(y - 4)
+        vline(y, y-10); y -= 10
 
-        # Barra BT despues del trafo (solo para semidirecta/directa)
-        if tipo != "indirecta":
-            busbar(y, "BARRA B.T.")
-            vline(y, y - 5); y -= 5
-
-    elif tipo != "indirecta":
-        ax.text(xc+6, y+1, "Conectado a barraje BT",
-                ha="left", va="center", fontsize=8, color="#666")
-
-    # -- TC en BT (solo semidirecta) --
-    if tipo == "semidirecta":
-        node_dot(y)
-        tc_bt_y = y - 5
-        tc_label = rel_tc or cfg.get("tc_amp", "---")
-        _u_ct(ax, xc, tc_bt_y, COL["R"], 1.0)
-        ax.text(xc+6, tc_bt_y, f"TC (B.T.)\n{tc_label}",
-                ha="left", va="center", fontsize=9, color=COL["R"], fontweight="bold")
-        vline(y, tc_bt_y - 5); y = tc_bt_y - 6
-
-    # -- Bloque de Prueba --
-    bp_h = 10; bp_w = 18
-    bp_top = y
-    bp_bot = y - bp_h
-    ax.add_patch(FancyBboxPatch((xc-bp_w/2, bp_bot), bp_w, bp_h,
-                 boxstyle="round,pad=0.5,rounding_size=1.5",
-                 fill=True, fc="#E8EFF7", ec="#444", lw=1.4, zorder=2))
-    ax.text(xc, bp_bot + bp_h/2, "BLOQUE DE\nPRUEBA",
-            ha="center", va="center", fontsize=8, color="#222", fontweight="bold")
-    vline(bp_top, bp_top)  # conexion con elemento anterior (no-op pero mantiene zorder)
-    vline(bp_top, bp_top)
-    y = bp_bot - 4
-    vline(bp_bot, y)
-
-    # -- Medidor(es) --
-    med_h = 11; med_w = 22
-
-    def draw_unif_meter(mx_c, my_top, label):
-        """Dibuja caja de medidor centrada en mx_c."""
-        mx0 = mx_c - med_w/2; mx1 = mx_c + med_w/2
-        ax.add_patch(FancyBboxPatch((mx0, my_top-med_h), med_w, med_h,
-                     boxstyle="round,pad=0.5,rounding_size=2",
-                     fill=True, fc=INK, ec="#0B0F14", lw=1.8, zorder=3))
-        ax.text(mx_c, my_top - med_h/2 + 1.5, label,
-                ha="center", va="center", fontsize=9,
-                fontweight="bold", color="white", zorder=4)
-        ax.add_patch(Rectangle((mx0+3, my_top-med_h+1), med_w-6, 4,
-                     fc="#0B3D2E", ec="#0A5", lw=0.8, zorder=4))
-        ax.text(mx_c, my_top-med_h+3, "kWh / kvarh",
-                ha="center", va="center", fontsize=7,
-                color="#36df8f", family="monospace", zorder=5)
-
-    if not respaldo:
-        draw_unif_meter(xc, y, "MEDIDOR")
-        # senal de medida (anotacion desde fuera del medidor)
-        ax.annotate("", xy=(xc+med_w/2, y-med_h/2),
-                    xytext=(xc+med_w/2+5, y-med_h/2),
-                    arrowprops=dict(arrowstyle="<-", color="#888", ls=":", lw=1.2))
-        ax.text(xc+med_w/2+6, y-med_h/2,
-                "senales de medida\n(I, V)" if tipo != "directa" else "medida\ndirecta",
-                ha="left", va="center", fontsize=7, color="#888", style="italic")
-        y -= med_h + 4
-    else:
-        # PRINCIPAL a la izquierda, CHEQUEO a la derecha del eje
-        sep = 18
-        draw_unif_meter(xc - sep, y, "PRINCIPAL")
-        draw_unif_meter(xc + sep, y, "CHEQUEO")
-        # Linea horizontal conectando los dos medidores
-        ax.plot([xc - sep + med_w/2, xc + sep - med_w/2],
-                [y - med_h/2, y - med_h/2],
-                color="#555", lw=1.0, ls=(0,(3,2)), zorder=5)
-        ax.text(xc, y - med_h/2 + 1, "senal de verificacion",
-                ha="center", va="bottom", fontsize=6.5, color="#555", style="italic")
-        # Lineas de conexion desde el eje (bloque) a cada medidor
-        ax.plot([xc, xc - sep], [y + 0.5, y + 0.5], color=INK, lw=1.8, zorder=2)
-        ax.plot([xc, xc + sep], [y + 0.5, y + 0.5], color=INK, lw=1.8, zorder=2)
-        ax.plot([xc - sep, xc - sep], [y + 0.5, y], color=INK, lw=1.8, zorder=2)
-        ax.plot([xc + sep, xc + sep], [y + 0.5, y], color=INK, lw=1.8, zorder=2)
-        y -= med_h + 4
-
-    # -- Interruptor / seccionador --
+    # ── Interruptor/seccionador (si tiene) ─────────────────────────────────────
     if interruptor:
         _u_breaker(ax, xc, y-3, INK, 1.0)
-        ax.text(xc+6, y-3, f"Interruptor\n{interruptor}",
-                ha="left", va="center", fontsize=9, color=INK, fontweight="bold")
-        vline(y, y-6); y -= 6
+        ax.text(xc-4, y-3, f"Interruptor\n{interruptor}",
+                ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
+        vline(y, y-7); y -= 7
     else:
         vline(y, y-5); y -= 5
 
-    # -- CARGA --
+    # ── CARGA ─────────────────────────────────────────────────────────────────
     ax.add_patch(Polygon([[xc-4.5,y],[xc+4.5,y],[xc,y-8]],
                  closed=True, fill=False, ec=INK, lw=2.2))
     ax.text(xc, y-10, "CARGA",
             ha="center", va="top", fontsize=10, fontweight="bold", color=INK)
 
-    # -- Plano de simbologia (panel derecho) --
-    px0, px1 = 76, 128
-    py0, py1 = 5, 88
+    # ── Plano de simbologia (panel derecho) ────────────────────────────────────
+    px0, px1 = 75, 132
+    py0, py1 = 5, 90
     ax.add_patch(FancyBboxPatch((px0, py0), px1-px0, py1-py0,
                  boxstyle="round,pad=0.6,rounding_size=2",
                  fill=False, ec="#2B2B2B", lw=1.4))
     ax.text((px0+px1)/2, py1-3, "PLANO DE SIMBOLOGIA",
             ha="center", fontsize=10, fontweight="bold", color=INK)
-    ax.text((px0+px1)/2, py1-6, "IEC / UNE 60617",
+    ax.text((px0+px1)/2, py1-6.5, "IEC / UNE 60617",
             ha="center", fontsize=7.5, color="#888", style="italic")
 
     sym_items = [
-        ("Transformador de potencia",      lambda x,y: _u_xfmr(ax,x,y,INK,0.75)),
-        ("Transformador de corriente (TC)", lambda x,y: _u_ct(ax,x,y,COL["R"],0.85)),
-        ("Transformador de tension (TP)",  lambda x,y: _u_vt(ax,x,y,COL["S"],0.85,False)),
-        ("Interruptor automatico",         lambda x,y: _u_breaker(ax,x,y,INK,0.85)),
-        ("Seccionador",                    lambda x,y: _u_disc(ax,x,y,INK,0.85)),
+        ("Transformador de potencia",      lambda x,y: _u_xfmr(ax,x,y,INK,0.72)),
+        ("Transformador de corriente (TC)",lambda x,y: _u_ct(ax,x,y,COL["R"],0.82)),
+        ("Transformador de tension (TP)",  lambda x,y: _u_vt(ax,x,y,COL["S"],0.82,False)),
+        ("Interruptor automatico",         lambda x,y: _u_breaker(ax,x,y,INK,0.82)),
+        ("Seccionador",                    lambda x,y: _u_disc(ax,x,y,INK,0.82)),
         ("Bloque de prueba",               lambda x,y: ax.add_patch(
-            Rectangle((x-3,y-1.8),6,3.6,fill=True,fc="#E8EFF7",ec="#444",lw=1.1))),
-        ("Medidor de energia",             lambda x,y: ax.add_patch(
+            Rectangle((x-3,y-1.8),6,3.6,fill=True,fc="#E8EFF7",ec="#444",lw=1.0))),
+        ("Medidor de energia (kWh)",       lambda x,y: ax.add_patch(
             Rectangle((x-3,y-1.8),6,3.6,fill=True,fc=INK,ec=INK))),
-        ("Barra / barraje",                lambda x,y: ax.plot([x-3,x+3],[y,y],color=INK,lw=3.5)),
-        ("Carga",                          lambda x,y: ax.add_patch(
+        ("Barra / barraje",                lambda x,y: ax.plot([x-3.5,x+3.5],[y,y],color=INK,lw=3.5)),
+        ("Carga (general)",                lambda x,y: ax.add_patch(
             Polygon([[x-2,y+2],[x+2,y+2],[x,y-2]],closed=True,fill=False,ec=INK,lw=1.6))),
     ]
-    sx = px0+8; tx = px0+15
-    item_ys = np.linspace(py1-10, py0+6, len(sym_items))
+    sx = px0+8; tx = px0+16
+    item_ys = np.linspace(py1-11, py0+6, len(sym_items))
     for (lbl, draw_sym), yy in zip(sym_items, item_ys):
         draw_sym(sx, yy)
         ax.text(tx, yy, lbl, ha="left", va="center", fontsize=8, color=INK)
