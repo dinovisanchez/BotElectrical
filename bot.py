@@ -1269,51 +1269,78 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
             elif tipo == "indirecta":
-                cfg["instalacion"] = "trafo"
-                ctx.user_data["esperando_kva"] = True
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                                    "  Escribe solo el número  ej: 50 o 150")
-                )
-            else:
-                kb = _kb([
-                    ("🔧  Transformador",  "trafo"),
-                    ("🏗  Barraje BT",    "barraje"),
-                ], "instalacion")
-                await q.edit_message_text(
-                    _header(n, cfg,
-                            "¿Punto de conexión?\n\n"
-                            "  🔧  Transformador  medida en secundario del trafo\n"
-                            "  🏗  Barraje BT    medida directo en la barra BT"),
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
+                if cfg.get("salida") == "conexiones":
+                    # Solo diagrama de conexiones — ir directo a RTC
+                    ctx.user_data["esperando_rel_tc"] = True
+                    await q.edit_message_text(
+                        _header(n, cfg, "¿Relación de los TCs?\n\n"
+                                        "  Formato primario/secundario  ej: 200/5")
+                    )
+                else:
+                    cfg["instalacion"] = "trafo"
+                    ctx.user_data["esperando_kva"] = True
+                    await q.edit_message_text(
+                        _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                        "  Escribe solo el número  ej: 50 o 150")
+                    )
+            else:  # semidirecta
+                if cfg.get("salida") == "conexiones":
+                    # Solo diagrama de conexiones — ir directo a RTC
+                    ctx.user_data["esperando_rel_tc"] = True
+                    await q.edit_message_text(
+                        _header(n, cfg, "¿Relación de los TCs?\n\n"
+                                        "  Formato primario/secundario  ej: 200/5")
+                    )
+                else:
+                    kb = _kb([
+                        ("🔧  Transformador",  "trafo"),
+                        ("🏗  Barraje BT",    "barraje"),
+                    ], "instalacion")
+                    await q.edit_message_text(
+                        _header(n, cfg,
+                                "¿Punto de conexión?\n\n"
+                                "  🔧  Transformador  medida en secundario del trafo\n"
+                                "  🏗  Barraje BT    medida directo en la barra BT"),
+                        reply_markup=InlineKeyboardMarkup(kb)
+                    )
 
     # ── Subtipo trifásica (indirecta) ─────────────────────────────────────────
     elif campo == "subtipo":
         cfg["sistema"] = val
         _adv()
-        cfg["instalacion"] = "trafo"
-        ctx.user_data["esperando_kva"] = True
-        await q.edit_message_text(
-            _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                            "  Escribe solo el número  ej: 50 o 150")
-        )
+        if cfg.get("salida") == "conexiones":
+            ctx.user_data["esperando_rel_tc"] = True
+            await q.edit_message_text(
+                _header(n, cfg, "¿Relación de los TCs?\n\n"
+                                "  Formato primario/secundario  ej: 200/5")
+            )
+        else:
+            cfg["instalacion"] = "trafo"
+            ctx.user_data["esperando_kva"] = True
+            await q.edit_message_text(
+                _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 50 o 150")
+            )
 
     # ── Conexión del medidor (directa) ────────────────────────────────────────
     elif campo == "conexion":
         cfg["conexion"] = val
         _adv()
-        kb = _kb([
-            ("🔧  Transformador",  "trafo"),
-            ("🏗  Barraje BT",    "barraje"),
-        ], "instalacion")
-        await q.edit_message_text(
-            _header(n, cfg,
-                    "¿Punto de conexión?\n\n"
-                    "  🔧  Transformador  medida en secundario del trafo\n"
-                    "  🏗  Barraje BT    medida directo en la barra BT"),
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        if cfg.get("salida") == "conexiones":
+            # Solo diagrama de conexiones — no necesita instalacion/trafo
+            await _kb_norma_q(q, cfg, n)
+        else:
+            kb = _kb([
+                ("🔧  Transformador",  "trafo"),
+                ("🏗  Barraje BT",    "barraje"),
+            ], "instalacion")
+            await q.edit_message_text(
+                _header(n, cfg,
+                        "¿Punto de conexión?\n\n"
+                        "  🔧  Transformador  medida en secundario del trafo\n"
+                        "  🏗  Barraje BT    medida directo en la barra BT"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
 
     # ── Instalación (directa/semidirecta) ────────────────────────────────────
     elif campo == "instalacion":
@@ -1723,6 +1750,9 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 _header(n, cfg, "¿Relación de los TPs?\n\n"
                                 "  Formato primario/secundario  ej: 13200/120")
             )
+        elif cfg.get("salida") == "conexiones":
+            # Solo conexiones — sin calibre de conductor
+            await _kb_norma_msg(update.message, cfg, n)
         else:
             ctx.user_data["esperando_calibre"] = True
             await update.message.reply_text(
@@ -1741,12 +1771,15 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cfg["rel_tp"] = rel
         ctx.user_data["cfg"] = cfg
         n += 1; ctx.user_data["paso_n"] = n
-        # Indirecta → protección (amp)
-        ctx.user_data["esperando_prot_amp_ind"] = True
-        await update.message.reply_text(
-            _header(n, cfg, "¿Amperios de la protección?\n\n"
-                            "  Escribe solo el número  ej: 100 o 60")
-        )
+        if cfg.get("salida") == "conexiones":
+            # Solo conexiones — sin protección ni calibre
+            await _kb_norma_msg(update.message, cfg, n)
+        else:
+            ctx.user_data["esperando_prot_amp_ind"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Amperios de la protección?\n\n"
+                                "  Escribe solo el número  ej: 100 o 60")
+            )
         return
 
     # ── Amperios protección indirecta ─────────────────────────────────────────
