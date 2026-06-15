@@ -724,13 +724,16 @@ async def _consulta_retie(update: Update, texto: str):
     try:
         tools = []
         if RETIE_STORE_NAME:
-            tools.append(
-                types.Tool(
-                    file_search=types.FileSearch(
-                        file_search_store_names=[RETIE_STORE_NAME]
-                    )
-                )
-            )
+            FileSearch = getattr(types, "FileSearch", None)
+            if FileSearch is not None:
+                try:
+                    tools.append(types.Tool(
+                        file_search=FileSearch(file_search_store_names=[RETIE_STORE_NAME])
+                    ))
+                except Exception as _te:
+                    log.warning(f"FileSearch tool error: {_te}")
+            else:
+                log.warning("types.FileSearch no disponible en esta versión de google-genai; continuando sin RAG indexado.")
 
         prompt = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA:\n{texto}"
 
@@ -797,10 +800,9 @@ async def _consulta_retie(update: Update, texto: str):
         respuesta = respuesta.replace("**", "").replace("__", "")
         respuesta = re.sub(r"\[([^\[\]]+)\]\([^\(\)]*\)", r"\1", respuesta)
 
-        if not RETIE_STORE_NAME:
+        if not tools:
             respuesta += (
-                "\n\n⚠️ [Sin acceso al documento RETIE indexado. "
-                "Respuesta basada en datos memorizados — verificar con norma oficial.]"
+                "\n\n⚠️ [Respuesta basada en conocimiento memorizados — verificar con norma oficial.]"
             )
 
         await _enviar_largo(update, respuesta)
