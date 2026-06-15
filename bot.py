@@ -1258,14 +1258,14 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             tipo = cfg["tipo"]
             if tipo == "directa" and cfg.get("salida") in ("conexiones", "ambos"):
                 kb = _kb([
-                    ("↔  Simétrica",   "simetrica"),
-                    ("↕  Asimétrica",  "asimetrica"),
+                    ("Simétrica — neutro CENTRO",  "simetrica"),
+                    ("Asimétrica — neutro FINAL",  "asimetrica"),
                 ], "conexion")
                 await q.edit_message_text(
                     _header(n, cfg,
-                            "¿Conexión del medidor?\n\n"
-                            "  ↔  Simétrica   I y V al mismo lado\n"
-                            "  ↕  Asimétrica  I y V en lados opuestos"),
+                            "¿Patrón de la bornera del medidor?\n\n"
+                            "  Simétrica   [F|N|N|F] — neutro en el CENTRO\n"
+                            "  Asimétrica  [F|F|N|N] — neutro al FINAL"),
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
             elif tipo == "indirecta":

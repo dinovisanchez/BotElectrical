@@ -836,15 +836,28 @@ def _draw_directa_retie(cfg, out_path):
             ha="left", va="center", fontsize=7.5, fontweight="bold",
             color="#555", rotation=90)
 
-    # ── Nota explicativa ────────────────────────────────────────────────────
-    if conexion == "simetrica":
-        nota = ("Bornera: [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]  ·  "
-                "Patron ESPEJO — tap V en borne 1 (acometida)")
-    else:
-        nota = ("Bornera: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]  ·  "
-                "Patron SECUENCIAL — tap V en borne 2 (carga)")
+    # ── Nota explicativa — patron de bornera segun sistema ──────────────────
+    if sistema == "mono":
+        if conexion == "simetrica":
+            nota = "Bornera: [1:F-ent | 2:N-sal | 3:N-ent | 4:F-sal]  ·  ESPEJO — neutro en el CENTRO"
+        else:
+            nota = "Bornera: [1:F-ent | 2:F-sal | 3:N-ent | 4:N-sal]  ·  SECUENCIAL — neutro al FINAL"
+    elif sistema == "bifasico":
+        if conexion == "simetrica":
+            nota = "Bornera: [1:R-ent | 2:N-sal | 3:N-ent | 4:R-sal | 5:S-ent | 6:S-sal]  ·  ESPEJO"
+        else:
+            nota = "Bornera: [1:R-ent | 2:R-sal | 3:S-ent | 4:S-sal | 5:N-ent | 6:N-sal]  ·  SECUENCIAL"
+    elif sistema == "tri4h":
+        if conexion == "simetrica":
+            nota = ("Bornera 8 bornes: [1:R-ent | 2:S-ent | 3:T-ent | 4:N-ent | 5:N-sal | 6:T-sal | 7:S-sal | 8:R-sal]"
+                    "  ·  ESPEJO — neutro en el CENTRO (bornes 4-5)")
+        else:
+            nota = ("Bornera 8 bornes: [1:R-ent | 2:R-sal | 3:S-ent | 4:S-sal | 5:T-ent | 6:T-sal | 7:N-ent | 8:N-sal]"
+                    "  ·  SECUENCIAL — neutro al FINAL (bornes 7-8)")
+    else:  # tri3h Aron
+        nota = "Bornera Aron: [1:R-ent | 2:R-sal | 3:S-ref | 4:S-ref | 5:T-ent | 6:T-sal]  ·  2 elementos"
     ax.text(W/2, Y_N - 2.5, nota, ha="center", va="top",
-            fontsize=7, color="#666", style="italic")
+            fontsize=6.5, color="#444", style="italic")
 
     # Notas de instalacion
     notas = []
