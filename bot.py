@@ -808,20 +808,30 @@ async def _consulta_retie(update: Update, texto: str):
         await _enviar_largo(update, respuesta)
 
     except Exception as e:
-        log.error(f"Error Gemini: {e}")
+        log.error(f"Error Gemini [{type(e).__name__}]: {e}")
         msg = str(e)
         if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
             await update.message.reply_text(
-                "⏳ El servicio normativo está saturado en este momento.\n"
-                "Por favor intenta de nuevo en unos segundos."
+                "⏳ El servicio normativo está saturado. Intenta de nuevo en unos segundos."
+            )
+        elif "401" in msg or "API_KEY" in msg.upper() or "invalid api key" in msg.lower() or "api key" in msg.lower():
+            await update.message.reply_text(
+                "⚠️ Clave API de Gemini inválida o no configurada.\n"
+                "Verifica la variable GEMINI_API_KEY en Render."
+            )
+        elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
+            await update.message.reply_text(
+                "⏳ Cuota de Gemini agotada. Intenta en unos minutos."
+            )
+        elif "404" in msg or "not found" in msg.lower():
+            await update.message.reply_text(
+                "⚠️ Modelo Gemini no disponible. Revisa GEMINI_MODEL en el código."
             )
         else:
-            # UX8: no exponer errores técnicos crudos al usuario
             await update.message.reply_text(
-                "⚠️ Ocurrió un error al consultar la normativa.\n\n"
-                "Para diagramas usa /menu. Si el error persiste, intenta más tarde."
+                f"⚠️ Error al consultar normativa: {type(e).__name__}\n"
+                "Para diagramas usa /menu."
             )
-            log.error(f"Detalle error Gemini: {e}")
 
 
 async def _procesar_texto(update, texto):
