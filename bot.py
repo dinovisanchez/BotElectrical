@@ -83,6 +83,38 @@ def _gs_sync(user) -> tuple:
         log.error(f"Error registrando usuario: {e}")
     return "Pendiente", nombre, True
 
+def _gs_set_estado(uid: str, estado: str):
+    """Sync: actualiza Estado de un usuario en la hoja. Devuelve (ok, nombre)."""
+    client = _gs_get_client()
+    if client is None:
+        return False, None
+    try:
+        sheet   = client.open_by_key(SHEET_ID).sheet1
+        col_ids = [str(x) for x in sheet.col_values(1)]  # columna A: Telegram_ID
+        try:
+            idx     = col_ids.index(str(uid))  # 0-based; idx=0 es la cabecera
+            row_num = idx + 1                  # 1-based
+        except ValueError:
+            return False, None
+        nombre = str(sheet.cell(row_num, 2).value or "Usuario")
+        sheet.update_cell(row_num, 5, estado)
+        _user_cache[str(uid)] = {"estado": estado, "nombre": nombre, "ts": time.time()}
+        return True, nombre
+    except Exception as e:
+        log.error(f"Error _gs_set_estado: {e}")
+        return False, None
+
+def _gs_get_all_users():
+    """Sync: devuelve todos los registros de la hoja como lista de dicts."""
+    client = _gs_get_client()
+    if client is None:
+        return []
+    try:
+        return client.open_by_key(SHEET_ID).sheet1.get_all_records()
+    except Exception as e:
+        log.error(f"Error _gs_get_all_users: {e}")
+        return []
+
 async def _check_user(user, force: bool = False) -> tuple:
     """Async wrapper con caché. Devuelve (estado, nombre, es_nuevo)."""
     uid = str(user.id)
@@ -105,6 +137,8 @@ async def _access_ok(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
     if not user:
         return True
+    if ADMIN_TG_ID and user.id == ADMIN_TG_ID:
+        return True  # admin siempre tiene acceso completo
     estado, nombre, _ = await _check_user(user)
     if estado == "Inactivo":
         msg = (
@@ -772,14 +806,20 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if estado == "Pendiente":
         if es_nuevo and ADMIN_TG_ID:
             try:
+                fecha = time.strftime("%Y-%m-%d %H:%M")
                 await ctx.bot.send_message(
                     ADMIN_TG_ID,
                     f"🆕 Nuevo usuario registrado\n"
                     f"─────────────────────────\n"
                     f"  Nombre:    {nombre}\n"
                     f"  ID:        {user.id}\n"
-                    f"  Username:  @{user.username or '—'}\n\n"
-                    f"Actívalo en Google Sheets → columna Estado: Activo"
+                    f"  Username:  @{user.username or '—'}\n"
+                    f"  Fecha:     {fecha}\n\n"
+                    f"Activa o rechaza su acceso:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✅ Activar",  callback_data=f"adm_ok:{user.id}"),
+                        InlineKeyboardButton("❌ Rechazar", callback_data=f"adm_no:{user.id}"),
+                    ]])
                 )
             except Exception:
                 pass
@@ -797,9 +837,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"⚡ Bienvenido, {nombre}!\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "¿En qué te ayudo hoy?\n\n"
-        "  📐 /menu        Configurar un diagrama\n"
-        "  🔍 /clasificar  Tipo de punto 1–5\n"
-        "  💬 Escríbeme   Consulta normativa\n\n"
+        "  📐 /menu       Configurar un diagrama\n"
+        "  💬 Escríbeme  Consulta normativa\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         reply_markup=REPLY_KEYBOARD
     )
@@ -1387,6 +1426,44 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["burden_paso"] = None
         await q.edit_message_text(_calcular_burden(bd))
 
+    # ── Admin — activar / desactivar usuarios ────────────────────────────────
+    elif campo in ("adm_ok", "adm_no"):
+        if not ADMIN_TG_ID or update.effective_user.id != ADMIN_TG_ID:
+            await q.answer("⛔ Sin permisos de administrador.", show_alert=True)
+            return
+        uid          = val
+        nuevo_estado = "Activo" if campo == "adm_ok" else "Inactivo"
+        loop = asyncio.get_event_loop()
+        ok, nombre = await loop.run_in_executor(
+            None, lambda: _gs_set_estado(uid, nuevo_estado)
+        )
+        if not ok:
+            await q.answer("⚠️ Usuario no encontrado en el registro.", show_alert=True)
+            return
+        icono = "✅" if nuevo_estado == "Activo" else "🔴"
+        try:
+            old_txt = q.message.text or ""
+            await q.edit_message_text(old_txt + f"\n\n{icono} {nombre}  →  {nuevo_estado}")
+        except Exception:
+            await q.answer(f"{icono} {nombre} → {nuevo_estado}", show_alert=True)
+        try:
+            if nuevo_estado == "Activo":
+                msg_u = (
+                    f"⚡ ¡Tu acceso fue activado, {nombre}!\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "Ya puedes usar BotElectric.\n"
+                    "Escribe /start para comenzar."
+                )
+            else:
+                msg_u = (
+                    f"⚠️ Hola, {nombre}.\n\n"
+                    "Tu acceso al bot ha sido suspendido.\n"
+                    "Contacta al administrador si crees que es un error."
+                )
+            await ctx.bot.send_message(int(uid), msg_u)
+        except Exception as e:
+            log.warning(f"No se pudo notificar al usuario {uid}: {e}")
+
     # ── Norma ─────────────────────────────────────────────────────────────────
     elif campo == "norma":
         cfg["norma"] = val
@@ -1713,6 +1790,46 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "¿Quieres generar el diagrama correcto? → /menu"
     )
 
+# ── /admin — Panel de gestión de usuarios (solo admin) ───────────────────────
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not ADMIN_TG_ID or user.id != ADMIN_TG_ID:
+        return  # ignorar silenciosamente
+    loop = asyncio.get_event_loop()
+    rows = await loop.run_in_executor(None, _gs_get_all_users)
+    if not rows:
+        await update.message.reply_text(
+            "👤 Panel de administración\n"
+            "─────────────────────────\n\n"
+            "No hay usuarios registrados aún."
+        )
+        return
+    lines   = ["👤 Panel de administración", "─────────────────────────", ""]
+    kb_rows = []
+    for row in rows[:20]:
+        uid    = str(row.get("Telegram_ID", ""))
+        nombre = str(row.get("Nombre",      "—"))
+        uname  = str(row.get("Username",    "—"))
+        estado = str(row.get("Estado",      "Pendiente"))
+        fecha  = str(row.get("Fecha_Registro", "—"))
+        icono  = "✅" if estado == "Activo" else ("⏳" if estado == "Pendiente" else "🔴")
+        lines.append(f"{icono} {nombre}  {uname}")
+        lines.append(f"   {estado}  ·  {fecha}")
+        lines.append("")
+        btns = []
+        if estado != "Activo":
+            btns.append(InlineKeyboardButton("✅ Activar",     callback_data=f"adm_ok:{uid}"))
+        if estado != "Inactivo":
+            btns.append(InlineKeyboardButton("🔴 Desactivar", callback_data=f"adm_no:{uid}"))
+        if btns:
+            kb_rows.append(btns)
+    if len(rows) > 20:
+        lines.append(f"⚠️ Mostrando 20 de {len(rows)} usuarios.")
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None
+    )
+
 # ── Arranque ──────────────────────────────────────────────────────────────────
 def main():
     token = os.environ.get("BOT_TOKEN")
@@ -1727,6 +1844,7 @@ def main():
     app.add_handler(CommandHandler("diagrama",   cmd_diagrama))
     app.add_handler(CommandHandler("clasificar", cmd_clasificar))
     app.add_handler(CommandHandler("cancelar",   cmd_cancelar))
+    app.add_handler(CommandHandler("admin",      cmd_admin))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
