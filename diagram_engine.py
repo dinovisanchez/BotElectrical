@@ -850,19 +850,21 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     terms = meter_terminals(sistema, norma); n = len(terms)
     cur_ph = current_phases(sistema); all_ph = phases_of(sistema)
 
-    # Canvas: más ancho para Aron con respaldo, más alto con respaldo
-    fig_w = 22 if (respaldo and sistema == "tri3h") else 18
-    fig_h = 22 if respaldo else 11
+    # Canvas: más ancho para respaldo (lado a lado), ylim reducido respecto al
+    # layout apilado anterior porque ambos medidores comparten la misma altura.
+    fig_w = 26 if respaldo else 18
+    fig_h = 15 if respaldo else 11
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    xlim  = 210 if (respaldo and sistema == "tri3h") else 190
-    ylim  = 240 if respaldo else 116
+    xlim  = 240 if respaldo else 190
+    ylim  = 175 if respaldo else 116
     ax.set_xlim(0, xlim); ax.set_ylim(0, ylim); ax.axis("off")
 
     titulo = f"DIAGRAMA DE CONEXIONES   ·   MEDIDA {tipo.upper()}   ·   {SIS_TXT[sistema]}"
     if respaldo: titulo += "   ·   PRINCIPAL + CHEQUEO"
-    ty_titulo = 236 if respaldo else 112
-    ty_sub    = 231 if respaldo else 107.5
-    ax.text(95, ty_titulo, titulo, ha="center", va="center", fontsize=15, fontweight="bold", color=INK)
+    ty_titulo = 171 if respaldo else 112
+    ty_sub    = 167 if respaldo else 107.5
+    ax.text(xlim/2, ty_titulo, titulo, ha="center", va="center",
+            fontsize=12 if respaldo else 15, fontweight="bold", color=INK)
     sub = f"Norma {norma}"
     if rel_tc: sub += f"      RTC {rel_tc}"
     if rel_tp: sub += f"      RTP {rel_tp}"
@@ -870,10 +872,10 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     if cfg.get("seccionamiento") or cfg.get("interruptor"):
         amp = cfg.get("interruptor") or cfg.get("tc_amp","")
         if amp: sub += f"      Seccionador {amp}" + ("" if "A" in str(amp) else " A")
-    ax.text(95, ty_sub, sub, ha="center", va="center", fontsize=10.5, color="#666")
+    ax.text(xlim/2, ty_sub, sub, ha="center", va="center", fontsize=10.5, color="#666")
 
     # ---------- PRIMARIO (ACOMETIDA) ----------
-    base_y = 226 if respaldo else 104
+    base_y = 149 if respaldo else 104
     x0,x1=6,40; dy=8
     y_ph={ph:base_y-i*dy for i,ph in enumerate(all_ph)}
     y_N=base_y-len(all_ph)*dy
@@ -904,7 +906,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 
     # ---------- BLOQUE DE PRUEBA ----------
     bx0,bx1=76,104
-    by1 = 226 if respaldo else 98
+    by1 = 149 if respaldo else 98
     step=min(8.4,(by1-12)/max(n,1))
     by0=by1-(n*step)-4
     ax.add_patch(FancyBboxPatch((bx0,by0),bx1-bx0,by1-by0,boxstyle="round,pad=0.5,rounding_size=2.5",
@@ -1006,20 +1008,20 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 
     # Posición vertical: el medidor empieza en la misma Y que el bloque (by1-step*0.7)
     meter_top = by1 - step*0.7
+    mx_w = 32   # ancho de medidor
     if not respaldo:
-        m_y0, mxr0 = draw_meter(132, 164, meter_top, "MEDIDOR")
+        mx0 = 132; mx1 = mx0 + mx_w
+        m_y0, mxr0 = draw_meter(mx0, mx1, meter_top, "MEDIDOR")
         draw_meter_bridges(m_y0, mxr0)
         meters = [(m_y0, mxr0)]
     else:
-        n_m     = len(meter_order)
-        meter_h = n_m * step + 18
-        gap     = step * 2
-        top_princ = meter_top
-        top_cheq  = top_princ - meter_h - gap
-        mx0 = 136 if sistema == "tri3h" else 132
-        mx1 = mx0 + 32
-        m_yp, mxrp = draw_meter(mx0, mx1, top_princ, "PRINCIPAL")
-        m_yc, mxrc = draw_meter(mx0, mx1, top_cheq,  "CHEQUEO")
+        # Lado a lado: PRINCIPAL izquierda, CHEQUEO derecha
+        gap_m = 8   # separacion entre los dos medidores
+        mx0_p = 124; mx1_p = mx0_p + mx_w   # PRINCIPAL: 124-156
+        mx0_c = mx1_p + gap_m               # CHEQUEO: 164-196
+        mx1_c = mx0_c + mx_w
+        m_yp, mxrp = draw_meter(mx0_p, mx1_p, meter_top, "PRINCIPAL")
+        m_yc, mxrc = draw_meter(mx0_c, mx1_c, meter_top, "CHEQUEO")
         draw_meter_bridges(m_yp, mxrp)
         draw_meter_bridges(m_yc, mxrc)
         meters = [(m_yp, mxrp), (m_yc, mxrc)]
@@ -1089,10 +1091,21 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     #   vertical hasta Y del borne en el medidor,
     #   horizontal hasta mxr (medidor).
     # Columnas xm separadas para no solaparse (una por borne del order)
-    xm_cols = np.linspace(106, 128, len(order))
-    xm_map  = {tlbl: xm_cols[i] for i,tlbl in enumerate(order)}
+    # Columnas de ruteo separadas por medidor para evitar solapamiento
+    if not respaldo:
+        xm_cols_p = np.linspace(106, 120, len(order))
+        xm_map_p  = {tlbl: xm_cols_p[i] for i, tlbl in enumerate(order)}
+        meter_routing = [(meters[0], xm_map_p, 1.8)]
+    else:
+        # PRINCIPAL: columnas 106-121 (entre bloque bx1=104 y PRINCIPAL en 124)
+        xm_cols_p = np.linspace(106, 121, len(order))
+        xm_map_p  = {tlbl: xm_cols_p[i] for i, tlbl in enumerate(order)}
+        # CHEQUEO: columnas 107.5-122.5, offset +1.5 para que sean visualmente distintos
+        xm_cols_c = np.linspace(107.5, 122.5, len(order))
+        xm_map_c  = {tlbl: xm_cols_c[i] for i, tlbl in enumerate(order)}
+        meter_routing = [(meters[0], xm_map_p, 1.8), (meters[1], xm_map_c, 1.5)]
 
-    for mi, (m_y, mxr) in enumerate(meters):
+    for (m_y, mxr), xm_map, lw in meter_routing:
         for tlbl in order:
             if tlbl not in m_y or tlbl not in row:
                 continue
@@ -1100,10 +1113,9 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             if sistema == "tri3h" and tlbl == "3":
                 continue
             yb = row[tlbl][0]   # Y en el bloque
-            ym = m_y[tlbl]      # Y en el medidor (orden físico)
+            ym = m_y[tlbl]      # Y en el medidor (orden fisico)
             ph = row[tlbl][1]; c = COL[ph]
             ls = (0,(6,3)) if ph=="N" else "-"
-            lw = 1.7
             xm = xm_map[tlbl]
             ax.plot([xR, xm],[yb, yb], color=c, lw=lw, ls=ls)   # horizontal desde bloque
             ax.plot([xm, xm],[yb, ym], color=c, lw=lw, ls=ls)   # vertical
@@ -1159,7 +1171,8 @@ def _draw_semi_indirecta_retie(cfg, out_path):
                     ha="left",va="center",style="italic")
 
     # ---------- SALIDA A CARGA (linea de potencia, solo fases de corriente) ----------
-    cx0 = 164
+    # cx0: borde derecho del medidor mas a la derecha
+    cx0 = 200 if respaldo else 164
     out_y = {}
     for i, ph in enumerate(cur_ph):
         yy = y_ph[ph]
@@ -1207,219 +1220,226 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 # ============================================================
 def draw_unifilar_generico(cfg, out_path):
     """
-    DIRECTA / SEMIDIRECTA (con barraje):
-        RED -> [TC/TP si semidirecta] -> Medidor -> Interruptor -> CARGA
-
-    DIRECTA / SEMIDIRECTA (con transformador):
-        RED -> Transformador(es) -> [TC si semidirecta] -> Medidor -> Interruptor -> CARGA
-
-    INDIRECTA (siempre con transformador despues de la medida):
-        RED (MT) -> TC+TP (MT) -> Transformador(es) -> Medidor -> Interruptor -> CARGA
-        (TC y TP se ubican en MEDIA TENSION, antes del/los transformador(es); no se dibuja barraje BT)
+    Flujo vertical: RED -> seccionador/cortacircuito -> trafo -> barra BT
+                         -> (TC si semi) -> Bloque Prueba -> Medidor(es) -> CARGA
+    Panel derecho: plano de simbologia IEC/UNE 60617.
     """
-    tipo      = cfg.get("tipo", "directa")
-    sistema   = cfg.get("sistema", "tri4h")
-    norma     = cfg.get("norma", "RA8")
-    rel_tc    = cfg.get("rel_tc", "")
-    rel_tp    = cfg.get("rel_tp", "")
+    tipo        = cfg.get("tipo", "directa")
+    sistema     = cfg.get("sistema", "tri4h")
+    norma       = cfg.get("norma", "RA8")
+    rel_tc      = cfg.get("rel_tc", "")
+    rel_tp      = cfg.get("rel_tp", "")
     instalacion = cfg.get("instalacion", "barraje")
+    respaldo    = bool(cfg.get("respaldo", False))
+    kva         = cfg.get("trafo_kva", "")
+    trafo_uso   = cfg.get("trafo_uso", "")
+    trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
+    interruptor = cfg.get("interruptor", "")
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ax.set_xlim(0, 100); ax.set_ylim(0, 85)
+    fig, ax = plt.subplots(figsize=(13, 11))
+    W, H = 130, 120
+    ax.set_xlim(0, W); ax.set_ylim(0, H)
     ax.set_aspect("equal"); ax.axis("off")
 
-    ax.text(50, 82, "DIAGRAMA UNIFILAR DE MEDIDA", ha="center", fontsize=14,
-            fontweight="bold", color=INK)
-    sub = f"Medida {tipo} · {SIS_TXT[sistema].split(' (')[0].title()} · Norma {norma}"
-    ax.text(50, 78.5, sub, ha="center", fontsize=9.5, color="#666")
+    # --- Titulo ---
+    ax.text(W/2, H-2, "DIAGRAMA UNIFILAR DE MEDIDA",
+            ha="center", fontsize=14, fontweight="bold", color=INK)
+    tipo_txt = {"directa":"Directa","semidirecta":"Semidirecta","indirecta":"Indirecta"}[tipo]
+    sis_short = SIS_TXT[sistema].split(" (")[0].title()
+    sub_parts = [f"Medida {tipo_txt}", sis_short, f"Norma {norma}"]
+    if rel_tc:  sub_parts.append(f"RTC {rel_tc}")
+    if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
+    if respaldo: sub_parts.append("Principal + Respaldo")
+    ax.text(W/2, H-6, "  .  ".join(sub_parts),
+            ha="center", fontsize=9, color="#666")
 
-    xc = 32
-    def vline(y1, y2, lw=2.6): ax.plot([xc, xc], [y1, y2], color=INK, lw=lw, zorder=2)
-    def busbar(yy, label, extra=""):
-        ax.plot([xc-13, xc+13], [yy, yy], color=INK, lw=4.5, zorder=2)
-        ax.text(xc-15, yy, label, ha="right", va="center", fontsize=9.5, fontweight="bold", color=INK)
-        if extra: ax.text(xc+15, yy, extra, ha="left", va="center", fontsize=8, color="#777")
+    xc = 48   # eje del unifilar
+    y  = H - 12  # inicio del flow (debajo del titulo)
 
-    y = 70
-    red_label = "RED (M.T.)" if tipo == "indirecta" else "RED"
-    busbar(y, red_label, "")
-    top = y
-    y -= 4; vline(top, y)
+    def vline(ya, yb, lw=2.6):
+        ax.plot([xc, xc], [ya, yb], color=INK, lw=lw, zorder=2)
 
-    # ============================================================
-    # INDIRECTA: TC y TP se ubican en MT, ANTES del transformador
-    # ============================================================
+    def node_dot(yy):
+        ax.add_patch(Circle((xc, yy), 0.85, fc=INK, ec=INK, zorder=4))
+
+    def busbar(yy, label, sub=""):
+        ax.plot([xc-16, xc+16], [yy, yy], color=INK, lw=4.5, zorder=2)
+        ax.text(xc-18, yy, label, ha="right", va="center",
+                fontsize=9.5, fontweight="bold", color=INK)
+        if sub:
+            ax.text(xc+18, yy, sub, ha="left", va="center",
+                    fontsize=7.5, color="#666")
+
+    # -- RED / Barra principal --
+    red_lbl = "RED (M.T.)" if tipo == "indirecta" else "RED (B.T.)"
+    busbar(y, red_lbl)
+    vline(y, y-6); y -= 6
+
+    # -- INDIRECTA: TC + TP en MT, antes del trafo --
     if tipo == "indirecta":
-        nodo = y
-        ax.add_patch(Circle((xc, nodo), 0.8, fc=INK, ec=INK, zorder=4))
+        node_dot(y)
+        tc_y = y - 4
+        _u_ct(ax, xc, tc_y, COL["R"], 1.0)
+        ax.text(xc+6, tc_y, f"TC (M.T.)\n{rel_tc or '---'}",
+                ha="left", va="center", fontsize=9, color=COL["R"], fontweight="bold")
+        vline(y, tc_y - 5)
 
-        # Seccionador ANTES de TC/TP (si aplica)
-        sec_pos = cfg.get("sec_pos", "")  # "antes" | "despues" | ""
-        if sec_pos == "antes":
-            _u_disc(ax, xc, nodo-2.5, INK, 0.9)
-            ax.text(xc+4, nodo-2.5, "Seccionador\n(antes TC/TP)",
-                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
-            y = nodo - 5; vline(nodo, y); nodo = y
-            ax.add_patch(Circle((xc, nodo), 0.8, fc=INK, ec=INK, zorder=4))
+        # TP en paralelo, a la izquierda
+        tp_node_y = y - 2
+        tpx = xc - 18
+        tpy = tc_y - 1
+        ax.plot([xc, tpx], [tp_node_y, tp_node_y], color=COL["S"], lw=1.6)
+        ax.plot([tpx, tpx], [tp_node_y, tpy - 3], color=COL["S"], lw=1.6)
+        _u_vt(ax, tpx, tpy - 3, COL["S"], 0.9, ground=True)
+        ax.text(tpx - 2, tpy - 3, f"TP (M.T.)\n{rel_tp or '---'}",
+                ha="right", va="center", fontsize=8.5, color=COL["S"], fontweight="bold")
+        y = tc_y - 6
 
-        # TC en serie en MT (justo bajo la red / bajo el seccionador)
-        _u_ct(ax, xc, nodo-3.5, COL["R"], 0.85)
-        ax.text(xc+4, nodo-3.5, f"TC (MT)\n{rel_tc or '—'}", ha="left", va="center",
-                fontsize=8, color=COL["R"], fontweight="bold")
-
-        # TP en paralelo, tomado mas abajo
-        tpx = xc - 13
-        tpy = nodo - 9
-        ax.plot([xc, xc], [nodo-6, tpy], color=COL["S"], lw=1.6)
-        ax.plot([xc, tpx], [tpy, tpy], color=COL["S"], lw=1.6)
-        _u_vt(ax, tpx, tpy-2.3, COL["S"], 0.85, ground=True)
-        ax.text(tpx-2.2, tpy, f"TP (MT)\n{rel_tp or '—'}", ha="right", va="center",
-                fontsize=7.5, color=COL["S"], fontweight="bold")
-
-        y = nodo - 9.5
-        vline(nodo, y)
-
-        # Seccionador DESPUES de TC/TP (si aplica)
-        if sec_pos == "despues":
-            _u_disc(ax, xc, y-2.5, INK, 0.9)
-            ax.text(xc+4, y-2.5, "Seccionador\n(después TC/TP)",
-                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
-            y2 = y - 5; vline(y, y2); y = y2
-
-        # Medidor a la izquierda, debajo del nivel del TP, con señales desde TC y TP en MT
-        my = tpy - 7
-        _u_meter(ax, 2, my, 18, 9)
-        ax.annotate("", xy=(20, my+1.2), xytext=(xc-1.2, nodo-3.5),
-                     arrowprops=dict(arrowstyle="-|>", color=COL["R"], ls=":", lw=1.3))
-        ax.annotate("", xy=(20, my-1.2), xytext=(tpx, tpy-1.0),
-                     arrowprops=dict(arrowstyle="-|>", color=COL["S"], ls=":", lw=1.3))
-        ax.text(11, my-6.5, "señales de\nmedida (I, V)", ha="center", va="top", fontsize=7, color="#888", style="italic")
-
-    # ============================================================
-    # Transformador(es) - DESPUES de TC/TP en indirecta;
-    # primer elemento si es directa/semidirecta con instalacion=trafo
-    # SEMIDIRECTA: seccionador SIEMPRE antes del trafo (fijo, sin preguntar)
-    # ============================================================
+    # -- TRAFO (instalacion=trafo) --
     if instalacion == "trafo":
-        # Seccionador fijo antes del trafo para semidirecta
         if tipo == "semidirecta":
-            _u_disc(ax, xc, y-2.5, INK, 0.9)
-            ax.text(xc+4, y-2.5, "Seccionador",
-                    ha="left", va="center", fontsize=7.5, color=INK, fontweight="bold")
-            y2 = y - 5; vline(y, y2); y = y2
-        kva   = cfg.get("trafo_kva", "")
-        ttipo = cfg.get("trafo_tipo", "trifasico")
-        uso   = cfg.get("trafo_uso", "")
-        n_tr  = int(cfg.get("n_trafos", 1) or 1)
-        lista_kva = cfg.get("trafo_kva_lista", [kva] if kva else [])
+            # Seccionador antes del trafo
+            _u_disc(ax, xc, y - 3, INK, 1.0)
+            ax.text(xc+6, y-3, "Seccionador", ha="left", va="center",
+                    fontsize=9, color=INK, fontweight="bold")
+            vline(y, y - 6); y -= 6
 
-        if n_tr > 1 and lista_kva:
-            ax.text(xc+10, y+1.2, f"{n_tr} Transformadores\nen paralelo", ha="left", fontsize=7.5, color="#666")
-            spread = 8
-            xs = [xc + (i-(n_tr-1)/2)*spread for i in range(n_tr)]
-            for x, kv in zip(xs, lista_kva):
-                ax.plot([xc, x], [y, y-1.5], color=INK, lw=1.4)
-                _u_xfmr(ax, x, y-5, INK, 0.9)
-                ax.text(x, y-9, f"{kv} kVA", ha="center", fontsize=7.5, color=INK, fontweight="bold")
-                ax.plot([x, xc], [y-8, y-10.5], color=INK, lw=1.4)
-            y -= 11.5
-            vline(y+1, y)
-        else:
-            _u_xfmr(ax, xc, y-3.5, INK, 1.2)
-            txt_uso = f" ({uso})" if uso else ""
-            etiqueta = f"Trafo {ttipo}{txt_uso}"
-            if kva: etiqueta += f"\n{kva} kVA"
-            ax.text(xc+6, y-3.5, etiqueta, ha="left", va="center", fontsize=8, color=INK, fontweight="bold")
-            y -= 7
-            vline(y+3.5, y)
+        trafo_y = y - 5
+        _u_xfmr(ax, xc, trafo_y, INK, 1.3)
+        lbl_parts = [f"Trafo {trafo_tipo}"]
+        if trafo_uso: lbl_parts.append(f"({trafo_uso})")
+        if kva: lbl_parts.append(f"{kva} kVA")
+        ax.text(xc+7, trafo_y, "\n".join(lbl_parts),
+                ha="left", va="center", fontsize=9, color=INK, fontweight="bold")
+        vline(y, trafo_y - 5); y = trafo_y - 6
+
+        # Barra BT despues del trafo (solo para semidirecta/directa)
+        if tipo != "indirecta":
+            busbar(y, "BARRA B.T.")
+            vline(y, y - 5); y -= 5
+
     elif tipo != "indirecta":
-        ax.text(xc+4, y+1.5, "Conectado a barraje\n(sin transformador)", ha="left", va="center", fontsize=8, color="#666")
+        ax.text(xc+6, y+1, "Conectado a barraje BT",
+                ha="left", va="center", fontsize=8, color="#666")
 
-    # ============================================================
-    # DIRECTA/SEMIDIRECTA: TC/TP van aqui (en BT, despues del trafo o barraje)
-    # ============================================================
-    if tipo != "indirecta":
-        nodo = y
-        ax.add_patch(Circle((xc, nodo), 0.8, fc=INK, ec=INK, zorder=4))
+    # -- TC en BT (solo semidirecta) --
+    if tipo == "semidirecta":
+        node_dot(y)
+        tc_bt_y = y - 5
+        tc_label = rel_tc or cfg.get("tc_amp", "---")
+        _u_ct(ax, xc, tc_bt_y, COL["R"], 1.0)
+        ax.text(xc+6, tc_bt_y, f"TC (B.T.)\n{tc_label}",
+                ha="left", va="center", fontsize=9, color=COL["R"], fontweight="bold")
+        vline(y, tc_bt_y - 5); y = tc_bt_y - 6
 
-        if tipo == "semidirecta":
-            tc_label = rel_tc or (f"{cfg.get('tc_amp','—')} A" if cfg.get("tc_amp") else "—")
-            _u_ct(ax, xc, nodo-4.5, COL["R"], 0.9)
-            ax.text(xc+4, nodo-4.5, f"TC\n{tc_label}", ha="left", va="center",
-                    fontsize=8, color=COL["R"], fontweight="bold")
-            y2 = nodo - 8
-        else:
-            y2 = nodo - 3.5
-        vline(nodo, y2)
-        y = y2
+    # -- Bloque de Prueba --
+    bp_h = 10; bp_w = 18
+    bp_top = y
+    bp_bot = y - bp_h
+    ax.add_patch(FancyBboxPatch((xc-bp_w/2, bp_bot), bp_w, bp_h,
+                 boxstyle="round,pad=0.5,rounding_size=1.5",
+                 fill=True, fc="#E8EFF7", ec="#444", lw=1.4, zorder=2))
+    ax.text(xc, bp_bot + bp_h/2, "BLOQUE DE\nPRUEBA",
+            ha="center", va="center", fontsize=8, color="#222", fontweight="bold")
+    vline(bp_top, bp_top)  # conexion con elemento anterior (no-op pero mantiene zorder)
+    vline(bp_top, bp_top)
+    y = bp_bot - 4
+    vline(bp_bot, y)
 
-        my = nodo - 4.5
-        _u_meter(ax, 3, my, 20, 10)
-        ax.annotate("", xy=(23, my+1.3), xytext=(xc-1.2, nodo-4.5),
-                     arrowprops=dict(arrowstyle="-|>", color=COL["R"], ls=":", lw=1.3))
-        ax.text(13, my-7, "señales de\nmedida (I)" if tipo=="semidirecta" else "medida\ndirecta",
-                ha="center", va="top", fontsize=7, color="#888", style="italic")
+    # -- Medidor(es) --
+    med_h = 11; med_w = 22
 
-    tc_pos = cfg.get("tc_pos")
+    def draw_unif_meter(mx_c, my_top, label):
+        """Dibuja caja de medidor centrada en mx_c."""
+        mx0 = mx_c - med_w/2; mx1 = mx_c + med_w/2
+        ax.add_patch(FancyBboxPatch((mx0, my_top-med_h), med_w, med_h,
+                     boxstyle="round,pad=0.5,rounding_size=2",
+                     fill=True, fc=INK, ec="#0B0F14", lw=1.8, zorder=3))
+        ax.text(mx_c, my_top - med_h/2 + 1.5, label,
+                ha="center", va="center", fontsize=9,
+                fontweight="bold", color="white", zorder=4)
+        ax.add_patch(Rectangle((mx0+3, my_top-med_h+1), med_w-6, 4,
+                     fc="#0B3D2E", ec="#0A5", lw=0.8, zorder=4))
+        ax.text(mx_c, my_top-med_h+3, "kWh / kvarh",
+                ha="center", va="center", fontsize=7,
+                color="#36df8f", family="monospace", zorder=5)
 
-    # ============================================================
-    # UN SOLO elemento de proteccion: interruptor (si existe) o
-    # info de TC-antes-del-totalizador (semidirecta+barraje sin interruptor)
-    # ============================================================
-    interruptor = cfg.get("interruptor")
-    interruptor_pos = cfg.get("interruptor_pos")
-    seccionamiento = cfg.get("seccionamiento")
-
-    proteccion_amp = interruptor or (f"{cfg.get('tc_amp')} A" if (tc_pos and cfg.get("tc_amp")) else None)
-
-    if proteccion_amp:
-        _u_breaker(ax, xc, y-2.5, INK, 0.9)
-        pos_txt = ""
-        if interruptor_pos:
-            pos_txt = f"\n({interruptor_pos} del medidor)"
-        elif tc_pos:
-            pos_txt = f"\n(TC {tc_pos} del totalizador)"
-        ax.text(xc+5, y-2.5, f"Interruptor {proteccion_amp}{pos_txt}",
-                ha="left", va="center", fontsize=8, color=INK, fontweight="bold")
-        y -= 5; vline(y+5, y)
+    if not respaldo:
+        draw_unif_meter(xc, y, "MEDIDOR")
+        # senal de medida (anotacion desde fuera del medidor)
+        ax.annotate("", xy=(xc+med_w/2, y-med_h/2),
+                    xytext=(xc+med_w/2+5, y-med_h/2),
+                    arrowprops=dict(arrowstyle="<-", color="#888", ls=":", lw=1.2))
+        ax.text(xc+med_w/2+6, y-med_h/2,
+                "senales de medida\n(I, V)" if tipo != "directa" else "medida\ndirecta",
+                ha="left", va="center", fontsize=7, color="#888", style="italic")
+        y -= med_h + 4
     else:
-        y -= 4; vline(y+4, y)
+        # PRINCIPAL a la izquierda, CHEQUEO a la derecha del eje
+        sep = 18
+        draw_unif_meter(xc - sep, y, "PRINCIPAL")
+        draw_unif_meter(xc + sep, y, "CHEQUEO")
+        # Linea horizontal conectando los dos medidores
+        ax.plot([xc - sep + med_w/2, xc + sep - med_w/2],
+                [y - med_h/2, y - med_h/2],
+                color="#555", lw=1.0, ls=(0,(3,2)), zorder=5)
+        ax.text(xc, y - med_h/2 + 1, "senal de verificacion",
+                ha="center", va="bottom", fontsize=6.5, color="#555", style="italic")
+        # Lineas de conexion desde el eje (bloque) a cada medidor
+        ax.plot([xc, xc - sep], [y + 0.5, y + 0.5], color=INK, lw=1.8, zorder=2)
+        ax.plot([xc, xc + sep], [y + 0.5, y + 0.5], color=INK, lw=1.8, zorder=2)
+        ax.plot([xc - sep, xc - sep], [y + 0.5, y], color=INK, lw=1.8, zorder=2)
+        ax.plot([xc + sep, xc + sep], [y + 0.5, y], color=INK, lw=1.8, zorder=2)
+        y -= med_h + 4
 
-    # Seccionador adicional SOLO si no se dibujo ya ningun elemento de proteccion
-    if seccionamiento and not proteccion_amp:
-        _u_disc(ax, xc, y-2.5, INK, 0.9)
-        ax.text(xc+5, y-2.5, "Seccionador", ha="left", va="center", fontsize=8, color=INK, fontweight="bold")
-        y -= 5; vline(y+5, y)
+    # -- Interruptor / seccionador --
+    if interruptor:
+        _u_breaker(ax, xc, y-3, INK, 1.0)
+        ax.text(xc+6, y-3, f"Interruptor\n{interruptor}",
+                ha="left", va="center", fontsize=9, color=INK, fontweight="bold")
+        vline(y, y-6); y -= 6
+    else:
+        vline(y, y-5); y -= 5
 
-    # ---- Carga ----
-    ax.add_patch(Polygon([[xc-3.5,y],[xc+3.5,y],[xc,y-6]], closed=True, fill=False, ec=INK, lw=2))
-    ax.text(xc, y-8, "CARGA", ha="center", va="top", fontsize=9, fontweight="bold", color=INK)
+    # -- CARGA --
+    ax.add_patch(Polygon([[xc-4.5,y],[xc+4.5,y],[xc,y-8]],
+                 closed=True, fill=False, ec=INK, lw=2.2))
+    ax.text(xc, y-10, "CARGA",
+            ha="center", va="top", fontsize=10, fontweight="bold", color=INK)
 
-    # ---------------- PLANO DE SIMBOLOGIA ----------------
-    px0, px1 = 68, 98
-    py1 = 67; py0 = 8
-    ax.add_patch(FancyBboxPatch((px0,py0),px1-px0,py1-py0,boxstyle="round,pad=0.6,rounding_size=2",
+    # -- Plano de simbologia (panel derecho) --
+    px0, px1 = 76, 128
+    py0, py1 = 5, 88
+    ax.add_patch(FancyBboxPatch((px0, py0), px1-px0, py1-py0,
+                 boxstyle="round,pad=0.6,rounding_size=2",
                  fill=False, ec="#2B2B2B", lw=1.4))
-    ax.text((px0+px1)/2, py1-2.8, "PLANO DE SIMBOLOGIA", ha="center", fontsize=9.5, fontweight="bold", color=INK)
-    ax.text((px0+px1)/2, py1-5.3, "IEC / UNE 60617", ha="center", fontsize=7, color="#888", style="italic")
+    ax.text((px0+px1)/2, py1-3, "PLANO DE SIMBOLOGIA",
+            ha="center", fontsize=10, fontweight="bold", color=INK)
+    ax.text((px0+px1)/2, py1-6, "IEC / UNE 60617",
+            ha="center", fontsize=7.5, color="#888", style="italic")
 
-    items = [
-        ("Transformador de potencia", lambda x,y: _u_xfmr(ax,x,y,INK,0.7)),
-        ("Transformador de corriente (TC)", lambda x,y: _u_ct(ax,x,y,COL["R"],0.8)),
-        ("Transformador de tension (TP)", lambda x,y: _u_vt(ax,x,y,COL["S"],0.8,False)),
-        ("Interruptor automatico", lambda x,y: _u_breaker(ax,x,y,INK,0.8)),
-        ("Seccionador", lambda x,y: _u_disc(ax,x,y,INK,0.8)),
-        ("Medidor de energia", lambda x,y: (ax.add_patch(Rectangle((x-2.5,y-1.7),5,3.4,fill=True,fc=INK,ec=INK)))),
-        ("Barra / barraje", lambda x,y: ax.plot([x-3,x+3],[y,y],color=INK,lw=3.5)),
-        ("Carga", lambda x,y: ax.add_patch(Polygon([[x-2,y+1.8],[x+2,y+1.8],[x,y-1.8]],closed=True,fill=False,ec=INK,lw=1.6))),
+    sym_items = [
+        ("Transformador de potencia",      lambda x,y: _u_xfmr(ax,x,y,INK,0.75)),
+        ("Transformador de corriente (TC)", lambda x,y: _u_ct(ax,x,y,COL["R"],0.85)),
+        ("Transformador de tension (TP)",  lambda x,y: _u_vt(ax,x,y,COL["S"],0.85,False)),
+        ("Interruptor automatico",         lambda x,y: _u_breaker(ax,x,y,INK,0.85)),
+        ("Seccionador",                    lambda x,y: _u_disc(ax,x,y,INK,0.85)),
+        ("Bloque de prueba",               lambda x,y: ax.add_patch(
+            Rectangle((x-3,y-1.8),6,3.6,fill=True,fc="#E8EFF7",ec="#444",lw=1.1))),
+        ("Medidor de energia",             lambda x,y: ax.add_patch(
+            Rectangle((x-3,y-1.8),6,3.6,fill=True,fc=INK,ec=INK))),
+        ("Barra / barraje",                lambda x,y: ax.plot([x-3,x+3],[y,y],color=INK,lw=3.5)),
+        ("Carga",                          lambda x,y: ax.add_patch(
+            Polygon([[x-2,y+2],[x+2,y+2],[x,y-2]],closed=True,fill=False,ec=INK,lw=1.6))),
     ]
-    sx = px0+7; tx = px0+13
-    ys2 = np.linspace(py1-9, py0+4, len(items))
-    for (label,dsym), yy in zip(items, ys2):
-        dsym(sx, yy)
-        ax.text(tx, yy, label, ha="left", va="center", fontsize=8, color=INK)
+    sx = px0+8; tx = px0+15
+    item_ys = np.linspace(py1-10, py0+6, len(sym_items))
+    for (lbl, draw_sym), yy in zip(sym_items, item_ys):
+        draw_sym(sx, yy)
+        ax.text(tx, yy, lbl, ha="left", va="center", fontsize=8, color=INK)
 
-    plt.savefig(out_path, dpi=160, bbox_inches="tight", facecolor="white", pad_inches=0.3)
+    plt.savefig(out_path, dpi=160, bbox_inches="tight",
+                facecolor="white", pad_inches=0.3)
     plt.close(fig)
     return out_path
 
