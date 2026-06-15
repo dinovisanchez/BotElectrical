@@ -4,7 +4,7 @@ import re
 
 DEFAULT = dict(sistema="tri4h", tipo="indirecta", respaldo=False,
                norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="",
-               asimetrico=False,
+               conexion="simetrica",
                trafo_presente=False,
                interruptor_pos=None,   # G5: era "antes", forzaba elemento falso en diagramas
                interruptor_antes_kva="", interruptor_despues_kva="")
@@ -151,6 +151,14 @@ def parse_spec(text):
         if mtc: cfg["n_tc"] = int(mtc.group(1))
         ma = re.search(r"(\d+)\s*a(?:mp|mps|mperios)?\b", t)
         if ma: cfg["interruptor"] = ma.group(1) + " A"
+
+    # --- CONEXION (simetrica / asimetrica) — solo aplica a medida directa ---
+    if re.search(r"asimetr", t):
+        cfg["conexion"] = "asimetrica"
+        entendido.append("Conexion: asimetrica")
+    elif re.search(r"simetr", t):
+        cfg["conexion"] = "simetrica"
+        entendido.append("Conexion: simetrica")
 
     # --- VALIDAR FALTANTE ---
     faltante = []
