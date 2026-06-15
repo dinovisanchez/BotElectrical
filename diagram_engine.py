@@ -585,167 +585,291 @@ def draw_conexiones_retie(cfg, out_path):
 
 def _draw_directa_retie(cfg, out_path):
     """
-    UN SOLO medidor (bobina + bornera) con N pares de terminales (uno por fase).
-    Cada par de terminales (in/out) de una fase tiene su propio patron de
-    cableado interno (lineas hacia la bobina + punto de conexion), pero
-    todo dentro del MISMO recuadro/bobina del medidor.
+    Medida DIRECTA — Simetrica o Asimetrica.
+
+    SIMETRICA:  El tap de tension se toma en el lado de la ACOMETIDA (antes de
+                la bobina I). Puente externo entre T_in y V+. La bobina V mide
+                la tension de la linea de suministro.
+
+    ASIMETRICA: El tap de tension se toma en el lado de la CARGA (despues de
+                la bobina I). Puente externo entre T_out y V+. La bobina V mide
+                la tension en bornes de carga.
+
+    Layout por fase (4 terminales en bornera):
+      Simetrica : [I_in | V+  | V-  | I_out]  — puente I_in <-> V+  (izquierda)
+      Asimetrica: [I_in | I_out | V+ | V- ]   — puente I_out <-> V+ (derecha)
     """
     sistema  = cfg.get("sistema", "tri4h")
-    norma    = cfg.get("norma", "RA8")
-    conexion = cfg.get("conexion", "simetrica")
+    norma    = cfg.get("norma",   "RA8")
+    conexion = cfg.get("conexion","simetrica")
     respaldo = bool(cfg.get("respaldo", False))
 
-    all_ph = phases_of(sistema)
-    show_N = sistema in ("mono","bifasico","tri3h","tri4h")
-    n_ph = len(all_ph)
+    all_ph  = phases_of(sistema)
+    n_ph    = len(all_ph)
+    sis_lbl = {"mono":"MONOFASICA","bifasico":"BIFASICA",
+               "tri3h":"TRIFASICA 3 HILOS","tri4h":"TRIFASICA 4 HILOS"}[sistema]
 
-    sis_label = {"mono":"MONOFASICA","bifasico":"BIFASICA","tri3h":"TRIFASICA 3 HILOS","tri4h":"TRIFASICA 4 HILOS"}[sistema]
+    # ── Canvas ─────────────────────────────────────────────────────────────
+    BLOCK_W  = 44          # ancho del bloque de 4 terminales por fase
+    MARGIN_H = 16          # margen horizontal total (8 cada lado)
+    W        = n_ph * BLOCK_W + MARGIN_H + 60   # extra para labels
+    W        = max(W, 140)
 
-    # Cada fase ocupa 4 terminales (igual al patron de la imagen)
-    pair_w = 13.5   # ancho por cada par de terminales (t1-t2 de una fase)
-    total_w = n_ph * pair_w * 2  # *2 porque cada fase tiene 2 pares (entrada y salida = 4 term)
-    W = max(90, total_w + 24)
-    H = 52
+    HDR = 9    # cabecera
+    MB  = 34   # altura interior del medidor (coils + bornera)
+    PH  = 5.5  # separacion vertical entre lineas de fase
+    FTR = 12   # neutro + notas
+    H   = HDR + MB + n_ph * PH + FTR
+    H   = max(H, 65)
 
-    fig, ax = plt.subplots(figsize=(max(11, total_w/6.5), 6.8))
-    ax.set_xlim(0, W); ax.set_ylim(0, H)
-    ax.axis("off")
+    fig, ax = plt.subplots(figsize=(W / 11, H / 8.5))
+    ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
 
-    titulo = f"DIAGRAMA DE CONEXIONES  ·  MEDIDA DIRECTA  ·  {sis_label}"
+    # ── Titulos ────────────────────────────────────────────────────────────
+    ax.text(W/2, H-1.5,
+            f"DIAGRAMA DE CONEXIONES  ·  MEDIDA DIRECTA  ·  {sis_lbl}",
+            ha="center", fontsize=10, fontweight="bold", color=INK)
     sub = f"Norma {norma}  ·  Conexion {conexion.upper()}"
     if respaldo: sub += "  ·  PRINCIPAL + CHEQUEO"
-    ax.text(W/2, H-1.5, titulo, ha="center", fontsize=13, fontweight="bold", color=INK)
-    ax.text(W/2, H-3.3, sub, ha="center", fontsize=9, color="#666")
+    ax.text(W/2, H-3.3, sub, ha="center", fontsize=8.5, color="#666")
 
-    bx0 = (W - total_w)/2 - 4
-    bx1 = (W + total_w)/2 + 4
-    by0, by1 = H-25, H-9
-    tb_y0, tb_y1 = by0-0.5, by0+5.0
-    term_y = (tb_y0+tb_y1)/2
+    # ── Zonas horizontales ─────────────────────────────────────────────────
+    # [0 .. XSL]       supply label
+    # [XSL .. XML]     conductores de acometida
+    # [XML .. XMR]     caja MEDIDOR
+    # [XMR .. XLL]     conductores de carga
+    # [XLL .. W]       carga label
+    XSL = 2        # supply label x
+    XML = 30       # medidor borde izquierdo
+    XMR = W - 30   # medidor borde derecho
+    XLL = W - 2    # load label x
+    X_SACOM = 18   # x donde la acometida entra a la zona del medidor
+    X_CARGA = W - 18
 
-    # Recuadro grande del medidor (UNO solo)
-    ax.add_patch(Rectangle((bx0, by0), bx1-bx0, by1-by0, fill=False, ec="#444", lw=1.2, ls=(0,(4,3)), zorder=1))
-    ax.add_patch(Rectangle((bx0+2, tb_y0), (bx1-bx0)-4, tb_y1-tb_y0, fill=False, ec="#444", lw=1.0, ls=(0,(4,3)), zorder=1))
+    # ── Y referencias ──────────────────────────────────────────────────────
+    BOX_TOP = H - HDR
+    BOX_BOT = BOX_TOP - MB
 
-    # Bobina(s): UNA bobina central que representa el elemento de medida.
-    # Si hay mas de 1 fase, se dibujan circulos concentricos/superpuestos
-    # para indicar "una sola bobina con N lineas" (elemento de medida unico).
-    bob_y = by1 - 4.5
-    if conexion == "simetrica":
-        bob_x = (bx0+bx1)/2
-    else:
-        bob_x = bx1 - total_w/(2*n_ph) - 1.5  # desplazada a la derecha
+    # Bornera: franja inferior del medidor
+    TB_H   = 7.5
+    TB_Y0  = BOX_BOT
+    TB_Y1  = TB_Y0 + TB_H
+    TERM_Y = (TB_Y0 + TB_Y1) / 2
 
-    # Dibuja la bobina principal; si n_ph>1, anillos adicionales superpuestos
-    # (mismo centro, ligero offset) para representar multiples elementos
-    # dentro del MISMO cuerpo del medidor.
-    for k in range(n_ph):
-        offset = (k - (n_ph-1)/2) * 1.3
-        ax.add_patch(Circle((bob_x+offset, bob_y), 3.5, fill=False, ec="#222", lw=1.6, zorder=3-0.01*k))
+    # Lineas de fase (debajo de la bornera)
+    PH_YS  = [BOX_BOT - PH * (i + 1) for i in range(n_ph)]
 
-    fy1 = tb_y0 - 3.5
+    # Linea de neutro
+    Y_N = PH_YS[-1] - PH - 2.5
 
-    x_cursor = bx0 + 5  # primer terminal
+    # ── Caja MEDIDOR ────────────────────────────────────────────────────────
+    ax.add_patch(Rectangle(
+        (XML, BOX_BOT - 0.5), XMR - XML, BOX_TOP - BOX_BOT + 0.5,
+        fill=False, ec="#444", lw=1.5, ls=(0,(4,3)), zorder=1
+    ))
+    ax.text((XML+XMR)/2, BOX_TOP + 1.8, "MEDIDOR",
+            ha="center", va="bottom", fontsize=9, fontweight="bold", color="#333")
+
+    # ── Bornera ─────────────────────────────────────────────────────────────
+    ax.add_patch(Rectangle(
+        (XML+4, TB_Y0), XMR-XML-8, TB_H,
+        fill=True, fc="#F0F0F0", ec="#555", lw=1.0, zorder=2
+    ))
+    ax.text((XML+XMR)/2, TB_Y0 - 1.2, "BORNERA",
+            ha="center", va="top", fontsize=7, color="#999")
+
+    # ── Terminales: 4 por fase ──────────────────────────────────────────────
+    TR       = 1.5   # radio terminal
+    bornera_w = XMR - XML - 8
+    block_w   = bornera_w / n_ph
+
+    ph_terms = []    # [(ta, tb, tc, td), ...] por fase
+    for pi in range(n_ph):
+        bx = XML + 4 + pi * block_w
+        sp = block_w / 5.0
+        ta = bx + sp * 1
+        tb = bx + sp * 2
+        tc = bx + sp * 3
+        td = bx + sp * 4
+        ph_terms.append((ta, tb, tc, td))
+
+    # Dibujar circulos de terminal y etiquetas
+    for pi, ph in enumerate(all_ph):
+        ta, tb, tc, td = ph_terms[pi]
+        for tx in (ta, tb, tc, td):
+            ax.add_patch(Circle((tx, TERM_Y), TR,
+                         fill=True, fc="white", ec="#333", lw=1.4, zorder=5))
+        # Etiquetas de funcion debajo de cada terminal
+        if conexion == "simetrica":
+            lbls = ["I_in", "V+", "V-", "I_out"]
+        else:
+            lbls = ["I_in", "I_out", "V+", "V-"]
+        for tx, lbl in zip((ta, tb, tc, td), lbls):
+            ax.text(tx, TB_Y0 - 0.4, lbl, ha="center", va="top",
+                    fontsize=5.5, color="#666")
+
+    # ── Bobinas y cableado interno ──────────────────────────────────────────
+    # Zona coils: entre TB_Y1 y BOX_TOP
+    CZ_BOT = TB_Y1 + 1.5
+    CZ_TOP = BOX_TOP - 1.0
+    CZ_H   = CZ_TOP - CZ_BOT
+
+    # Bobina I (serie, corriente): en la mitad superior
+    I_CY = CZ_BOT + CZ_H * 0.72
+    # Bobina V (paralelo, tension): en la mitad inferior
+    V_CY = CZ_BOT + CZ_H * 0.28
+    COIL_H = min(CZ_H * 0.35, 7)
+
     for pi, ph in enumerate(all_ph):
         c = COL[ph]
-        t1 = x_cursor
-        t2 = x_cursor + 5.5
-        t3 = x_cursor + 5.5 + 9.0
-        t4 = t3 + 5.5
-
-        for tx in (t1,t2,t3,t4):
-            ax.add_patch(Circle((tx, term_y), 1.5, fill=False, ec="#222", lw=1.6, zorder=4))
+        ta, tb, tc, td = ph_terms[pi]
 
         if conexion == "simetrica":
-            ax.plot([t1, t1], [term_y, bob_y+0.5], color="#222", lw=1.3, zorder=2)
-            ax.plot([t1, bob_x-3.5], [bob_y+0.5, bob_y+0.5], color="#222", lw=1.3, zorder=2)
-            ax.plot([t4, t4], [term_y, bob_y-1.0], color="#222", lw=1.3, zorder=2)
-            ax.plot([t4, bob_x+3.5], [bob_y-1.0, bob_y-1.0], color="#222", lw=1.3, zorder=2)
-
-            cxm = (t2+t3)/2
-            ax.plot([t2, t3], [term_y+2.5, term_y+2.5], color="#222", lw=1.2, zorder=2)
-            ax.plot([t2, t2], [term_y, term_y+2.5], color="#222", lw=1.2, zorder=2)
-            ax.plot([t3, t3], [term_y, term_y+2.5], color="#222", lw=1.2, zorder=2)
-            ax.add_patch(Circle((cxm, term_y+2.5), 0.5, fc="#222", ec="#222", zorder=4))
-            ax.plot([cxm, cxm], [term_y+2.5, bob_y-3.5], color="#222", lw=1.0, ls=(0,(2,2)), zorder=2)
+            # Terminales: ta=I_in, tb=V+, tc=V-, td=I_out
+            T_iin  = ta; T_vpos = tb; T_vneg = tc; T_iout = td
         else:
-            ax.plot([t1, t1], [term_y, bob_y+0.5], color="#222", lw=1.3, zorder=2)
-            ax.plot([t1, bob_x-3.5], [bob_y+0.5, bob_y+0.5], color="#222", lw=1.3, zorder=2)
-            ax.plot([t4, t4], [term_y, bob_y-1.0], color="#222", lw=1.3, zorder=2)
-            ax.plot([t4, bob_x+3.5], [bob_y-1.0, bob_y-1.0], color="#222", lw=1.3, zorder=2)
+            # Terminales: ta=I_in, tb=I_out, tc=V+, td=V-
+            T_iin  = ta; T_iout = tb; T_vpos = tc; T_vneg = td
 
-            ax.plot([t3, t3], [term_y, term_y+2.5], color="#222", lw=1.2, zorder=2)
-            ax.add_patch(Circle((t3, term_y+2.5), 0.5, fc="#222", ec="#222", zorder=4))
-            ax.plot([t3, t3], [term_y+2.5, bob_y-3.5], color="#222", lw=1.0, ls=(0,(2,2)), zorder=2)
+        # ── Bobina I (serie en camino de corriente) ─────────────────────
+        icx   = (T_iin + T_iout) / 2
+        ic_w  = abs(T_iout - T_iin) - 2
+        ic_w  = max(ic_w, 8)
+        ic_x0 = icx - ic_w / 2
+        ic_x1 = icx + ic_w / 2
+        ic_y0 = I_CY - COIL_H / 2
+        ic_y1 = I_CY + COIL_H / 2
+        ax.add_patch(Rectangle((ic_x0, ic_y0), ic_w, COIL_H,
+                     fill=True, fc="#FFFDE7", ec=c, lw=1.3, zorder=3))
+        ax.text(icx, I_CY, "I", ha="center", va="center",
+                fontsize=8, fontweight="bold", color=c, zorder=4)
 
-        # circulo pequeno entre t1 y t2 (interruptor de prueba)
-        ax.add_patch(Circle(((t1+t2)/2, term_y-2.2), 0.5, fill=False, ec="#222", lw=1.0, zorder=4))
-        ax.plot([(t1+t2)/2, (t1+t2)/2], [term_y, term_y-1.7], color="#222", lw=1.0, zorder=2)
+        # ── Bobina V (paralelo, medida de tension) ──────────────────────
+        vcx   = (T_vpos + T_vneg) / 2
+        vc_w  = abs(T_vneg - T_vpos) + 2
+        vc_w  = max(vc_w, 8)
+        vc_x0 = vcx - vc_w / 2
+        vc_x1 = vcx + vc_w / 2
+        vc_y0 = V_CY - COIL_H / 2
+        vc_y1 = V_CY + COIL_H / 2
+        ax.add_patch(Rectangle((vc_x0, vc_y0), vc_w, COIL_H,
+                     fill=True, fc="#E3F2FD", ec=c, lw=1.3, ls=(0,(3,2)), zorder=3))
+        ax.text(vcx, V_CY, "V", ha="center", va="center",
+                fontsize=8, fontweight="bold", color=c, zorder=4)
 
-        # Linea de potencia de esta fase (su propia fila apilada)
-        fy_block = fy1 - pi*4.0
-        ax.plot([t1, t1], [fy_block, term_y-1.5], color=c, lw=2.6, zorder=2)
-        ax.plot([t2, t2], [fy_block, term_y-1.5], color=c, lw=2.6, zorder=2)
-        ax.plot([4, t1], [fy_block, fy_block], color=c, lw=2.6, zorder=2)
-        ax.plot([t2, W-4], [fy_block, fy_block], color=c, lw=2.6, zorder=2)
+        # ── Cableado interno: terminal → bobina ─────────────────────────
+        def _wire_up(tx, coil_edge_x, coil_y, col, lw=1.4):
+            # sube del terminal a la altura de la bobina y va horizontal a ella
+            ax.plot([tx, tx], [TERM_Y + TR, coil_y], color=col, lw=lw, zorder=2)
+            ax.plot([tx, coil_edge_x], [coil_y, coil_y], color=col, lw=lw, zorder=2)
 
-        ax.text(t1, term_y-1.0, f"{ph}", ha="center", va="top", fontsize=7, color=c, fontweight="bold")
-        ax.text(2, fy_block, f"Fase {ph}", ha="right", va="center", fontsize=10, fontweight="bold", color=c)
-        ax.text(W-2, fy_block, f"Fase {ph}", ha="left", va="center", fontsize=10, fontweight="bold", color=c)
+        _wire_up(T_iin,  ic_x0, ic_y0, c)          # T_iin  → lado izq. bobina I
+        _wire_up(T_iout, ic_x1, ic_y0, c)          # T_iout → lado der. bobina I
+        _wire_up(T_vpos, vc_x0, vc_y0, c)          # T_vpos → lado izq. bobina V
+        _wire_up(T_vneg, vc_x1, vc_y0, COL["N"], lw=1.2)  # T_vneg → neutro bobina V
 
-        x_cursor = t4 + 5.5  # siguiente fase
+        # ── Lineas de fase externas (debajo de la bornera) ──────────────
+        py = PH_YS[pi]
 
-    # Etiqueta MEDIDOR centrada arriba del recuadro
-    ax.text((bx0+bx1)/2, by1+2.0, "MEDIDOR", ha="center", va="bottom",
-            fontsize=10, fontweight="bold", color="#333")
+        # Acometida → T_iin
+        ax.plot([X_SACOM, T_iin], [py, py], color=c, lw=2.5, zorder=2)
+        ax.plot([T_iin, T_iin],   [py, TERM_Y - TR], color=c, lw=2.5, zorder=2)
 
-    # ---- Neutro (linea recta, sin bobina, debajo de todos los bloques) ----
-    if show_N:
-        fyN = fy1 - n_ph*4.0 - 2
-        ax.plot([4, W-4], [fyN, fyN], color=COL["N"], lw=1.8, ls=(0,(6,3)), zorder=2)
-        ax.text(2, fyN, "Neutro", ha="right", va="center", fontsize=10, fontweight="bold", color=COL["N"])
-        ax.text(W-2, fyN, "Neutro", ha="left", va="center", fontsize=10, fontweight="bold", color=COL["N"])
+        # T_iout → Carga
+        ax.plot([T_iout, T_iout], [TERM_Y - TR, py], color=c, lw=2.5, zorder=2)
+        ax.plot([T_iout, X_CARGA], [py, py], color=c, lw=2.5, zorder=2)
 
-        # ASIMETRICA: neutro sube a los ultimos 2 terminales (t3 y t4 de la
-        # ultima fase). En SIMETRICA el neutro queda en el centro (t2-t3)
-        # de cada bloque y no requiere conexion individual a bornera.
-        if conexion == "asimetrica":
-            # ancho de un bloque completo = t1..t4 = 5.5+9.0+5.5 = 20 unidades
-            # mas el gap entre bloques (5.5). x_cursor tras el ultimo bloque:
-            # bx0+5 + (n_ph-1)*(20+5.5) + 20
-            bloque_w = 5.5 + 9.0 + 5.5   # t1 a t4
-            gap_w    = 5.5                 # espacio entre bloques
-            t3_last  = bx0 + 5 + (n_ph-1)*(bloque_w + gap_w) + 5.5
-            t4_last  = t3_last + 5.5
-            for tx_n in (t3_last, t4_last):
-                ax.plot([tx_n, tx_n], [fyN, term_y-1.5],
-                        color=COL["N"], lw=1.8, ls=(0,(6,3)), zorder=2)
-                ax.add_patch(Circle((tx_n, term_y), 1.5,
-                             fill=False, ec=COL["N"], lw=1.6, zorder=4))
+        # T_vneg → neutro (linea discontinua gris)
+        ax.plot([T_vneg, T_vneg], [TERM_Y - TR, Y_N],
+                color=COL["N"], lw=1.6, ls=(0,(5,2)), zorder=2)
+
+        # ── PUENTE DE TENSION (diferencia clave entre simetrica/asimetrica)
+        #
+        # Simetrica : puente entre T_iin (ta) y T_vpos (tb) → LADO IZQUIERDO
+        #             La acometida alimenta tanto la bobina I como la bobina V.
+        #             Nodo de tension = lado de entrada (antes de la bobina I).
+        #
+        # Asimetrica: puente entre T_iout (tb) y T_vpos (tc) → LADO DERECHO
+        #             La carga alimenta la bobina V.
+        #             Nodo de tension = lado de salida (despues de la bobina I).
+        #
+        BP_Y = TERM_Y - TR - 2.5   # y del arco del puente
+
+        if conexion == "simetrica":
+            bx_a = T_iin   # ta
+            bx_b = T_vpos  # tb
+        else:
+            bx_a = T_iout  # tb
+            bx_b = T_vpos  # tc
+
+        # Arco del puente (trazo discontinuo verde-oliva para distinguir)
+        PUENTE_COL = "#558B2F"
+        ax.plot([bx_a, bx_a, bx_b, bx_b],
+                [TERM_Y - TR, BP_Y, BP_Y, TERM_Y - TR],
+                color=PUENTE_COL, lw=1.6, ls="--", zorder=3)
+        # Punto de nodo en la linea de fase
+        ax.add_patch(Circle((bx_a, py), 1.4, fc=c, ec=c, zorder=5))
+        # Rama del puente que baja desde bx_a hasta la linea de fase
+        ax.plot([bx_a, bx_a], [TERM_Y - TR, py],
+                color=PUENTE_COL, lw=1.6, ls="--", zorder=3)
+
+        lado_txt = "acometida" if conexion == "simetrica" else "carga"
+        ax.text((bx_a + bx_b) / 2, BP_Y - 0.5,
+                f"puente ({lado_txt})", ha="center", va="top",
+                fontsize=5.5, color=PUENTE_COL, style="italic")
+
+        # Etiqueta de fase
+        ax.text(XSL + 0.5, py, f"Fase {ph}", ha="left", va="center",
+                fontsize=9, fontweight="bold", color=c)
+        ax.text(XLL - 0.5, py, f"Fase {ph}", ha="right", va="center",
+                fontsize=9, fontweight="bold", color=c)
+
+    # ── Linea de neutro ─────────────────────────────────────────────────────
+    ax.plot([X_SACOM, X_CARGA], [Y_N, Y_N],
+            color=COL["N"], lw=2.0, ls=(0,(6,3)), zorder=2)
+    ax.text(XSL + 0.5, Y_N, "Neutro", ha="left", va="center",
+            fontsize=9, fontweight="bold", color=COL["N"])
+    ax.text(XLL - 0.5, Y_N, "Neutro", ha="right", va="center",
+            fontsize=9, fontweight="bold", color=COL["N"])
+
+    # ── Buses verticales de acometida y carga ───────────────────────────────
+    bus_top = PH_YS[0] + 1.5
+    bus_bot = Y_N
+    ax.plot([X_SACOM, X_SACOM], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
+    ax.plot([X_CARGA, X_CARGA], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
+    ax.text(X_SACOM - 1, (bus_top+bus_bot)/2, "ACOMETIDA",
+            ha="right", va="center", fontsize=7.5, fontweight="bold",
+            color="#555", rotation=90)
+    ax.text(X_CARGA + 1, (bus_top+bus_bot)/2, "CARGA",
+            ha="left", va="center", fontsize=7.5, fontweight="bold",
+            color="#555", rotation=90)
+
+    # ── Nota explicativa ────────────────────────────────────────────────────
+    if conexion == "simetrica":
+        nota = ("Tap de tension en la ACOMETIDA  |  "
+                "Bobina V mide V de suministro  |  "
+                "Conexion ANTES de la bobina I")
     else:
-        fyN = fy1
+        nota = ("Tap de tension en la CARGA  |  "
+                "Bobina V mide V en bornes de carga  |  "
+                "Conexion DESPUES de la bobina I")
+    ax.text(W/2, Y_N - 2.5, nota, ha="center", va="top",
+            fontsize=7, color="#666", style="italic")
 
-    # Etiquetas LINEA / CARGA
-    ax.text(bx0-2, term_y, "LINEA (ACOMETIDA)", ha="right", va="center",
-            fontsize=9, color="#444", style="italic", fontweight="bold")
-    ax.text(bx1+2, term_y, "CARGA", ha="left", va="center",
-            fontsize=9, color="#444", style="italic", fontweight="bold")
-
+    # Notas de instalacion
     notas = []
     if cfg.get("instalacion") == "trafo" and cfg.get("trafo_kva"):
-        uso = cfg.get("trafo_uso","")
-        notas.append(f"Trafo {uso} {cfg['trafo_kva']} kVA {cfg.get('trafo_tipo','')}".replace("  "," ").strip())
+        notas.append(f"Trafo {cfg.get('trafo_uso','')} {cfg['trafo_kva']} kVA".strip())
     elif cfg.get("instalacion") == "barraje":
-        notas.append("Conectado a barraje")
+        notas.append("Barraje BT")
     if cfg.get("interruptor"):
-        pos = cfg.get("interruptor_pos","")
-        notas.append(f"Interruptor {cfg['interruptor']}" + (f" ({pos} del medidor)" if pos else ""))
-    if cfg.get("calibre_acometida"):
-        notas.append(f"Acometida: {cfg['calibre_acometida']}")
+        notas.append(f"Interruptor {cfg['interruptor']}")
     if notas:
-        ax.text(W/2, fyN-3, "  |  ".join(notas), ha="center", va="top", fontsize=8.5, color="#555")
+        ax.text(W/2, Y_N - 5.5, "  ·  ".join(notas),
+                ha="center", va="top", fontsize=7.5, color="#555")
 
-    plt.savefig(out_path, dpi=160, bbox_inches="tight", facecolor="white", pad_inches=0.3)
+    plt.savefig(out_path, dpi=160, bbox_inches="tight",
+                facecolor="white", pad_inches=0.3)
     plt.close(fig)
     return out_path
 
