@@ -585,291 +585,251 @@ def draw_conexiones_retie(cfg, out_path):
 
 def _draw_directa_retie(cfg, out_path):
     """
-    Medida DIRECTA — Simetrica o Asimetrica.
-
-    SIMETRICA:  El tap de tension se toma en el lado de la ACOMETIDA (antes de
-                la bobina I). Puente externo entre T_in y V+. La bobina V mide
-                la tension de la linea de suministro.
-
-    ASIMETRICA: El tap de tension se toma en el lado de la CARGA (despues de
-                la bobina I). Puente externo entre T_out y V+. La bobina V mide
-                la tension en bornes de carga.
-
-    Layout por fase (4 terminales en bornera):
-      Simetrica : [I_in | V+  | V-  | I_out]  — puente I_in <-> V+  (izquierda)
-      Asimetrica: [I_in | I_out | V+ | V- ]   — puente I_out <-> V+ (derecha)
+    Medida DIRECTA — estilo fisico con bornera global numerada.
+    Simetrica : bornes entrada en la mitad izquierda, salidas en la derecha (espejo).
+    Asimetrica: pares adyacentes entrada-salida por conductor (secuencial).
     """
     sistema  = cfg.get("sistema", "tri4h")
     norma    = cfg.get("norma",   "RA8")
     conexion = cfg.get("conexion","simetrica")
     respaldo = bool(cfg.get("respaldo", False))
 
-    all_ph  = phases_of(sistema)
-    n_ph    = len(all_ph)
     sis_lbl = {"mono":"MONOFASICA","bifasico":"BIFASICA",
                "tri3h":"TRIFASICA 3 HILOS","tri4h":"TRIFASICA 4 HILOS"}[sistema]
 
+    # ── Bornera global: (conductor, etiqueta, 'ent'|'sal') por posicion ────
+    if sistema == "mono":
+        if conexion == "simetrica":
+            layout = [("R","F-ent","ent"),("N","N-sal","sal"),
+                      ("N","N-ent","ent"),("R","F-sal","sal")]
+        else:
+            layout = [("R","F-ent","ent"),("R","F-sal","sal"),
+                      ("N","N-ent","ent"),("N","N-sal","sal")]
+    elif sistema == "bifasico":
+        if conexion == "simetrica":
+            layout = [("R","R-ent","ent"),("S","S-ent","ent"),("N","N-ent","ent"),
+                      ("N","N-sal","sal"),("S","S-sal","sal"),("R","R-sal","sal")]
+        else:
+            layout = [("R","R-ent","ent"),("R","R-sal","sal"),
+                      ("S","S-ent","ent"),("S","S-sal","sal"),
+                      ("N","N-ent","ent"),("N","N-sal","sal")]
+    else:  # tri4h  (tri3h usa este bloque tb, sin neutro fisico)
+        if conexion == "simetrica":
+            layout = [("R","R-ent","ent"),("S","S-ent","ent"),("T","T-ent","ent"),("N","N-ent","ent"),
+                      ("N","N-sal","sal"),("T","T-sal","sal"),("S","S-sal","sal"),("R","R-sal","sal")]
+        else:
+            layout = [("R","R-ent","ent"),("R","R-sal","sal"),
+                      ("S","S-ent","ent"),("S","S-sal","sal"),
+                      ("T","T-ent","ent"),("T","T-sal","sal"),
+                      ("N","N-ent","ent"),("N","N-sal","sal")]
+
+    n_bornes  = len(layout)
+    # Conductores unicos en orden de aparicion
+    seen = {}
+    for cond,_,_ in layout:
+        if cond not in seen: seen[cond] = True
+    conductores = list(seen.keys())   # e.g. ['R','S','T','N']
+
+    # Indices de borne (0-based) para entrada y salida de cada conductor
+    ent_idx = {}; sal_idx = {}
+    for i,(cond,_,side) in enumerate(layout):
+        if side == "ent": ent_idx[cond] = i
+        else:             sal_idx[cond] = i
+
     # ── Canvas ─────────────────────────────────────────────────────────────
-    BLOCK_W  = 44          # ancho del bloque de 4 terminales por fase
-    MARGIN_H = 16          # margen horizontal total (8 cada lado)
-    W        = n_ph * BLOCK_W + MARGIN_H + 60   # extra para labels
-    W        = max(W, 140)
+    BPITCH   = 17          # separacion entre bornes
+    LEFT_M   = 45          # margen izquierdo (labels acometida)
+    RIGHT_M  = 45          # margen derecho (labels carga)
+    BORN_PAD = 10          # padding interno del medidor a cada lado
+    W = LEFT_M + RIGHT_M + BORN_PAD*2 + BPITCH * n_bornes
+    W = max(W, 180)
 
-    HDR = 9    # cabecera
-    MB  = 34   # altura interior del medidor (coils + bornera)
-    PH  = 5.5  # separacion vertical entre lineas de fase
-    FTR = 12   # neutro + notas
-    H   = HDR + MB + n_ph * PH + FTR
-    H   = max(H, 65)
+    N_COND   = len(conductores)
+    LANE_SEP = 10          # separacion entre lanes de conductor
+    HDR_H    = 14          # cabecera (titulos)
+    n_coil_conds = sum(1 for c in conductores if c != "N")
+    MED_H    = max(55, n_coil_conds * 22 + 14)   # altura dinamica: espacio para coils apilados
+    BOT_H    = N_COND * LANE_SEP + 12   # lanes de conductor + nota
+    H        = HDR_H + MED_H + BOT_H
 
-    fig, ax = plt.subplots(figsize=(W / 11, H / 8.5))
+    fig, ax = plt.subplots(figsize=(W/9.5, H/9.5))
     ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
 
     # ── Titulos ────────────────────────────────────────────────────────────
-    ax.text(W/2, H-1.5,
-            f"DIAGRAMA DE CONEXIONES  ·  MEDIDA DIRECTA  ·  {sis_lbl}",
-            ha="center", fontsize=10, fontweight="bold", color=INK)
+    ax.text(W/2, H-2, f"DIAGRAMA DE CONEXIONES  ·  MEDIDA DIRECTA  ·  {sis_lbl}",
+            ha="center", fontsize=9.5, fontweight="bold", color=INK)
     sub = f"Norma {norma}  ·  Conexion {conexion.upper()}"
     if respaldo: sub += "  ·  PRINCIPAL + CHEQUEO"
-    ax.text(W/2, H-3.3, sub, ha="center", fontsize=8.5, color="#666")
+    ax.text(W/2, H-5.5, sub, ha="center", fontsize=8, color="#666")
 
-    # ── Zonas horizontales ─────────────────────────────────────────────────
-    # [0 .. XSL]       supply label
-    # [XSL .. XML]     conductores de acometida
-    # [XML .. XMR]     caja MEDIDOR
-    # [XMR .. XLL]     conductores de carga
-    # [XLL .. W]       carga label
-    XSL = 2        # supply label x
-    XML = 30       # medidor borde izquierdo
-    XMR = W - 30   # medidor borde derecho
-    XLL = W - 2    # load label x
-    X_SACOM = 18   # x donde la acometida entra a la zona del medidor
-    X_CARGA = W - 18
+    # ── Coordenadas de bornes ──────────────────────────────────────────────
+    BORN_R   = 4.5         # radio circulo borne
+    BORN_Y   = BOT_H + 7  # y del centro de los bornes
+    bx_start = LEFT_M + BORN_PAD + BPITCH * 0.5
+    bx       = [bx_start + i * BPITCH for i in range(n_bornes)]
 
-    # ── Y referencias ──────────────────────────────────────────────────────
-    BOX_TOP = H - HDR
-    BOX_BOT = BOX_TOP - MB
-
-    # Bornera: franja inferior del medidor
-    TB_H   = 7.5
-    TB_Y0  = BOX_BOT
-    TB_Y1  = TB_Y0 + TB_H
-    TERM_Y = (TB_Y0 + TB_Y1) / 2
-
-    # Lineas de fase (debajo de la bornera)
-    PH_YS  = [BOX_BOT - PH * (i + 1) for i in range(n_ph)]
-
-    # Linea de neutro
-    Y_N = PH_YS[-1] - PH - 2.5
-
-    # ── Caja MEDIDOR ────────────────────────────────────────────────────────
-    ax.add_patch(Rectangle(
-        (XML, BOX_BOT - 0.5), XMR - XML, BOX_TOP - BOX_BOT + 0.5,
-        fill=False, ec="#444", lw=1.5, ls=(0,(4,3)), zorder=1
-    ))
-    ax.text((XML+XMR)/2, BOX_TOP + 1.8, "MEDIDOR",
+    # ── Medidor box ────────────────────────────────────────────────────────
+    MX0 = bx[0]  - BORN_PAD - BORN_R
+    MX1 = bx[-1] + BORN_PAD + BORN_R
+    MY0 = BORN_Y - BORN_R - 1
+    MY1 = MY0 + MED_H
+    ax.add_patch(Rectangle((MX0, MY0), MX1-MX0, MY1-MY0,
+                 fill=False, ec="#444", lw=1.5, ls=(0,(4,3)), zorder=1))
+    ax.text((MX0+MX1)/2, MY1 + 2, "MEDIDOR",
             ha="center", va="bottom", fontsize=9, fontweight="bold", color="#333")
 
-    # ── Bornera ─────────────────────────────────────────────────────────────
-    ax.add_patch(Rectangle(
-        (XML+4, TB_Y0), XMR-XML-8, TB_H,
-        fill=True, fc="#F0F0F0", ec="#555", lw=1.0, zorder=2
-    ))
-    ax.text((XML+XMR)/2, TB_Y0 - 1.2, "BORNERA",
-            ha="center", va="top", fontsize=7, color="#999")
+    # ── Bornera (fondo gris) ───────────────────────────────────────────────
+    ax.add_patch(Rectangle((MX0+2, BORN_Y-BORN_R-2), MX1-MX0-4, 2*BORN_R+5,
+                 fill=True, fc="#EEEEEE", ec="#888", lw=0.8, zorder=2))
+    ax.text((MX0+MX1)/2, BORN_Y - BORN_R - 3.5, "BORNERA",
+            ha="center", va="top", fontsize=6, color="#999")
 
-    # ── Terminales: 4 por fase ──────────────────────────────────────────────
-    TR       = 1.5   # radio terminal
-    bornera_w = XMR - XML - 8
-    block_w   = bornera_w / n_ph
+    # ── Bornes numerados ───────────────────────────────────────────────────
+    for i,(cond,lbl,side) in enumerate(layout):
+        c = COL.get(cond, "#333")
+        ax.add_patch(Circle((bx[i], BORN_Y), BORN_R,
+                     fill=True, fc="white", ec=c, lw=1.8, zorder=5))
+        ax.text(bx[i], BORN_Y, str(i+1),
+                ha="center", va="center", fontsize=6.5, fontweight="bold",
+                color="#222", zorder=6)
+        ax.text(bx[i], BORN_Y - BORN_R - 1.5, lbl,
+                ha="center", va="top", fontsize=5.5, color=c, zorder=5)
 
-    ph_terms = []    # [(ta, tb, tc, td), ...] por fase
-    for pi in range(n_ph):
-        bx = XML + 4 + pi * block_w
-        sp = block_w / 5.0
-        ta = bx + sp * 1
-        tb = bx + sp * 2
-        tc = bx + sp * 3
-        td = bx + sp * 4
-        ph_terms.append((ta, tb, tc, td))
+    # ── Lanes de conductores (debajo del medidor) ──────────────────────────
+    LANE_Y_TOP = BORN_Y - BORN_R - 10  # primera lane justo bajo la bornera
+    lane_y = {}
+    for ki, cond in enumerate(conductores):
+        lane_y[cond] = LANE_Y_TOP - ki * LANE_SEP
 
-    # Dibujar circulos de terminal y etiquetas
-    # Labels correctos segun norma colombiana (RETIE):
-    #   Simetrica : [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]  ← patron ESPEJO
-    #   Asimetrica: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]  ← patron SECUENCIAL
-    for pi, ph in enumerate(all_ph):
-        ta, tb, tc, td = ph_terms[pi]
-        for tx in (ta, tb, tc, td):
-            ax.add_patch(Circle((tx, TERM_Y), TR,
-                         fill=True, fc="white", ec="#333", lw=1.4, zorder=5))
+    X_ACO = 8    # x inicio lineas acometida
+    X_CAR = W-8  # x fin lineas carga
+
+    for cond in conductores:
+        c  = COL.get(cond, "#333")
+        ly = lane_y[cond]
+        lw = 2.2 if cond != "N" else 1.8
+        ls = "-" if cond != "N" else (0,(5,2))
+        lbl = "Neutro" if cond == "N" else f"Fase {cond}"
+
+        # Etiquetas
+        ax.text(X_ACO - 1, ly, lbl, ha="right", va="center",
+                fontsize=8.5, fontweight="bold", color=c)
+        ax.text(X_CAR + 1, ly, lbl, ha="left", va="center",
+                fontsize=8.5, fontweight="bold", color=c)
+
+        ei = ent_idx.get(cond)
+        si = sal_idx.get(cond)
+        ex = bx[ei] if ei is not None else None
+        sx = bx[si] if si is not None else None
+
+        # Acometida → borne entrada
+        if ex is not None:
+            ax.plot([X_ACO, ex], [ly, ly], color=c, lw=lw, ls=ls, zorder=2)
+            ax.plot([ex, ex],    [ly, BORN_Y - BORN_R], color=c, lw=lw, ls=ls, zorder=2)
+
+        # Borne salida → carga
+        if sx is not None:
+            ax.plot([sx, sx],    [BORN_Y - BORN_R, ly], color=c, lw=lw, ls=ls, zorder=2)
+            ax.plot([sx, X_CAR], [ly, ly], color=c, lw=lw, ls=ls, zorder=2)
+
+    # Buses verticales acometida y carga
+    ys_all = list(lane_y.values())
+    bus_top = max(ys_all) + 2; bus_bot = min(ys_all) - 2
+    ax.plot([X_ACO, X_ACO], [bus_bot, bus_top], color="#AAA", lw=0.7, zorder=1)
+    ax.plot([X_CAR, X_CAR], [bus_bot, bus_top], color="#AAA", lw=0.7, zorder=1)
+    ax.text(X_ACO-1, (bus_top+bus_bot)/2, "ACOMETIDA",
+            ha="right", va="center", fontsize=7, color="#555", rotation=90)
+    ax.text(X_CAR+1, (bus_top+bus_bot)/2, "CARGA",
+            ha="left", va="center", fontsize=7, color="#555", rotation=90)
+
+    # ── Bobinas I — una por fase, apiladas verticalmente ────────────────────
+    COIL_R = 6.5
+    coil_zone_bot = BORN_Y + BORN_R + COIL_R + 4   # coil bottom clears bornera top
+    coil_zone_top = MY1 - 3
+    coil_zone_h   = coil_zone_top - coil_zone_bot
+
+    coil_conds = [c for c in conductores if c != "N"]
+    n_coils    = len(coil_conds)
+    # y-positions evenly spaced: highest coil for first conductor
+    if n_coils == 1:
+        coil_ys = [coil_zone_bot + coil_zone_h * 0.5]
+    else:
+        coil_ys = [coil_zone_bot + coil_zone_h * (n_coils - 1 - ki) / (n_coils - 1)
+                   for ki in range(n_coils)]
+
+    for ki, cond in enumerate(coil_conds):
+        c    = COL.get(cond, "#333")
+        ei   = ent_idx.get(cond)
+        si   = sal_idx.get(cond)
+        if ei is None or si is None: continue
+        ex_b = bx[ei]; sx_b = bx[si]
+        cy   = coil_ys[ki]
+
         if conexion == "simetrica":
-            lbls = ["1-Fent", "2-Nsal", "3-Nent", "4-Fsal"]
+            # Coil queda sobre el borne de entrada; la salida cruza con cable horizontal largo
+            cx = ex_b + COIL_R      # borde izq del coil alineado con borne
         else:
-            lbls = ["1-Fent", "2-Fsal", "3-Nent", "4-Nsal"]
-        for tx, lbl in zip((ta, tb, tc, td), lbls):
-            ax.text(tx, TB_Y0 - 0.4, lbl, ha="center", va="top",
-                    fontsize=5.5, color="#666")
+            # Coil centrado entre el par adyacente de bornes
+            cx = (ex_b + sx_b) / 2.0
 
-    # ── Bobinas y cableado interno ──────────────────────────────────────────
-    CZ_BOT = TB_Y1 + 1.5
-    CZ_TOP = BOX_TOP - 1.0
-    CZ_H   = CZ_TOP - CZ_BOT
+        # Circulo bobina I
+        ax.add_patch(Circle((cx, cy), COIL_R,
+                     fill=True, fc="#FFFDE7", ec=c, lw=1.8, zorder=3))
+        ax.text(cx, cy, "I", ha="center", va="center",
+                fontsize=8.5, fontweight="bold", color=c, zorder=4)
 
-    I_CY   = CZ_BOT + CZ_H * 0.72
-    V_CY   = CZ_BOT + CZ_H * 0.28
-    COIL_H = min(CZ_H * 0.35, 7)
+        # Cable borne-entrada → coil (entra por el lado izquierdo del circulo)
+        ax.plot([ex_b, ex_b], [BORN_Y + BORN_R, cy], color=c, lw=1.8, zorder=2)
+        # solo tramo horizontal si el borne no está alineado con el borde izq del coil
+        if abs(ex_b - (cx - COIL_R)) > 0.5:
+            ax.plot([ex_b, cx - COIL_R], [cy, cy], color=c, lw=1.8, zorder=2)
 
-    for pi, ph in enumerate(all_ph):
-        c  = COL[ph]
-        ta, tb, tc, td = ph_terms[pi]
+        # Cable coil (lado derecho) → borne-salida → abajo
+        ax.plot([cx + COIL_R, sx_b], [cy, cy], color=c, lw=1.8, zorder=2)
+        ax.plot([sx_b, sx_b], [cy, BORN_Y + BORN_R], color=c, lw=1.8, zorder=2)
 
-        # ── Asignacion de terminales (norma colombiana RETIE) ───────────
-        if conexion == "simetrica":
-            # Bornera: [1:F_ent | 2:N_sal | 3:N_ent | 4:F_sal]
-            # La fase entra por borne 1 y sale por borne 4 (patron espejo/cruzado).
-            # El neutro entra por borne 3 y sale por borne 2.
-            # Tap de tension V+ en borne 1 (lado acometida).
-            T_fin  = ta   # borne 1: Fase entrada
-            T_nout = tb   # borne 2: Neutro salida (hacia carga)
-            T_nin  = tc   # borne 3: Neutro entrada (de la red)
-            T_fout = td   # borne 4: Fase salida
-            T_vpos = ta   # V+ tap: mismo borne que Fase entrada
-            T_vneg = tc   # V- ref: Neutro entrada
-        else:
-            # Bornera: [1:F_ent | 2:F_sal | 3:N_ent | 4:N_sal]
-            # La fase entra por borne 1 y sale por borne 2 (contiguos).
-            # El neutro entra por borne 3 y sale por borne 4 (contiguos).
-            # Tap de tension V+ en borne 2 (lado carga).
-            T_fin  = ta   # borne 1: Fase entrada
-            T_fout = tb   # borne 2: Fase salida
-            T_nin  = tc   # borne 3: Neutro entrada (de la red)
-            T_nout = td   # borne 4: Neutro salida (hacia carga)
-            T_vpos = tb   # V+ tap: mismo borne que Fase salida
-            T_vneg = tc   # V- ref: Neutro entrada
+        # Tap de tension V+
+        tap_bx = ex_b if conexion == "simetrica" else sx_b
+        tap_y  = BORN_Y + BORN_R + 3
+        ax.add_patch(Circle((tap_bx, tap_y), 1.6, fc=c, ec=c, zorder=7))
+        ax.plot([tap_bx, tap_bx], [tap_y + 1.6, cy - COIL_R],
+                color=c, lw=0.9, ls=(0,(3,2)), zorder=2)
+        ax.text(tap_bx + 2, tap_y + 1.5, "V+", ha="left", va="bottom",
+                fontsize=5, color=c)
 
-        # ── Bobina I (serie, camino de corriente): T_fin → T_fout ──────
-        icx   = (T_fin + T_fout) / 2
-        ic_w  = max(abs(T_fout - T_fin) - 2, 8)
-        ic_x0 = icx - ic_w / 2
-        ic_x1 = icx + ic_w / 2
-        ic_y0 = I_CY - COIL_H / 2
-        ax.add_patch(Rectangle((ic_x0, ic_y0), ic_w, COIL_H,
-                     fill=True, fc="#FFFDE7", ec=c, lw=1.3, zorder=3))
-        ax.text(icx, I_CY, "I", ha="center", va="center",
-                fontsize=8, fontweight="bold", color=c, zorder=4)
+    # ── Neutro dentro del medidor (pass-through) ────────────────────────────
+    n_ei = ent_idx.get("N"); n_si = sal_idx.get("N")
+    if n_ei is not None and n_si is not None:
+        nx_e = bx[n_ei]; nx_s = bx[n_si]
+        N_Y  = MY0 + (MY1-MY0) * 0.25
+        ax.plot([nx_e, nx_e, nx_s, nx_s],
+                [BORN_Y+BORN_R, N_Y, N_Y, BORN_Y+BORN_R],
+                color=COL["N"], lw=1.5, ls=(0,(4,2)), zorder=2)
+        ax.text((nx_e+nx_s)/2, N_Y + 1.5, "N", ha="center", va="bottom",
+                fontsize=7, color=COL["N"])
 
-        # ── Bobina V (paralelo, medida de tension) ──────────────────────
-        # V+ toma del mismo borne que la fase (T_vpos = T_fin o T_fout).
-        # V- referencia al neutro (T_vneg = T_nin).
-        vcx   = (T_vpos + T_vneg) / 2
-        vc_w  = max(abs(T_vneg - T_vpos) - 2, 8)
-        vc_x0 = vcx - vc_w / 2
-        vc_x1 = vcx + vc_w / 2
-        vc_y0 = V_CY - COIL_H / 2
-        ax.add_patch(Rectangle((vc_x0, vc_y0), vc_w, COIL_H,
-                     fill=True, fc="#E3F2FD", ec=c, lw=1.3, ls=(0,(3,2)), zorder=3))
-        ax.text(vcx, V_CY, "V", ha="center", va="center",
-                fontsize=8, fontweight="bold", color=c, zorder=4)
-
-        # ── Cableado interno: terminales → bobinas ──────────────────────
-        def _wire_up(tx, ex, ey, col, lw=1.4):
-            ax.plot([tx, tx], [TERM_Y + TR, ey], color=col, lw=lw, zorder=2)
-            ax.plot([tx, ex], [ey, ey], color=col, lw=lw, zorder=2)
-
-        # Fase → I_coil (serie)
-        _wire_up(T_fin,  ic_x0, ic_y0, c)
-        _wire_up(T_fout, ic_x1, ic_y0, c)
-
-        # V+ tap: desde T_vpos (mismo hilo de fase) → V_coil lado V+
-        # Nodo de union en el hilo de fase a la altura de la bobina V
-        vc_vplus_edge = vc_x0 if T_vpos <= vcx else vc_x1
-        _wire_up(T_vpos, vc_vplus_edge, vc_y0, c, lw=1.2)
-        # Punto de nodo (●) sobre el hilo de fase en vc_y0
-        ax.add_patch(Circle((T_vpos, vc_y0), 1.0, fc=c, ec=c, zorder=6))
-
-        # Neutro pass-through interno: T_nin ──── T_nout (con cruce en simetrica)
-        N_PASS_Y = vc_y0 - 2.2
-        ax.plot([T_nin,  T_nin],  [TERM_Y + TR, N_PASS_Y], color=COL["N"], lw=1.2, zorder=2)
-        ax.plot([T_nin,  T_nout], [N_PASS_Y,    N_PASS_Y], color=COL["N"], lw=1.2, zorder=2)
-        ax.plot([T_nout, T_nout], [N_PASS_Y, TERM_Y + TR], color=COL["N"], lw=1.2, zorder=2)
-
-        # V- referencia: nodo en el hilo de neutro interno → V_coil lado V-
-        vc_vminus_edge = vc_x1 if T_vpos <= T_vneg else vc_x0
-        ax.add_patch(Circle((T_nin, N_PASS_Y), 1.0, fc=COL["N"], ec=COL["N"], zorder=6))
-        ax.plot([T_nin, T_nin],         [N_PASS_Y, vc_y0],         color=COL["N"], lw=1.2, ls=(0,(3,2)), zorder=2)
-        ax.plot([T_nin, vc_vminus_edge], [vc_y0,   vc_y0],         color=COL["N"], lw=1.2, ls=(0,(3,2)), zorder=2)
-
-        # ── Conductores externos: fase ──────────────────────────────────
-        py = PH_YS[pi]
-        ax.plot([X_SACOM, T_fin],   [py, py], color=c, lw=2.5, zorder=2)
-        ax.plot([T_fin,   T_fin],   [py, TERM_Y - TR], color=c, lw=2.5, zorder=2)
-        ax.plot([T_fout,  T_fout],  [TERM_Y - TR, py], color=c, lw=2.5, zorder=2)
-        ax.plot([T_fout,  X_CARGA], [py, py], color=c, lw=2.5, zorder=2)
-
-        # ── Conductores externos: neutro (ramas a T_nin y T_nout) ───────
-        ax.plot([T_nin,  T_nin],  [Y_N, TERM_Y - TR], color=COL["N"], lw=1.8, ls=(0,(5,2)), zorder=2)
-        ax.plot([T_nout, T_nout], [Y_N, TERM_Y - TR], color=COL["N"], lw=1.8, ls=(0,(5,2)), zorder=2)
-
-        # ── Etiquetas de fase ───────────────────────────────────────────
-        ax.text(XSL + 0.5, py, f"Fase {ph}", ha="left",  va="center",
-                fontsize=9, fontweight="bold", color=c)
-        ax.text(XLL - 0.5, py, f"Fase {ph}", ha="right", va="center",
-                fontsize=9, fontweight="bold", color=c)
-
-    # ── Bus de neutro ───────────────────────────────────────────────────────
-    ax.plot([X_SACOM, X_CARGA], [Y_N, Y_N],
-            color=COL["N"], lw=2.0, ls=(0,(6,3)), zorder=2)
-    ax.text(XSL + 0.5, Y_N, "Neutro", ha="left",  va="center",
-            fontsize=9, fontweight="bold", color=COL["N"])
-    ax.text(XLL - 0.5, Y_N, "Neutro", ha="right", va="center",
-            fontsize=9, fontweight="bold", color=COL["N"])
-
-    # ── Buses verticales de acometida y carga ───────────────────────────────
-    bus_top = PH_YS[0] + 1.5
-    bus_bot = Y_N
-    ax.plot([X_SACOM, X_SACOM], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
-    ax.plot([X_CARGA, X_CARGA], [bus_bot, bus_top], color="#AAA", lw=0.8, zorder=1)
-    ax.text(X_SACOM - 1, (bus_top + bus_bot) / 2, "ACOMETIDA",
-            ha="right", va="center", fontsize=7.5, fontweight="bold",
-            color="#555", rotation=90)
-    ax.text(X_CARGA + 1, (bus_top + bus_bot) / 2, "CARGA",
-            ha="left", va="center", fontsize=7.5, fontweight="bold",
-            color="#555", rotation=90)
-
-    # ── Nota explicativa — patron de bornera segun sistema ──────────────────
-    if sistema == "mono":
-        if conexion == "simetrica":
-            nota = "Bornera: [1:F-ent | 2:N-sal | 3:N-ent | 4:F-sal]  ·  ESPEJO — neutro en el CENTRO"
-        else:
-            nota = "Bornera: [1:F-ent | 2:F-sal | 3:N-ent | 4:N-sal]  ·  SECUENCIAL — neutro al FINAL"
-    elif sistema == "bifasico":
-        if conexion == "simetrica":
-            nota = "Bornera: [1:R-ent | 2:N-sal | 3:N-ent | 4:R-sal | 5:S-ent | 6:S-sal]  ·  ESPEJO"
-        else:
-            nota = "Bornera: [1:R-ent | 2:R-sal | 3:S-ent | 4:S-sal | 5:N-ent | 6:N-sal]  ·  SECUENCIAL"
-    elif sistema == "tri4h":
-        if conexion == "simetrica":
-            nota = ("Bornera 8 bornes: [1:R-ent | 2:S-ent | 3:T-ent | 4:N-ent | 5:N-sal | 6:T-sal | 7:S-sal | 8:R-sal]"
-                    "  ·  ESPEJO — neutro en el CENTRO (bornes 4-5)")
-        else:
-            nota = ("Bornera 8 bornes: [1:R-ent | 2:R-sal | 3:S-ent | 4:S-sal | 5:T-ent | 6:T-sal | 7:N-ent | 8:N-sal]"
-                    "  ·  SECUENCIAL — neutro al FINAL (bornes 7-8)")
-    else:  # tri3h Aron
-        nota = "Bornera Aron: [1:R-ent | 2:R-sal | 3:S-ref | 4:S-ref | 5:T-ent | 6:T-sal]  ·  2 elementos"
-    ax.text(W/2, Y_N - 2.5, nota, ha="center", va="top",
-            fontsize=6.5, color="#444", style="italic")
+    # ── Nota bornera ───────────────────────────────────────────────────────
+    partes = [f"{i+1}:{layout[i][1]}" for i in range(n_bornes)]
+    if conexion == "simetrica":
+        extra = "  ESPEJO — entradas izq, salidas der"
+    else:
+        extra = "  SECUENCIAL — pares adyacentes ent-sal"
+    nota = "Bornera: [" + " | ".join(partes) + "]" + extra
+    nota_y = min(ys_all) - 4
+    ax.text(W/2, nota_y, nota, ha="center", va="top",
+            fontsize=5.8, color="#555", style="italic")
 
     # Notas de instalacion
-    notas = []
-    if cfg.get("instalacion") == "trafo" and cfg.get("trafo_kva"):
-        notas.append(f"Trafo {cfg.get('trafo_uso','')} {cfg['trafo_kva']} kVA".strip())
+    notas_inst = []
+    if cfg.get("trafo_kva"):
+        notas_inst.append(f"Trafo {cfg.get('trafo_uso','')} {cfg['trafo_kva']} kVA".strip())
     elif cfg.get("instalacion") == "barraje":
-        notas.append("Barraje BT")
+        notas_inst.append("Barraje BT")
     if cfg.get("interruptor"):
-        notas.append(f"Interruptor {cfg['interruptor']}")
-    if notas:
-        ax.text(W/2, Y_N - 5.5, "  ·  ".join(notas),
-                ha="center", va="top", fontsize=7.5, color="#555")
+        notas_inst.append(f"Interruptor {cfg['interruptor']}")
+    if notas_inst:
+        ax.text(W/2, nota_y - 4, "  ·  ".join(notas_inst),
+                ha="center", va="top", fontsize=7, color="#555")
 
     plt.savefig(out_path, dpi=160, bbox_inches="tight",
                 facecolor="white", pad_inches=0.3)
