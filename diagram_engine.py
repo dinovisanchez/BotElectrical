@@ -1451,6 +1451,26 @@ def draw_unifilar_generico(cfg, out_path):
 
     # ── INDIRECTA: TC + TP en MT antes del trafo ──────────────────────────────
     if tipo == "indirecta":
+        # Seccionador / Cortacircuito MT (protección primaria antes de la medida)
+        n_cc = int(cfg.get("n_cc", 1))
+        cc_y = y - 3
+        vline(y, cc_y)
+        if n_cc >= 3:
+            for dx in [-2.5, 0, 2.5]:
+                _u_fuse(ax, xc+dx, cc_y, INK, 0.75)
+            cc_lbl = f"{n_cc} Cortacircuitos MT"
+        elif n_cc == 2:
+            for dx in [-1.5, 1.5]:
+                _u_fuse(ax, xc+dx, cc_y, INK, 0.75)
+            cc_lbl = "2 Cortacircuitos MT"
+        else:
+            _u_disc(ax, xc, cc_y, INK, 1.0)
+            cc_lbl = "Seccionador MT"
+        ax.text(xc-6, cc_y, cc_lbl, ha="right", va="center",
+                fontsize=7.5, color=INK, fontweight="bold")
+        vline(cc_y, cc_y-4)
+        y = cc_y - 4
+
         node_dot(y)
         vline(y, y-4)
 
@@ -1503,6 +1523,15 @@ def draw_unifilar_generico(cfg, out_path):
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
         vline(y, trafo_y-5); y = trafo_y - 6
 
+        # Interruptor totalizador BT (entre trafo y barraje)
+        if interruptor:
+            int_y = y - 4
+            vline(y, int_y - 3)
+            _u_breaker(ax, xc, int_y, INK, 1.0)
+            ax.text(xc-4, int_y, f"Int. Totalizador\n{interruptor}",
+                    ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
+            y = int_y - 4
+
         busbar(y, "BARRA B.T.")
         vline(y, y-5); y -= 5
 
@@ -1524,8 +1553,8 @@ def draw_unifilar_generico(cfg, out_path):
         draw_medida_box(y - 4)
         vline(y, y-10); y -= 10
 
-    # ── Interruptor/seccionador (si tiene) ─────────────────────────────────────
-    if interruptor:
+    # ── Interruptor (solo si no hay trafo; con trafo ya se dibujó arriba) ──────
+    if interruptor and instalacion != "trafo":
         _u_breaker(ax, xc, y-3, INK, 1.0)
         ax.text(xc-4, y-3, f"Interruptor\n{interruptor}",
                 ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
