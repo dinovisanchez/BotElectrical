@@ -869,9 +869,9 @@ async def _procesar_texto(update, texto):
         return
 
     palabras_diagrama = [
-        "unifilar","conexiones","esquema","plano","dibuja","grafica","diagrama",
-        "directa","semidirecta","indirecta","monofasica","trifasica",
-        "monofásica","trifásica",
+        "diagrama","unifilar","conexiones","dibuja","dibujame","grafica",
+        "graficame","genera el diagrama","muéstrame el diagrama",
+        "muestrame el diagrama","esquema de conexion","esquema de conexión",
     ]
     if any(p in texto.lower() for p in palabras_diagrama):
         if faltante:
