@@ -1191,30 +1191,39 @@ def _draw_semi_indirecta_retie(cfg, out_path):
                 ax.plot([xret, xret],[y_bus, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
                 ax.plot([xret, xL],[yb_cierre, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
 
-        # 3. TENSION PARALELO (bloque -> T-junction -> PRINCIPAL borne_V y CHEQUEO borne_V)
+        # 3. TENSION PARALELO
+        # PRINCIPAL: bloque -> columna xv -> borne izquierdo PRINCIPAL (sin cruce)
+        # CHEQUEO:   cable sale por el lado DERECHO del PRINCIPAL cruzando el gap visible
+        #            (la porcion dentro del cuerpo del PRINCIPAL queda bajo el rectangulo)
         all_V = {**bornes_V, **bornes_N}
-        xv_cols = np.linspace(106, 120, max(len(all_V), 1))
-        vi = 0
-        for tlbl, ph in all_V.items():
+        n_V = max(len(all_V), 1)
+        xv_cols = np.linspace(106, 120, n_V)
+        xgap_center = (mx1_p + mx0_c) / 2   # centro del gap entre los dos medidores
+
+        for i_v, (tlbl, ph) in enumerate(all_V.items()):
             if tlbl not in row:
-                vi += 1; continue
+                continue
             c = COL[ph]; ls = (0,(6,3)) if ph=="N" else "-"
-            yb = row[tlbl][0]; xv = xv_cols[vi]; vi += 1
-            # Rama horizontal desde bloque
+            yb = row[tlbl][0]; xv = xv_cols[i_v]
+
+            # Bloque -> columna de ruteo (horizontal)
             ax.plot([xR, xv],[yb, yb], color=c, lw=1.6, ls=ls)
-            jy = yb
-            # Al PRINCIPAL
+
+            # -> PRINCIPAL: vertical hasta nivel del borne + horizontal al borne
             if tlbl in m_yp:
                 ym_p = m_yp[tlbl]
-                ax.plot([xv, xv],[jy, ym_p], color=c, lw=1.5, ls=ls)
+                ax.plot([xv, xv],[yb, ym_p], color=c, lw=1.5, ls=ls)
                 ax.plot([xv, mxrp],[ym_p, ym_p], color=c, lw=1.5, ls=ls)
-            # Al CHEQUEO (misma vertical, continua)
-            if tlbl in m_yc:
-                ym_c = m_yc[tlbl]
-                ax.plot([xv, xv],[jy, ym_c], color=c, lw=1.3, ls=ls)
-                ax.plot([xv, mxrc],[ym_c, ym_c], color=c, lw=1.3, ls=ls)
-            # Dot de bifurcacion en bloque
-            ax.add_patch(Circle((xv, jy), 0.5, fc=c, ec=c, zorder=6))
+
+                # -> CHEQUEO: cable horizontal que cruza el gap (bajo el cuerpo de PRINCIPAL)
+                #    el tramo dentro del PRINCIPAL (mxrp->mx1_p) queda oculto bajo el rectangulo
+                if tlbl in m_yc:
+                    ym_c = m_yc[tlbl]   # == ym_p (mismos medidores, mismo step)
+                    ax.plot([mxrp, mxrc],[ym_p, ym_p], color=c, lw=1.3, ls=ls, zorder=1)
+                    if abs(ym_c - ym_p) > 0.5:
+                        ax.plot([mxrc, mxrc],[ym_p, ym_c], color=c, lw=1.3, ls=ls, zorder=3)
+                    # punto de bifurcacion visible en el gap
+                    ax.add_patch(Circle((xgap_center, ym_p), 0.65, fc=c, ec=c, zorder=6))
 
     # tri3h: puente C1->C2 en bornera (solo puntos en C1 y C2, no en el medio)
     # y cable desde C1 al borne 4 del medidor
