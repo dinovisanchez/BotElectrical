@@ -1122,6 +1122,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         m_yp, mxrp = meters[0]  # PRINCIPAL (arriba)
         m_yr, mxrr = meters[1]  # RESPALDO  (abajo)
 
+
         # Bornes de corriente por sistema
         if sistema == "tri4h":
             bornes_I_in  = {"1":"R","4":"S","7":"T"}
@@ -1182,9 +1183,9 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             ax.add_patch(Circle((xbr, ym_in),  0.55, fc=c, ec=c, zorder=6))
 
         # 3. CIERRE RETORNO (RESPALDO borne_out -> bloque cierre, línea punteada)
-        # Ruta: RESPALDO out → izquierda (fuera del medidor) → abajo bajo la caja
-        #       → más a la izquierda → arriba hasta el borne cierre del bloque
-        y_bus_base = 5   # bus horizontal por debajo de todo (cerca del fondo del canvas)
+        # Ruta: RESPALDO out → izquierda → SUBE por encima del bloque (aguas arriba)
+        #       → izquierda hasta columna junto al bloque → baja al borne cierre
+        y_top_bus = by1 + 5   # bus horizontal por encima del bloque
 
         for ci, (tlbl_out, ph) in enumerate(bornes_I_out.items()):
             if tlbl_out not in m_yr or tlbl_out not in row:
@@ -1192,13 +1193,13 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             yb_cierre = row[tlbl_out][0]   # borne cierre en el bloque
             ym_rout   = m_yr[tlbl_out]     # RESPALDO borne salida y
             x_out     = mx0_p - 4 - ci*2  # columna lateral izquierda del medidor
-            y_bus     = y_bus_base - ci*2  # bus horizontal escalonado por fase
+            y_top     = y_top_bus + ci*2   # bus superior escalonado por fase (sube)
             xret      = xL - 3 - ci*2     # columna de retorno junto al bloque
             c = COL[ph]; ls = (0,(4,2))
             ax.plot([mxrr,  x_out],[ym_rout,  ym_rout],   color=c, lw=1.5, ls=ls)
-            ax.plot([x_out, x_out],[ym_rout,  y_bus],     color=c, lw=1.5, ls=ls)
-            ax.plot([x_out, xret], [y_bus,    y_bus],     color=c, lw=1.5, ls=ls)
-            ax.plot([xret,  xret], [y_bus,    yb_cierre], color=c, lw=1.5, ls=ls)
+            ax.plot([x_out, x_out],[ym_rout,  y_top],     color=c, lw=1.5, ls=ls)
+            ax.plot([x_out, xret], [y_top,    y_top],     color=c, lw=1.5, ls=ls)
+            ax.plot([xret,  xret], [y_top,    yb_cierre], color=c, lw=1.5, ls=ls)
             ax.plot([xret,  xL],   [yb_cierre,yb_cierre], color=c, lw=1.5, ls=ls)
 
         # 4. TENSIÓN PARALELO: bloque → T-junction en columna → PRINCIPAL (arriba)
