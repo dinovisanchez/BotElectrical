@@ -315,10 +315,12 @@ def _u_vt(ax,x,y,c=COL["S"],s=1.0,ground=True):
     ax.add_patch(Circle((x,y-1.1*s),1.25*s,fill=False,ec=c,lw=1.9,zorder=4))
     if ground: _ground(ax,x,y-2.4*s,0.55)
 
-def _u_xfmr(ax,x,y,c=INK,s=1.0):
-    """Transformador de potencia: dos circulos entrelazados."""
+def _u_xfmr(ax,x,y,c=INK,s=1.0,ground=True):
+    """Transformador de potencia: dos circulos entrelazados + tierra en neutro secundario."""
     ax.add_patch(Circle((x,y+1.5*s),2.2*s,fill=False,ec=c,lw=2.2,zorder=4))
     ax.add_patch(Circle((x,y-1.5*s),2.2*s,fill=False,ec=c,lw=2.2,zorder=4))
+    if ground:
+        _ground(ax, x, y-3.7*s, 0.5*s)
 
 def _u_relay(ax,x,y,c="#6A1B9A",funcs="50/51",s=1.0):
     """Rele de proteccion: circulo con funciones ANSI."""
@@ -1343,6 +1345,8 @@ def draw_unifilar_generico(cfg, out_path):
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
     n_trafos    = int(cfg.get("n_trafos", 1))
     interruptor = cfg.get("interruptor", "")
+    seccionador_pos = cfg.get("seccionador", "")   # "antes" | "despues" | ""
+    calibre     = cfg.get("calibre_conductor", "") or cfg.get("calibre_acometida", "")
 
     fig, ax = plt.subplots(figsize=(14, 11))
     W, H = 135, 115
@@ -1447,14 +1451,23 @@ def draw_unifilar_generico(cfg, out_path):
                         ha="center", va="center", fontsize=5.5,
                         fontweight="bold", color="white")
 
-    # ── RED / Barra principal ──────────────────────────────────────────────────
-    red_lbl = "RED (M.T.)" if tipo == "indirecta" else "RED (B.T.)"
-    busbar(y, red_lbl)
-    vline(y, y-6); y -= 6
-
-    # ── INDIRECTA: TC + TP en MT antes del trafo ──────────────────────────────
+    # ── Fuente / entrada ──────────────────────────────────────────────────────
     if tipo == "indirecta":
-        # Seccionador / Cortacircuito MT (protección primaria antes de la medida)
+        # Línea MT: solo etiqueta, no busbar (la barra MT es la red)
+        ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
+                fontsize=9, fontweight="bold", color=INK)
+        vline(y+1, y)
+    elif instalacion == "barraje":
+        busbar(y, "BARRA B.T.")
+    else:
+        # Trafo sin barraje: etiqueta sobre la línea
+        ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
+                fontsize=9, fontweight="bold", color=INK)
+        vline(y+1, y)
+    vline(y, y-4); y -= 4
+
+    # ── INDIRECTA: seccionador/cortacircuitos + TC + TP en MT ─────────────────
+    if tipo == "indirecta":
         n_cc = int(cfg.get("n_cc", 1))
         cc_y = y - 3
         vline(y, cc_y)
@@ -1471,19 +1484,13 @@ def draw_unifilar_generico(cfg, out_path):
             cc_lbl = "Seccionador MT"
         ax.text(xc-6, cc_y, cc_lbl, ha="right", va="center",
                 fontsize=7.5, color=INK, fontweight="bold")
-        vline(cc_y, cc_y-4)
-        y = cc_y - 4
+        vline(cc_y, cc_y-4); y = cc_y - 4
 
-        node_dot(y)
-        vline(y, y-4)
-
-        # TC en la linea principal
+        node_dot(y); vline(y, y-4)
         tc_y = y - 4
         _u_ct(ax, xc, tc_y, COL["R"], 1.0)
         ax.text(xc-4, tc_y, f"TC (M.T.)\n{rel_tc or '---'}",
                 ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
-
-        # TP al mismo nivel del TC — rama izquierda desde el mismo nodo de medida
         node_dot(tc_y)
         tpx = xc - 18
         ax.plot([xc, tpx], [tc_y, tc_y], color=COL["S"], lw=1.5)
@@ -1491,19 +1498,18 @@ def draw_unifilar_generico(cfg, out_path):
         _u_vt(ax, tpx, tc_y-6, COL["S"], 0.85, ground=True)
         ax.text(tpx-2, tc_y-6, f"TP (M.T.)\n{rel_tp or '---'}",
                 ha="right", va="center", fontsize=8, color=COL["S"], fontweight="bold")
-
-        # Caja de medida a la DERECHA del TC (TC+TP secundarios al circuito)
         draw_medida_box(tc_y)
-
         vline(y, y-9); y -= 9
 
     # ── TRAFO (instalacion=trafo) ──────────────────────────────────────────────
     if instalacion == "trafo":
-        if tipo == "semidirecta":
+        # Seccionador ANTES del trafo (solo si seccionador_pos == "antes")
+        if seccionador_pos == "antes":
+            vline(y, y-3)
             _u_disc(ax, xc, y-3, INK, 1.0)
             ax.text(xc-6, y-3, "Seccionador", ha="right", va="center",
                     fontsize=8, color=INK, fontweight="bold")
-            vline(y, y-6); y -= 6
+            vline(y-3, y-6); y -= 6
 
         trafo_y = y - 5
         kva_list = cfg.get("trafo_kva_list", [])
@@ -1515,21 +1521,30 @@ def draw_unifilar_generico(cfg, out_path):
                 return " + ".join(kva_list) + " kVA"
             return f"{n_t} x {kva} kVA" if kva else ""
 
-        if n_trafos == 3:
-            # Banco de 3 trafos (simbolos lado a lado)
+        if n_trafos >= 4:
+            # Banco grande: representación compacta
+            for dx in [-4.5, -1.5, 1.5, 4.5]:
+                ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.0, fill=False, ec=INK, lw=1.6))
+                ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.0, fill=False, ec=INK, lw=1.6))
+                _ground(ax, xc+dx, trafo_y-4.2, 0.35)
+            k = _banco_kva_lbl(n_trafos)
+            trafo_lbl = f"Banco {n_trafos} x trafo\n{k}" if k else f"Banco {n_trafos} x trafo"
+        elif n_trafos == 3:
             for dx in [-4.5, 0, 4.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
+                _ground(ax, xc+dx, trafo_y-4.4, 0.4)
             k = _banco_kva_lbl(3)
             trafo_lbl = f"Banco 3 x trafo\n{k}" if k else "Banco 3 x trafo"
         elif n_trafos == 2:
             for dx in [-2.5, 2.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
+                _ground(ax, xc+dx, trafo_y-4.4, 0.4)
             k = _banco_kva_lbl(2)
             trafo_lbl = f"Banco 2 x trafo\n{k}" if k else "Banco 2 x trafo"
         else:
-            _u_xfmr(ax, xc, trafo_y, INK, 1.25)
+            _u_xfmr(ax, xc, trafo_y, INK, 1.25, ground=True)
             trafo_lbl = f"Trafo {trafo_tipo}"
             if kva: trafo_lbl += f"\n{kva} kVA"
 
@@ -1537,7 +1552,7 @@ def draw_unifilar_generico(cfg, out_path):
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
         vline(y, trafo_y-5); y = trafo_y - 6
 
-        # Interruptor totalizador BT (entre trafo y barraje)
+        # Interruptor totalizador BT (entre trafo y medida)
         if interruptor:
             int_y = y - 4
             vline(y, int_y - 3)
@@ -1546,35 +1561,37 @@ def draw_unifilar_generico(cfg, out_path):
                     ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
             y = int_y - 4
 
-        busbar(y, "BARRA B.T.")
-        vline(y, y-5); y -= 5
+        vline(y, y-3); y -= 3   # continúa la línea BT hacia TC/medida
 
     # ── TC en BT (semidirecta) ────────────────────────────────────────────────
     if tipo == "semidirecta":
         node_dot(y)
         tc_y = y - 4
         _u_ct(ax, xc, tc_y, COL["R"], 1.0)
-        ax.text(xc-4, tc_y, f"TC (B.T.)\n{rel_tc or '---'}",
+        lbl_tc = f"TC (B.T.)\n{rel_tc or '---'}"
+        if calibre: lbl_tc += f"\n{calibre}"
+        ax.text(xc-4, tc_y, lbl_tc,
                 ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
-
-        # Caja de medida a la DERECHA del TC
         draw_medida_box(tc_y)
-
         vline(y, y-9); y -= 9
 
-    # ── DIRECTA: caja de medida directa ──────────────────────────────────────
+    # ── DIRECTA: caja de medida ───────────────────────────────────────────────
     if tipo == "directa":
+        if calibre:
+            ax.text(xc+2, y-2, calibre, ha="left", va="center",
+                    fontsize=7.5, color="#444", style="italic")
         draw_medida_box(y - 4)
         vline(y, y-10); y -= 10
 
-    # ── Interruptor (solo si no hay trafo; con trafo ya se dibujó arriba) ──────
-    if interruptor and instalacion != "trafo":
-        _u_breaker(ax, xc, y-3, INK, 1.0)
-        ax.text(xc-4, y-3, f"Interruptor\n{interruptor}",
-                ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
-        vline(y, y-7); y -= 7
+    # ── Seccionador DESPUÉS de la medida ─────────────────────────────────────
+    if seccionador_pos == "despues" and tipo != "indirecta":
+        vline(y, y-3)
+        _u_disc(ax, xc, y-3, INK, 1.0)
+        ax.text(xc-6, y-3, "Seccionador", ha="right", va="center",
+                fontsize=8, color=INK, fontweight="bold")
+        vline(y-3, y-6); y -= 6
     else:
-        vline(y, y-5); y -= 5
+        vline(y, y-4); y -= 4
 
     # ── CARGA ─────────────────────────────────────────────────────────────────
     ax.add_patch(Polygon([[xc-4.5,y],[xc+4.5,y],[xc,y-8]],
