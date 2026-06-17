@@ -1267,13 +1267,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 cfg["instalacion"] = "trafo"
                 _adv()
-                kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3"),("4  (banco cuatro)","4")], "n_trafos")
+                ctx.user_data["esperando_n_trafos"] = True
                 await q.edit_message_text(
                     _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                    "  1  — un transformador trifásico\n"
-                                    "  2  — banco de 2 monofásicos\n"
-                                    "  3  — banco de 3 monofásicos"),
-                    reply_markup=InlineKeyboardMarkup(kb)
+                                    "  Escribe el número  ej: 1  2  3  ...")
                 )
 
     # ── Sistema ───────────────────────────────────────────────────────────────
@@ -1416,38 +1413,12 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif campo == "trafo_uso":
         cfg["trafo_uso"] = val
         _adv()
-        kb = _kb([
-            ("1  (un trafo)",      "1"),
-            ("2  (banco dos)",     "2"),
-            ("3  (banco tres)",    "3"),
-            ("4  (banco cuatro)",  "4"),
-        ], "n_trafos")
+        ctx.user_data["esperando_n_trafos"] = True
         await q.edit_message_text(
             _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                            "  1  — un transformador trifásico\n"
-                            "  2  — banco de 2 monofásicos\n"
-                            "  3  — banco de 3 monofásicos\n"
-                            "  4  — banco de 4 monofásicos"),
-            reply_markup=InlineKeyboardMarkup(kb)
+                            "  Escribe el número  ej: 1  2  3  ...")
         )
 
-    elif campo == "n_trafos":
-        cfg["n_trafos"] = int(val)
-        n_tr = cfg["n_trafos"]
-        _adv()
-        if n_tr > 1:
-            ctx.user_data["kva_trafo_idx"] = 0
-            ctx.user_data["kva_trafo_list"] = []
-            await q.edit_message_text(
-                _header(n, cfg, f"¿Capacidad del transformador 1 de {n_tr}? (kVA)\n\n"
-                                "  Escribe solo el número  ej: 167 o 500")
-            )
-        else:
-            ctx.user_data["esperando_kva"] = True
-            await q.edit_message_text(
-                _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                                "  Escribe solo el número  ej: 75 o 150")
-            )
 
     # ── Tensión del barraje ───────────────────────────────────────────────────
     elif campo == "tension_bt":
@@ -1739,6 +1710,32 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.user_data.get("clasificando"):
         ctx.user_data["clasificando"] = False
         await _hacer_clasificacion(update, txt)
+        return
+
+    # ── Número de transformadores (texto libre) ───────────────────────────────
+    if ctx.user_data.get("esperando_n_trafos"):
+        val_str, err = _validar_numero(txt, "número de transformadores")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}\n\nEscribe solo el número  ej: 1  2  3")
+            return
+        ctx.user_data["esperando_n_trafos"] = False
+        n_tr = max(1, int(float(val_str)))
+        cfg["n_trafos"] = n_tr
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        if n_tr > 1:
+            ctx.user_data["kva_trafo_idx"] = 0
+            ctx.user_data["kva_trafo_list"] = []
+            await update.message.reply_text(
+                _header(n, cfg, f"¿Capacidad del transformador 1 de {n_tr}? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 167 o 500")
+            )
+        else:
+            ctx.user_data["esperando_kva"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 75 o 150")
+            )
         return
 
     # ── kVA banco de trafos (uno por uno) ────────────────────────────────────

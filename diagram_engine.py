@@ -1373,6 +1373,16 @@ def draw_unifilar_generico(cfg, out_path):
     def vline(ya, yb, lw=2.6):
         ax.plot([xc, xc], [ya, yb], color=INK, lw=lw, zorder=2)
 
+    def cable_lbl(ya, yb, lbl, lado=1):
+        """Etiqueta de calibre sobre el segmento vertical (ya>yb)."""
+        ym = (ya + yb) / 2
+        dx = 2.5 * lado
+        ax.plot([xc+dx*0.4, xc+dx*1.1], [ym+0.6, ym-0.6],
+                color="#555", lw=1.1, zorder=3)
+        ax.text(xc+dx+1.5*lado, ym, lbl,
+                ha="left" if lado>0 else "right", va="center",
+                fontsize=7, color="#444", style="italic")
+
     def node_dot(yy):
         ax.add_patch(Circle((xc, yy), 0.85, fc=INK, ec=INK, zorder=4))
 
@@ -1453,14 +1463,13 @@ def draw_unifilar_generico(cfg, out_path):
 
     # ── Fuente / entrada ──────────────────────────────────────────────────────
     if tipo == "indirecta":
-        # Línea MT: solo etiqueta, no busbar (la barra MT es la red)
         ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
                 fontsize=9, fontweight="bold", color=INK)
         vline(y+1, y)
     elif instalacion == "barraje":
         busbar(y, "BARRA B.T.")
+        if calibre: cable_lbl(y, y-4, calibre, lado=-1)
     else:
-        # Trafo sin barraje: etiqueta sobre la línea
         ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
                 fontsize=9, fontweight="bold", color=INK)
         vline(y+1, y)
@@ -1522,27 +1531,28 @@ def draw_unifilar_generico(cfg, out_path):
             return f"{n_t} x {kva} kVA" if kva else ""
 
         if n_trafos >= 4:
-            # Banco grande: representación compacta
-            for dx in [-4.5, -1.5, 1.5, 4.5]:
+            spacing = min(3.0, 14.0 / n_trafos)
+            xs = [(i - (n_trafos-1)/2) * spacing * 2 for i in range(n_trafos)]
+            for dx in xs:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.0, fill=False, ec=INK, lw=1.6))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.0, fill=False, ec=INK, lw=1.6))
                 _ground(ax, xc+dx, trafo_y-4.2, 0.35)
             k = _banco_kva_lbl(n_trafos)
-            trafo_lbl = f"Banco {n_trafos} x trafo\n{k}" if k else f"Banco {n_trafos} x trafo"
+            trafo_lbl = f"Trafo\n{k}" if k else "Trafo"
         elif n_trafos == 3:
             for dx in [-4.5, 0, 4.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 _ground(ax, xc+dx, trafo_y-4.4, 0.4)
             k = _banco_kva_lbl(3)
-            trafo_lbl = f"Banco 3 x trafo\n{k}" if k else "Banco 3 x trafo"
+            trafo_lbl = f"Trafo\n{k}" if k else "Trafo"
         elif n_trafos == 2:
             for dx in [-2.5, 2.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 _ground(ax, xc+dx, trafo_y-4.4, 0.4)
             k = _banco_kva_lbl(2)
-            trafo_lbl = f"Banco 2 x trafo\n{k}" if k else "Banco 2 x trafo"
+            trafo_lbl = f"Trafo\n{k}" if k else "Trafo"
         else:
             _u_xfmr(ax, xc, trafo_y, INK, 1.25, ground=True)
             trafo_lbl = f"Trafo {trafo_tipo}"
@@ -1561,37 +1571,39 @@ def draw_unifilar_generico(cfg, out_path):
                     ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
             y = int_y - 4
 
-        vline(y, y-3); y -= 3   # continúa la línea BT hacia TC/medida
+        # Calibre en la línea BT (trafo → TC/medida)
+        bt_y_top = y; vline(y, y-3); y -= 3
+        if calibre: cable_lbl(bt_y_top, y, calibre, lado=-1)
 
     # ── TC en BT (semidirecta) ────────────────────────────────────────────────
     if tipo == "semidirecta":
         node_dot(y)
         tc_y = y - 4
         _u_ct(ax, xc, tc_y, COL["R"], 1.0)
-        lbl_tc = f"TC (B.T.)\n{rel_tc or '---'}"
-        if calibre: lbl_tc += f"\n{calibre}"
-        ax.text(xc-4, tc_y, lbl_tc,
+        ax.text(xc-4, tc_y, f"TC (B.T.)\n{rel_tc or '---'}",
                 ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
         draw_medida_box(tc_y)
         vline(y, y-9); y -= 9
 
     # ── DIRECTA: caja de medida ───────────────────────────────────────────────
     if tipo == "directa":
-        if calibre:
-            ax.text(xc+2, y-2, calibre, ha="left", va="center",
-                    fontsize=7.5, color="#444", style="italic")
         draw_medida_box(y - 4)
         vline(y, y-10); y -= 10
 
     # ── Seccionador DESPUÉS de la medida ─────────────────────────────────────
+    y0_sal = y
     if seccionador_pos == "despues" and tipo != "indirecta":
         vline(y, y-3)
         _u_disc(ax, xc, y-3, INK, 1.0)
         ax.text(xc-6, y-3, "Seccionador", ha="right", va="center",
                 fontsize=8, color=INK, fontweight="bold")
         vline(y-3, y-6); y -= 6
+        if tipo == "directa" and calibre:
+            cable_lbl(y0_sal, y0_sal-3, calibre, lado=-1)
     else:
         vline(y, y-4); y -= 4
+        if tipo == "directa" and calibre:
+            cable_lbl(y0_sal, y, calibre, lado=-1)
 
     # ── CARGA ─────────────────────────────────────────────────────────────────
     ax.add_patch(Polygon([[xc-4.5,y],[xc+4.5,y],[xc,y-8]],
