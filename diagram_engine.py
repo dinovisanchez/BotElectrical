@@ -1585,10 +1585,25 @@ def draw_unifilar_generico(cfg, out_path):
         draw_medida_box(tc_y)
         vline(y, y-9); y -= 9
 
-    # ── DIRECTA: caja de medida ───────────────────────────────────────────────
+    # ── DIRECTA: medidor en línea sobre el conductor (sin bloque de prueba) ────
     if tipo == "directa":
-        draw_medida_box(y - 4)
-        vline(y, y-10); y -= 10
+        y_mid = y - 5          # centro del medidor
+        med_w = 14; med_h = 8
+        mx = xc - med_w / 2
+        my = y_mid - med_h / 2
+        vline(y, y_mid + med_h / 2)           # conductor arriba del medidor
+        vline(y_mid - med_h / 2, y - 10)      # conductor abajo del medidor
+        ax.add_patch(FancyBboxPatch((mx, my), med_w, med_h,
+                     boxstyle="round,pad=0.3,rounding_size=1.5",
+                     fill=True, fc=INK, ec="#0B0F14", lw=1.6, zorder=3))
+        ax.text(xc, y_mid + 1.2, "MEDIDOR",
+                ha="center", va="center", fontsize=6.5, fontweight="bold", color="white")
+        ax.add_patch(Rectangle((mx + 2, my + 1), med_w - 4, 3.2,
+                     fc="#0B3D2E", ec="#0A5", lw=0.7, zorder=4))
+        ax.text(xc, my + 2.6, "kWh",
+                ha="center", va="center", fontsize=5.5, color="#36df8f",
+                family="monospace", zorder=5)
+        y -= 10
 
     # ── Seccionador DESPUÉS de la medida ─────────────────────────────────────
     y0_sal = y
