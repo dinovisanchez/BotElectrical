@@ -1431,12 +1431,21 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif campo == "n_trafos":
         cfg["n_trafos"] = int(val)
+        n_tr = cfg["n_trafos"]
         _adv()
-        ctx.user_data["esperando_kva"] = True
-        await q.edit_message_text(
-            _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
-                            "  Escribe solo el número  ej: 75 o 150")
-        )
+        if n_tr > 1:
+            ctx.user_data["kva_trafo_idx"] = 0
+            ctx.user_data["kva_trafo_list"] = []
+            await q.edit_message_text(
+                _header(n, cfg, f"¿Capacidad del transformador 1 de {n_tr}? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 167 o 500")
+            )
+        else:
+            ctx.user_data["esperando_kva"] = True
+            await q.edit_message_text(
+                _header(n, cfg, "¿Capacidad del transformador? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 75 o 150")
+            )
 
     # ── Tensión del barraje ───────────────────────────────────────────────────
     elif campo == "tension_bt":
@@ -1728,6 +1737,58 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.user_data.get("clasificando"):
         ctx.user_data["clasificando"] = False
         await _hacer_clasificacion(update, txt)
+        return
+
+    # ── kVA banco de trafos (uno por uno) ────────────────────────────────────
+    if ctx.user_data.get("kva_trafo_idx") is not None:
+        val_str, err = _validar_numero(txt, "kVA del transformador")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}")
+            return
+        idx = ctx.user_data["kva_trafo_idx"]
+        lst = ctx.user_data.get("kva_trafo_list", [])
+        lst.append(val_str)
+        n_tr = cfg.get("n_trafos", 1)
+
+        if len(lst) < n_tr:
+            # Más trafos por configurar
+            ctx.user_data["kva_trafo_idx"] = idx + 1
+            ctx.user_data["kva_trafo_list"] = lst
+            await update.message.reply_text(
+                _header(n, cfg, f"¿Capacidad del transformador {idx+2} de {n_tr}? (kVA)\n\n"
+                                "  Escribe solo el número  ej: 167 o 500")
+            )
+            return
+
+        # Todos recolectados — guardar y continuar el flujo
+        ctx.user_data.pop("kva_trafo_idx")
+        ctx.user_data.pop("kva_trafo_list", None)
+        cfg["trafo_kva_list"] = lst
+        cfg["trafo_kva"] = lst[0] if len(set(lst)) == 1 else " + ".join(lst)
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        tipo = cfg["tipo"]
+
+        if tipo == "indirecta":
+            kb = _kb([
+                ("Antes de la medida",   "antes"),
+                ("Después de la medida", "despues"),
+            ], "seccionador")
+            await update.message.reply_text(
+                _header(n, cfg,
+                        "¿El seccionador está antes o después de la medida?\n\n"
+                        "  Antes    lado de red (MT)\n"
+                        "  Después  lado de carga (BT)"),
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        elif tipo == "directa":
+            await _kb_norma_msg(update.message, cfg, n)
+        else:
+            ctx.user_data["esperando_rel_tc"] = True
+            await update.message.reply_text(
+                _header(n, cfg, "¿Relación de los TCs?\n\n"
+                                "  Formato primario/secundario  ej: 200/5")
+            )
         return
 
     # ── kVA del transformador ─────────────────────────────────────────────────

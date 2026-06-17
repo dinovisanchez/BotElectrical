@@ -1503,17 +1503,28 @@ def draw_unifilar_generico(cfg, out_path):
             vline(y, y-6); y -= 6
 
         trafo_y = y - 5
+        kva_list = cfg.get("trafo_kva_list", [])
+
+        def _banco_kva_lbl(n_t):
+            if kva_list and len(kva_list) == n_t:
+                if len(set(kva_list)) == 1:
+                    return f"{n_t} x {kva_list[0]} kVA"
+                return " + ".join(kva_list) + " kVA"
+            return f"{n_t} x {kva} kVA" if kva else ""
+
         if n_trafos == 3:
             # Banco de 3 trafos (simbolos lado a lado)
             for dx in [-4.5, 0, 4.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
-            trafo_lbl = f"Banco 3 x trafo\n3 x {kva} kVA" if kva else "Banco 3 x trafo"
+            k = _banco_kva_lbl(3)
+            trafo_lbl = f"Banco 3 x trafo\n{k}" if k else "Banco 3 x trafo"
         elif n_trafos == 2:
             for dx in [-2.5, 2.5]:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.2, fill=False, ec=INK, lw=1.8))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.2, fill=False, ec=INK, lw=1.8))
-            trafo_lbl = f"Banco 2 x trafo\n2 x {kva} kVA" if kva else "Banco 2 x trafo"
+            k = _banco_kva_lbl(2)
+            trafo_lbl = f"Banco 2 x trafo\n{k}" if k else "Banco 2 x trafo"
         else:
             _u_xfmr(ax, xc, trafo_y, INK, 1.25)
             trafo_lbl = f"Trafo {trafo_tipo}"
