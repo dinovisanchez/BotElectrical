@@ -1086,7 +1086,7 @@ async def _kb_respaldo_q(q, cfg, n):
         _header(n, cfg,
                 "¿Configuración de medidores?\n\n"
                 "  Solo principal   un medidor\n"
-                "  Con respaldo     principal + chequeo en mismo bloque"),
+                "  Con respaldo     principal + respaldo en mismo bloque"),
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
@@ -1096,7 +1096,7 @@ async def _kb_respaldo_msg(msg, cfg, n):
         _header(n, cfg,
                 "¿Configuración de medidores?\n\n"
                 "  Solo principal   un medidor\n"
-                "  Con respaldo     principal + chequeo en mismo bloque"),
+                "  Con respaldo     principal + respaldo en mismo bloque"),
         reply_markup=InlineKeyboardMarkup(kb)
     )
 

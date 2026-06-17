@@ -96,8 +96,8 @@ def meter_bridges(sistema):
     Puentes INTERNOS en la bornera del medidor.
     tri3h (Aron): borneras 3, 8 y 9 se puentean entre si dentro del medidor.
     Con respaldo Aron:
-      - B3 bloque -> B1 medidor CHEQUEO  (cable externo, se maneja en ruteo)
-      - borne 4 CHEQUEO -> borne 6 PRINCIPAL (cable externo, se maneja en ruteo)
+      - B3 bloque -> B1 medidor RESPALDO  (cable externo, se maneja en ruteo)
+      - borne 4 RESPALDO -> borne 6 PRINCIPAL (cable externo, se maneja en ruteo)
     """
     if sistema == "tri3h":
         # Puentes internos: 3 <-> 6 <-> 9
@@ -152,7 +152,7 @@ def draw(cfg, out_path):
     fig,ax=plt.subplots(figsize=(17,11)); ax.set_xlim(0,178); ax.set_ylim(0,116); ax.axis("off")
 
     titulo=f"DIAGRAMA DE CONEXIONES   ·   MEDIDA {tipo.upper()}   ·   {SIS_TXT[sistema]}"
-    if respaldo: titulo+="   ·   PRINCIPAL + CHEQUEO"
+    if respaldo: titulo+="   ·   PRINCIPAL + RESPALDO"
     ax.text(89,112,titulo,ha="center",va="center",fontsize=15,fontweight="bold",color=INK)
     sub=f"Norma {norma}"
     if rel_tc: sub+=f"      RTC {rel_tc}"
@@ -227,7 +227,7 @@ def draw(cfg, out_path):
     else:
         h=mh*0.5
         meters=[draw_meter(132,162,60,60+h,"PRINCIPAL"),
-                draw_meter(132,162,10,10+h,"CHEQUEO")]
+                draw_meter(132,162,10,10+h,"RESPALDO")]
 
     # ---------- RUTEO PRIMARIO -> BLOQUE ----------
     src={}
@@ -659,7 +659,7 @@ def _draw_directa_retie(cfg, out_path):
     ax.text(W/2, H-2, f"DIAGRAMA DE CONEXIONES  ·  MEDIDA DIRECTA  ·  {sis_lbl}",
             ha="center", fontsize=9.5, fontweight="bold", color=INK)
     sub = f"Norma {norma}  ·  Conexion {conexion.upper()}"
-    if respaldo: sub += "  ·  PRINCIPAL + CHEQUEO"
+    if respaldo: sub += "  ·  PRINCIPAL + RESPALDO"
     ax.text(W/2, H-5.5, sub, ha="center", fontsize=8, color="#666")
 
     # ── Coordenadas de bornes ──────────────────────────────────────────────
@@ -850,8 +850,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     terms = meter_terminals(sistema, norma); n = len(terms)
     cur_ph = current_phases(sistema); all_ph = phases_of(sistema)
 
-    # Canvas: más ancho para respaldo (lado a lado), ylim reducido respecto al
-    # layout apilado anterior porque ambos medidores comparten la misma altura.
+    # Canvas más ancho para respaldo (medidores apilados verticalmente).
     fig_w = 26 if respaldo else 18
     fig_h = 15 if respaldo else 11
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
@@ -860,7 +859,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     ax.set_xlim(0, xlim); ax.set_ylim(0, ylim); ax.axis("off")
 
     titulo = f"DIAGRAMA DE CONEXIONES   ·   MEDIDA {tipo.upper()}   ·   {SIS_TXT[sistema]}"
-    if respaldo: titulo += "   ·   PRINCIPAL + CHEQUEO"
+    if respaldo: titulo += "   ·   PRINCIPAL + RESPALDO"
     ty_titulo = 171 if respaldo else 112
     ty_sub    = 167 if respaldo else 107.5
     ax.text(xlim/2, ty_titulo, titulo, ha="center", va="center",
@@ -960,16 +959,17 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     # Mapa tlbl -> (tipo, fase, color) para colorear bornes del medidor
     term_info = {t[0]: t for t in terms}
 
-    def draw_meter(mx0, mx1, y_top, etq):
+    def draw_meter(mx0, mx1, y_top, etq, ystep=None):
         """
         y_top: Y de la parte superior del área de bornes del medidor.
-        Los bornes se espacian igual que el bloque (step).
+        ystep: paso vertical entre bornes (por defecto usa el paso del bloque).
         """
+        ms = ystep if ystep is not None else step
         n_m = len(meter_order)
         # Y de cada borne del medidor en orden físico, de arriba a abajo
-        ys_m = np.array([y_top - i*step for i in range(n_m)])
-        my0 = ys_m[-1] - step*0.5
-        my1 = y_top    + step*0.5 + 14
+        ys_m = np.array([y_top - i*ms for i in range(n_m)])
+        my0 = ys_m[-1] - ms*0.5
+        my1 = y_top    + ms*0.5 + 14
         ax.add_patch(FancyBboxPatch((mx0,my0),mx1-mx0,my1-my0,
                      boxstyle="round,pad=0.6,rounding_size=3",
                      fill=True,fc=INK,ec="#0B0F14",lw=2,zorder=2))
@@ -1015,16 +1015,24 @@ def _draw_semi_indirecta_retie(cfg, out_path):
         draw_meter_bridges(m_y0, mxr0)
         meters = [(m_y0, mxr0)]
     else:
-        # Lado a lado: PRINCIPAL izquierda, CHEQUEO derecha
-        gap_m = 8   # separacion entre los dos medidores
-        mx0_p = 124; mx1_p = mx0_p + mx_w   # PRINCIPAL: 124-156
-        mx0_c = mx1_p + gap_m               # CHEQUEO: 164-196
-        mx1_c = mx0_c + mx_w
-        m_yp, mxrp = draw_meter(mx0_p, mx1_p, meter_top, "PRINCIPAL")
-        m_yc, mxrc = draw_meter(mx0_c, mx1_c, meter_top, "CHEQUEO")
+        # APILADO: PRINCIPAL arriba, RESPALDO abajo (misma columna x, distinto y)
+        m_step  = step * 0.65   # paso reducido para que quepan los dos
+        n_m     = len(meter_order)
+        gap_m_v = 10            # espacio vertical entre cuerpos de medidor
+
+        mx0_p = 124; mx1_p = mx0_p + mx_w   # columna del medidor
+        y_top_p = meter_top    # PRINCIPAL: mismo nivel superior que el bloque
+
+        m_yp, mxrp = draw_meter(mx0_p, mx1_p, y_top_p, "PRINCIPAL", ystep=m_step)
+
+        # RESPALDO: justo debajo de PRINCIPAL
+        my0_p   = y_top_p - (n_m - 1) * m_step - m_step * 0.5
+        y_top_r = my0_p - gap_m_v - m_step * 0.5 - 14
+        m_yr, mxrr = draw_meter(mx0_p, mx1_p, y_top_r, "RESPALDO", ystep=m_step)
+
         draw_meter_bridges(m_yp, mxrp)
-        draw_meter_bridges(m_yc, mxrc)
-        meters = [(m_yp, mxrp), (m_yc, mxrc)]
+        draw_meter_bridges(m_yr, mxrr)
+        meters = [(m_yp, mxrp), (m_yr, mxrr)]
 
     # ---------- RUTEO ACOMETIDA -> BLOQUE ----------
     # Reglas confirmadas por el usuario:
@@ -1109,11 +1117,10 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             ax.plot([xm, xm],[yb, ym], color=c, lw=1.8, ls=ls)
             ax.plot([xm, mxr],[ym, ym], color=c, lw=1.8, ls=ls)
     else:
-        # CON RESPALDO: puentes correctos segun norma colombiana
-        # Corriente: SERIE (bloque->PRINCIPAL->puente->CHEQUEO->bloque_cierre)
-        # Tension/Neutro: PARALELO (bloque->T-junction->ambos medidores)
-        m_yp, mxrp = meters[0]  # PRINCIPAL
-        m_yc, mxrc = meters[1]  # CHEQUEO
+        # CON RESPALDO: corriente SERIE, tensión PARALELO (layout apilado vertical)
+        # PRINCIPAL arriba, RESPALDO abajo — misma columna x, puente VERTICAL entre ellos
+        m_yp, mxrp = meters[0]  # PRINCIPAL (arriba)
+        m_yr, mxrr = meters[1]  # RESPALDO  (abajo)
 
         # Bornes de corriente por sistema
         if sistema == "tri4h":
@@ -1137,12 +1144,12 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             bornes_V     = {"2":"R"}
             bornes_N     = {"4":"N"}
 
-        # Columnas de ruteo entre bloque (xR~104) y PRINCIPAL (mxrp)
+        # Columnas de ruteo entre bloque (xR) y medidores
         n_terms_total = len(order)
         xm_cols = np.linspace(106, 120, n_terms_total)
         xm_map  = {tlbl: xm_cols[i] for i, tlbl in enumerate(order)}
 
-        # 1. CORRIENTE ENTRADA (bloque -> PRINCIPAL, solo bornes I_in)
+        # 1. CORRIENTE ENTRADA (bloque xR -> PRINCIPAL, bornes I_in)
         for tlbl, ph in bornes_I_in.items():
             if tlbl not in m_yp or tlbl not in row:
                 continue
@@ -1152,78 +1159,73 @@ def _draw_semi_indirecta_retie(cfg, out_path):
             ax.plot([xm, xm],[yb, ym], color=c, lw=2.0)
             ax.plot([xm, mxrp],[ym, ym], color=c, lw=2.0)
 
-        # 2. CORRIENTE SALIDA + PUENTES (PRINCIPAL borne_out -> CHEQUEO borne_in -> cierre bloque)
-        out_to_in = dict(zip(bornes_I_out.keys(), bornes_I_in.keys()))
+        # 2. PUENTE SERIE VERTICAL (PRINCIPAL borne_out -> RESPALDO borne_in)
+        # Los cables bajan por columnas justo a la izquierda del medidor (x < mx0_p)
+        n_bridge = max(len(bornes_I_out), 1)
+        xbr_cols = np.linspace(mx0_p - 3, mx0_p - 3*n_bridge, n_bridge)
+        xbr_map  = dict(zip(bornes_I_out.keys(), xbr_cols))
 
-        # Columnas de puente (entre PRINCIPAL mxrp y CHEQUEO mx0_c)
-        mx0_c = mx0_c if 'mx0_c' in dir() else mxrp + 10
-        xp_cols = np.linspace(mxrp+2, mx0_c-2, max(len(bornes_I_out), 1))
-        xp_map  = dict(zip(bornes_I_out.keys(), xp_cols))
-
-        # Y de bus inferior para cables de retorno (por debajo del bloque)
-        bot_bus_base = by0 - 6
-
-        for ci, ((tlbl_out, ph), tlbl_in) in enumerate(zip(bornes_I_out.items(), bornes_I_in.keys())):
+        for (tlbl_out, ph), tlbl_in in zip(bornes_I_out.items(), bornes_I_in.keys()):
             c = COL[ph]
-            # PRINCIPAL borne salida -> puente -> CHEQUEO borne entrada
-            if tlbl_out in m_yp:
-                ym_out = m_yp[tlbl_out]
-                xp = xp_map[tlbl_out]
-                ax.plot([mxrp, xp],[ym_out, ym_out], color=c, lw=1.8)
+            if tlbl_out not in m_yp or tlbl_in not in m_yr:
+                continue
+            ym_out = m_yp[tlbl_out]   # PRINCIPAL borne salida
+            ym_in  = m_yr[tlbl_in]    # RESPALDO  borne entrada
+            xbr    = xbr_map[tlbl_out]
+            # PRINCIPAL out → izquierda → baja → RESPALDO in
+            ax.plot([mxrp, xbr],[ym_out, ym_out], color=c, lw=1.8)
+            ax.plot([xbr,  xbr],[ym_out, ym_in],  color=c, lw=1.8)
+            ax.plot([xbr, mxrr],[ym_in,  ym_in],  color=c, lw=1.8)
+            ax.text(xbr - 1, (ym_out+ym_in)/2, f"{tlbl_out}→{tlbl_in}",
+                    fontsize=5.5, color=c, va="center", ha="right", style="italic")
+            ax.add_patch(Circle((xbr, ym_out), 0.55, fc=c, ec=c, zorder=6))
+            ax.add_patch(Circle((xbr, ym_in),  0.55, fc=c, ec=c, zorder=6))
 
-                if tlbl_in in m_yc:
-                    ym_in = m_yc[tlbl_in]
-                    ax.plot([xp, xp],[ym_out, ym_in], color=c, lw=1.8)
-                    ax.plot([xp, mxrc],[ym_in, ym_in], color=c, lw=1.8)
-                    ax.text(xp, (ym_out+ym_in)/2, f"  {tlbl_out}→{tlbl_in}",
-                            fontsize=6, color=c, va="center", ha="left", style="italic")
-                    ax.add_patch(Circle((xp, ym_out), 0.55, fc=c, ec=c, zorder=6))
-                    ax.add_patch(Circle((xp, ym_in), 0.55, fc=c, ec=c, zorder=6))
+        # 3. CIERRE RETORNO (RESPALDO borne_out -> bloque cierre, línea punteada)
+        # Ruta: RESPALDO out → izquierda (fuera del medidor) → abajo bajo la caja
+        #       → más a la izquierda → arriba hasta el borne cierre del bloque
+        y_bus_base = 5   # bus horizontal por debajo de todo (cerca del fondo del canvas)
 
-            # CHEQUEO borne salida -> bloque cierre via bus INFERIOR (sin cruzar PRINCIPAL)
-            if tlbl_out in m_yc and tlbl_out in row:
-                yb_cierre = row[tlbl_out][0]
-                ym_cout = m_yc[tlbl_out]
-                y_bus = bot_bus_base - ci * 3   # escalonado por fase
-                xret  = xL - 2 - ci * 2         # columna escalonada junto al bloque
-                ax.plot([mxrc, mxrc],[ym_cout, y_bus], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([mxrc, xret],[y_bus, y_bus], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([xret, xret],[y_bus, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
-                ax.plot([xret, xL],[yb_cierre, yb_cierre], color=c, lw=1.5, ls=(0,(4,2)))
+        for ci, (tlbl_out, ph) in enumerate(bornes_I_out.items()):
+            if tlbl_out not in m_yr or tlbl_out not in row:
+                continue
+            yb_cierre = row[tlbl_out][0]   # borne cierre en el bloque
+            ym_rout   = m_yr[tlbl_out]     # RESPALDO borne salida y
+            x_out     = mx0_p - 4 - ci*2  # columna lateral izquierda del medidor
+            y_bus     = y_bus_base - ci*2  # bus horizontal escalonado por fase
+            xret      = xL - 3 - ci*2     # columna de retorno junto al bloque
+            c = COL[ph]; ls = (0,(4,2))
+            ax.plot([mxrr,  x_out],[ym_rout,  ym_rout],   color=c, lw=1.5, ls=ls)
+            ax.plot([x_out, x_out],[ym_rout,  y_bus],     color=c, lw=1.5, ls=ls)
+            ax.plot([x_out, xret], [y_bus,    y_bus],     color=c, lw=1.5, ls=ls)
+            ax.plot([xret,  xret], [y_bus,    yb_cierre], color=c, lw=1.5, ls=ls)
+            ax.plot([xret,  xL],   [yb_cierre,yb_cierre], color=c, lw=1.5, ls=ls)
 
-        # 3. TENSION PARALELO
-        # PRINCIPAL: bloque -> columna xv -> borne izquierdo PRINCIPAL (sin cruce)
-        # CHEQUEO:   cable sale por el lado DERECHO del PRINCIPAL cruzando el gap visible
-        #            (la porcion dentro del cuerpo del PRINCIPAL queda bajo el rectangulo)
+        # 4. TENSIÓN PARALELO: bloque → T-junction en columna → PRINCIPAL (arriba)
+        #    y desde la misma columna → RESPALDO (abajo)
         all_V = {**bornes_V, **bornes_N}
         n_V = max(len(all_V), 1)
         xv_cols = np.linspace(106, 120, n_V)
-        xgap_center = (mx1_p + mx0_c) / 2   # centro del gap entre los dos medidores
 
         for i_v, (tlbl, ph) in enumerate(all_V.items()):
             if tlbl not in row:
                 continue
             c = COL[ph]; ls = (0,(6,3)) if ph=="N" else "-"
             yb = row[tlbl][0]; xv = xv_cols[i_v]
-
-            # Bloque -> columna de ruteo (horizontal)
             ax.plot([xR, xv],[yb, yb], color=c, lw=1.6, ls=ls)
 
-            # -> PRINCIPAL: vertical hasta nivel del borne + horizontal al borne
-            if tlbl in m_yp:
-                ym_p = m_yp[tlbl]
-                ax.plot([xv, xv],[yb, ym_p], color=c, lw=1.5, ls=ls)
-                ax.plot([xv, mxrp],[ym_p, ym_p], color=c, lw=1.5, ls=ls)
+            ym_p = m_yp.get(tlbl)
+            ym_r = m_yr.get(tlbl)
 
-                # -> CHEQUEO: cable horizontal que cruza el gap (bajo el cuerpo de PRINCIPAL)
-                #    el tramo dentro del PRINCIPAL (mxrp->mx1_p) queda oculto bajo el rectangulo
-                if tlbl in m_yc:
-                    ym_c = m_yc[tlbl]   # == ym_p (mismos medidores, mismo step)
-                    ax.plot([mxrp, mxrc],[ym_p, ym_p], color=c, lw=1.3, ls=ls, zorder=1)
-                    if abs(ym_c - ym_p) > 0.5:
-                        ax.plot([mxrc, mxrc],[ym_p, ym_c], color=c, lw=1.3, ls=ls, zorder=3)
-                    # punto de bifurcacion visible en el gap
-                    ax.add_patch(Circle((xgap_center, ym_p), 0.65, fc=c, ec=c, zorder=6))
+            if ym_p is not None:
+                ax.plot([xv, xv],   [yb,  ym_p], color=c, lw=1.5, ls=ls)
+                ax.plot([xv, mxrp], [ym_p, ym_p], color=c, lw=1.5, ls=ls)
+            if ym_r is not None:
+                ax.plot([xv, xv],   [yb,  ym_r], color=c, lw=1.3, ls=ls, zorder=1)
+                ax.plot([xv, mxrr], [ym_r, ym_r], color=c, lw=1.3, ls=ls)
+            if ym_p is not None and ym_r is not None:
+                # T-junction visible en la columna de ruteo
+                ax.add_patch(Circle((xv, yb), 0.65, fc=c, ec=c, zorder=6))
 
     # tri3h: puente C1->C2 en bornera (solo puntos en C1 y C2, no en el medio)
     # y cable desde C1 al borne 4 del medidor
@@ -1424,7 +1426,7 @@ def draw_unifilar_generico(cfg, out_path):
                     ha="center", va="center", fontsize=5.5, color="#36df8f",
                     family="monospace", zorder=5)
         else:
-            # PRINCIPAL arriba, CHEQUEO abajo, dentro de la caja
+            # PRINCIPAL arriba, RESPALDO abajo, dentro de la caja
             sep = half_h - 2
             y_p = bp_mid + sep/2
             y_c = bp_mid - sep/2
@@ -1436,7 +1438,7 @@ def draw_unifilar_generico(cfg, out_path):
             ax.plot([jx, med_x0], [y_p, y_p], color=INK, lw=1.2, zorder=3)
             ax.plot([jx, med_x0], [y_c, y_c], color=INK, lw=1.0, ls=(0,(3,2)), zorder=3)
 
-            for etq, my, fc in [("PRINCIPAL", y_p, INK), ("CHEQUEO", y_c, "#1a3a6a")]:
+            for etq, my, fc in [("PRINCIPAL", y_p, INK), ("RESPALDO", y_c, "#1a3a6a")]:
                 ax.add_patch(FancyBboxPatch((med_x0, my - med_h/2), med_w, med_h,
                              boxstyle="round,pad=0.3,rounding_size=1.5",
                              fill=True, fc=fc, ec="#0B0F14", lw=1.2, zorder=3))

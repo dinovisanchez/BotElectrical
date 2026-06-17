@@ -88,7 +88,7 @@ def parse_spec(text):
     # --- RESPALDO ---
     if any(x in t for x in ["respaldo", "chequeo", "principal", "2 medidor", "dos medidor"]):
         cfg["respaldo"] = True
-        entendido.append("Con respaldo (principal + chequeo)")
+        entendido.append("Con respaldo (principal + respaldo)")
 
     # --- NORMA ---
     norma_count = sum(1 for x in ["cens", "ra8", "ra-8"] if x in t)
