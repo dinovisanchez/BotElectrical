@@ -441,6 +441,83 @@ PROMPT_SISTEMA_RETIE = (
     "    🎯 clasificaciones   |  💰 costos        |  🔋 energia\n"
 )
 
+PROMPT_DIAGRAMA = (
+    "Eres un Ingeniero Electricista Senior colombiano especialista en sistemas de "
+    "medicion de energia electrica (RETIE 2024, CREG 038/2014).\n"
+    "\n"
+    "Tu tarea UNICA es recopilar toda la informacion necesaria para generar un "
+    "diagrama electrico correcto. No das conceptos tecnicos extensos. Solo preguntas "
+    "y confirmaciones tecnicas breves.\n"
+    "\n"
+    "=== REGLAS ESTRICTAS ===\n"
+    "- Haz MAXIMA UNA pregunta a la vez.\n"
+    "- Si el usuario da informacion en la primera descripcion, usala como base y "
+    "pregunta solo lo que falta.\n"
+    "- Si la respuesta tecnica del usuario tiene un error, corrigelo brevemente "
+    "y continua.\n"
+    "- NUNCA inventes ni supongas datos que el usuario no haya dado.\n"
+    "- Cuando tengas TODA la informacion, emite la senal DIAGRAMA_LISTO.\n"
+    "\n"
+    "=== INFORMACION QUE DEBES RECOPILAR ===\n"
+    "1. DIAGRAMA: conexiones, unifilar, o ambos.\n"
+    "2. SISTEMA: mono / bifasico / trifasico 3H (2 elementos, Aron) / trifasico 4H (3 elementos).\n"
+    "3. TIPO DE MEDIDA: directa (sin TC/TP) / semidirecta (con TC) / indirecta (TC + TP).\n"
+    "   Ayuda si no sabe: directa < 100 A BT, semidirecta > 100 A o hasta 600 V, indirecta MT.\n"
+    "4. INSTALACION: trafo propio / barra BT / red directa.\n"
+    "   Si hay trafo: cantidad, kVA de cada uno, tipo (mono/bi/tri), tension MT.\n"
+    "   Si es barra: tension de la barra.\n"
+    "5. PROTECCIONES:\n"
+    "   Interruptor totalizador: amperaje.\n"
+    "   Seccionador de medida: antes o despues del bloque de pruebas.\n"
+    "6. EQUIPOS DE MEDIDA:\n"
+    "   Semidirecta/Indirecta: relacion TC (ej. 200/5).\n"
+    "   Indirecta: relacion TP (ej. 13200/120).\n"
+    "   Norma: RA8 (operador nacional) o CENS (Codensa/Enel).\n"
+    "   Con o sin medidor de respaldo.\n"
+    "7. CONDUCTOR: calibre principal (ej. AWG 2/0). Si no sabe, omitir.\n"
+    "\n"
+    "=== SENAL DE DIAGRAMA LISTO ===\n"
+    "Cuando tengas TODA la informacion, responde EXACTAMENTE:\n"
+    "\n"
+    "DIAGRAMA_LISTO\n"
+    "```json\n"
+    "{\n"
+    '  "sistema": "tri4h",\n'
+    '  "tipo": "semidirecta",\n'
+    '  "salida": "ambos",\n'
+    '  "norma": "RA8",\n'
+    '  "instalacion": "trafo",\n'
+    '  "n_trafos": 1,\n'
+    '  "trafo_kva": "225",\n'
+    '  "trafo_tipo": "trifasico",\n'
+    '  "interruptor": "400 A",\n'
+    '  "seccionador": "despues",\n'
+    '  "rel_tc": "200/5",\n'
+    '  "calibre_conductor": "AWG 2/0",\n'
+    '  "respaldo": false\n'
+    "}\n"
+    "```\n"
+    "\n"
+    "CAMPOS DEL JSON:\n"
+    'sistema: "mono" | "bifasico" | "tri3h" | "tri4h"\n'
+    'tipo: "directa" | "semidirecta" | "indirecta"\n'
+    'salida: "conexiones" | "unifilar" | "ambos"\n'
+    'norma: "RA8" | "CENS"\n'
+    'instalacion: "trafo" | "barraje" | "" (vacio = red sin trafo)\n'
+    "n_trafos: entero >= 1\n"
+    "trafo_kva: string ej '225'\n"
+    "trafo_kva_list: lista ej ['225','112'] si hay varios trafos\n"
+    'trafo_tipo: "monofasico" | "bifasico" | "trifasico"\n'
+    "interruptor: string ej '400 A'\n"
+    'seccionador: "antes" | "despues" | ""\n'
+    "rel_tc: string ej '200/5'\n"
+    "rel_tp: string ej '13200/120'\n"
+    "calibre_conductor: string ej 'AWG 2/0'\n"
+    "respaldo: true | false\n"
+    "v_mt: string ej '13.2 kV' (tension MT, solo indirecta)\n"
+    "tension_bt: string ej '220' (solo si instalacion=barraje)\n"
+)
+
 SIS_TXT = {
     "mono":    "Monofásica",
     "bifasico":"Bifásica",
@@ -921,6 +998,60 @@ async def _consulta_retie(update: Update, texto: str):
             )
 
 
+async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
+    """Conversacion guiada por Gemini para recopilar specs del diagrama."""
+    historial: list = ctx.user_data.setdefault("historial_diagrama", [])
+    historial.append({"role": "user", "parts": [{"text": texto_usuario}]})
+
+    await update.message.reply_chat_action("typing")
+    try:
+        response = await _genai_client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[{"role": m["role"], "parts": m["parts"]} for m in historial],
+            config=types.GenerateContentConfig(system_instruction=PROMPT_DIAGRAMA),
+        )
+        respuesta = (response.text or "").strip()
+    except Exception as e:
+        log.error(f"Error dialogo_diagrama: {e}")
+        await update.message.reply_text(
+            "⚠️ Error temporal con el servicio IA.\n"
+            "Intenta de nuevo o usa /menu para el flujo guiado."
+        )
+        return
+
+    respuesta_clean = respuesta.replace("**", "").replace("__", "")
+
+    if "DIAGRAMA_LISTO" in respuesta:
+        json_m = re.search(r"```json\s*(\{.*?\})\s*```", respuesta, re.DOTALL)
+        if json_m:
+            try:
+                ia_cfg = json.loads(json_m.group(1))
+                cfg = dict(DEFAULT)
+                for k, v in ia_cfg.items():
+                    if v is not None and v != "":
+                        cfg[k] = v
+                if cfg.get("trafo_tipo") and not cfg.get("trafo_uso"):
+                    cfg["trafo_uso"] = cfg["trafo_tipo"]
+                ctx.user_data["modo_diagrama_ia"] = False
+                ctx.user_data["historial_diagrama"] = []
+                await update.message.reply_text("Generando diagrama…")
+                await _enviar_foto(update.message, cfg)
+                return
+            except (json.JSONDecodeError, KeyError) as e:
+                log.error(f"JSON malformado de Gemini diagrama: {e}")
+        ctx.user_data["modo_diagrama_ia"] = False
+        ctx.user_data["historial_diagrama"] = []
+        await update.message.reply_text(
+            "⚠️ No pude procesar la especificacion. Usa /menu para el flujo guiado."
+        )
+        return
+
+    historial.append({"role": "model", "parts": [{"text": respuesta}]})
+    if len(historial) == 2:
+        respuesta_clean = respuesta_clean + "\n\n_Escribe /cancelar para salir en cualquier momento._"
+    await update.message.reply_text(respuesta_clean)
+
+
 async def _procesar_texto(update, texto):
     try:
         cfg, entendido, faltante = parse_spec(texto)
@@ -1244,20 +1375,34 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         else:
-            _adv()
-            kb = _kb([
-                ("⬇  Directa",      "directa"),
-                ("⚡  Semidirecta",  "semidirecta"),
-                ("🔭  Indirecta",   "indirecta"),
-            ], "tipo")
-            await q.edit_message_text(
-                _header(n, cfg,
-                        "Tipo de medida:\n\n"
-                        "  ⬇  Directa      V e I directos al medidor\n"
-                        "  ⚡  Semidirecta  I por TC, tensión directa\n"
-                        "  🔭  Indirecta   TC + TP  (media tensión / AT)"),
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
+            if _genai_client:
+                ctx.user_data["modo_diagrama_ia"] = True
+                ctx.user_data["historial_diagrama"] = []
+                await q.edit_message_text(
+                    "📐 Diseño de Diagrama\n"
+                    "──────────────────────────────\n\n"
+                    "Describe tu instalacion y yo hago las preguntas necesarias.\n\n"
+                    "Ejemplos:\n"
+                    "  medida semidirecta trifasica, trafo 225 kVA\n"
+                    "  conexiones directa monofasica norma CENS\n"
+                    "  indirecta industrial 13.2 kV con unifilar\n\n"
+                    "Escribe tu descripcion:"
+                )
+            else:
+                _adv()
+                kb = _kb([
+                    ("⬇  Directa",      "directa"),
+                    ("⚡  Semidirecta",  "semidirecta"),
+                    ("🔭  Indirecta",   "indirecta"),
+                ], "tipo")
+                await q.edit_message_text(
+                    _header(n, cfg,
+                            "Tipo de medida:\n\n"
+                            "  ⬇  Directa      V e I directos al medidor\n"
+                            "  ⚡  Semidirecta  I por TC, tensión directa\n"
+                            "  🔭  Indirecta   TC + TP  (media tensión / AT)"),
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
 
     # ── Tipo ─────────────────────────────────────────────────────────────────
     elif campo == "tipo":
@@ -1763,6 +1908,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cfg = ctx.user_data.get("cfg", dict(DEFAULT))
     txt = update.message.text.strip()
     n   = ctx.user_data.get("paso_n", 1)
+
+    # ── Modo diagrama IA ──────────────────────────────────────────────────────
+    if ctx.user_data.get("modo_diagrama_ia"):
+        await _dialogo_diagrama(update, ctx, txt)
+        return
 
     # ── Modo consulta (seleccionado desde /menu) ──────────────────────────────
     if ctx.user_data.get("modo_consulta"):
