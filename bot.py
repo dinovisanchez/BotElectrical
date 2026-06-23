@@ -999,26 +999,44 @@ async def _consulta_retie(update: Update, texto: str):
 
 
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
-    """Conversacion guiada por Gemini para recopilar specs del diagrama."""
+    """Conversacion guiada por Gemini. Historial = lista de {"role":"user"|"model","text":"..."}"""
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
-    historial.append({"role": "user", "parts": [{"text": texto_usuario}]})
+    historial.append({"role": "user", "text": texto_usuario})
+
+    # Construir prompt plano (mismo patron que _consulta_retie)
+    conv = PROMPT_DIAGRAMA + "\n\n--- CONVERSACION ---\n"
+    for m in historial:
+        lbl = "USUARIO" if m["role"] == "user" else "INGENIERO"
+        conv += f"\n{lbl}: {m['text']}"
 
     await update.message.reply_chat_action("typing")
-    try:
-        response = await _genai_client.aio.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[{"role": m["role"], "parts": m["parts"]} for m in historial],
-            config=types.GenerateContentConfig(system_instruction=PROMPT_DIAGRAMA),
-        )
-        respuesta = (response.text or "").strip()
-    except Exception as e:
-        log.error(f"Error dialogo_diagrama: {e}")
+    response = None
+    last_err = None
+    for intento in range(3):
+        try:
+            response = await _genai_client.aio.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=conv,
+            )
+            break
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+                if intento < 2:
+                    await asyncio.sleep(2 * (intento + 1))
+                    continue
+            break
+
+    if response is None:
+        log.error(f"Error dialogo_diagrama: {last_err}")
         await update.message.reply_text(
             "⚠️ Error temporal con el servicio IA.\n"
             "Intenta de nuevo o usa /menu para el flujo guiado."
         )
         return
 
+    respuesta = (response.text or "").strip()
     respuesta_clean = respuesta.replace("**", "").replace("__", "")
 
     if "DIAGRAMA_LISTO" in respuesta:
@@ -1038,7 +1056,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 await _enviar_foto(update.message, cfg)
                 return
             except (json.JSONDecodeError, KeyError) as e:
-                log.error(f"JSON malformado de Gemini diagrama: {e}")
+                log.error(f"JSON malformado de Gemini diagrama: {e}\n{respuesta}")
         ctx.user_data["modo_diagrama_ia"] = False
         ctx.user_data["historial_diagrama"] = []
         await update.message.reply_text(
@@ -1046,9 +1064,9 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         )
         return
 
-    historial.append({"role": "model", "parts": [{"text": respuesta}]})
+    historial.append({"role": "model", "text": respuesta})
     if len(historial) == 2:
-        respuesta_clean = respuesta_clean + "\n\n_Escribe /cancelar para salir en cualquier momento._"
+        respuesta_clean += "\n\n_Escribe /cancelar para salir en cualquier momento._"
     await update.message.reply_text(respuesta_clean)
 
 
