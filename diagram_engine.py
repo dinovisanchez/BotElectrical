@@ -1344,9 +1344,10 @@ def draw_unifilar_generico(cfg, out_path):
     kva         = cfg.get("trafo_kva", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
     n_trafos    = int(cfg.get("n_trafos", 1))
-    interruptor = cfg.get("interruptor", "")
-    seccionador_pos = cfg.get("seccionador", "")   # "antes" | "despues" | ""
-    calibre     = cfg.get("calibre_conductor", "") or cfg.get("calibre_acometida", "")
+    interruptor      = cfg.get("interruptor", "")
+    interruptor_medida = bool(cfg.get("interruptor_medida", False))
+    seccionador_pos  = cfg.get("seccionador", "")   # "antes" | "despues" | ""
+    calibre          = cfg.get("calibre_conductor", "") or cfg.get("calibre_acometida", "")
 
     fig, ax = plt.subplots(figsize=(14, 11))
     W, H = 135, 115
@@ -1406,8 +1407,17 @@ def draw_unifilar_generico(cfg, out_path):
         by0 = tap_y - half_h   # solo sube/baja simétricamente
         by1 = tap_y + half_h
 
-        # Rama horizontal (línea de señal desde TC secundario al circuito)
-        ax.plot([xc, bx0], [tap_y, tap_y], color=INK, lw=1.8, zorder=2)
+        # Rama horizontal: señal desde TC/TP secundario → circuito de medida
+        # Con interruptor_medida=True: fusible de protección intercalado en la línea
+        if interruptor_medida:
+            fus_x = (xc + bx0) / 2   # centrado entre el TC y la entrada de la caja
+            ax.plot([xc, fus_x - 0.61], [tap_y, tap_y], color=INK, lw=1.8, zorder=4)
+            _u_fuse(ax, fus_x, tap_y, INK, 0.55)
+            ax.text(fus_x, tap_y + 1.4, "Fusible\nmedida", ha="center", va="bottom",
+                    fontsize=6, color=INK, fontweight="bold", zorder=5)
+            ax.plot([fus_x + 0.61, bx0], [tap_y, tap_y], color=INK, lw=1.8, zorder=4)
+        else:
+            ax.plot([xc, bx0], [tap_y, tap_y], color=INK, lw=1.8, zorder=2)
 
         # Caja punteada (circuito de medida)
         ax.add_patch(Rectangle((bx0, by0), bx1-bx0, by1-by0,
@@ -1415,9 +1425,11 @@ def draw_unifilar_generico(cfg, out_path):
         ax.text(bx0+1.5, by1-1, "Circuito de medida",
                 fontsize=6, va="top", ha="left", color="#555", style="italic")
 
-        # Bloque de prueba (centrado en tap_y)
+        # Cable interno: entrada de caja → bloque de prueba
         bp_x = bx0 + 3
         bp_h = min(12, half_h * 2 - 4)   # ajusta al espacio de la caja
+        ax.plot([bx0, bp_x], [bp_mid, bp_mid], color=INK, lw=1.5, zorder=3)
+
         ax.add_patch(FancyBboxPatch((bp_x, bp_mid - bp_h/2), bp_w, bp_h,
                      boxstyle="round,pad=0.3,rounding_size=1",
                      fill=True, fc="#E8EFF7", ec="#444", lw=1.1, zorder=3))
@@ -1466,6 +1478,12 @@ def draw_unifilar_generico(cfg, out_path):
         ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
                 fontsize=9, fontweight="bold", color=INK)
         vline(y+1, y)
+        # Pararrayos ZnO en entrada MT (RETIE 2024 Libro 3 — obligatorio en subestaciones)
+        arrx = xc + 16
+        ax.plot([xc, arrx], [y, y], color=COL["G"], lw=1.5)
+        _u_arrester(ax, arrx, y - 3, COL["G"], 0.82)
+        ax.text(arrx + 3, y - 1.5, "Pararrayos\nZnO 15kV",
+                ha="left", va="center", fontsize=7, color=COL["G"], fontweight="bold")
     elif instalacion == "barraje":
         busbar(y, "BARRA B.T.")
         if calibre: cable_lbl(y, y-4, calibre, lado=-1)
@@ -1475,25 +1493,32 @@ def draw_unifilar_generico(cfg, out_path):
         vline(y+1, y)
     vline(y, y-4); y -= 4
 
-    # ── INDIRECTA: seccionador/cortacircuitos + TC + TP en MT ─────────────────
+    # ── INDIRECTA: seccionador + cortacircuitos + TC + TP en MT ───────────────
     if tipo == "indirecta":
-        n_cc = int(cfg.get("n_cc", 1))
-        cc_y = y - 3
-        vline(y, cc_y)
+        n_cc = int(cfg.get("n_cc", 3))
+        # Seccionador MT (maniobra — siempre presente junto con los CC)
+        sec_y = y - 3
+        vline(y, sec_y)
+        _u_disc(ax, xc, sec_y, INK, 0.9)
+        ax.text(xc - 6, sec_y, "Seccionador MT", ha="right", va="center",
+                fontsize=7.5, color=INK, fontweight="bold")
+        # Cortacircuitos fusibles MT (protección — siempre presentes)
+        cc_y = sec_y - 7
+        vline(sec_y, cc_y)
         if n_cc >= 3:
             for dx in [-2.5, 0, 2.5]:
-                _u_fuse(ax, xc+dx, cc_y, INK, 0.75)
-            cc_lbl = f"{n_cc} Cortacircuitos MT"
+                _u_fuse(ax, xc + dx, cc_y, INK, 0.75)
+            cc_lbl = f"{n_cc} CC fusibles MT"
         elif n_cc == 2:
             for dx in [-1.5, 1.5]:
-                _u_fuse(ax, xc+dx, cc_y, INK, 0.75)
-            cc_lbl = "2 Cortacircuitos MT"
+                _u_fuse(ax, xc + dx, cc_y, INK, 0.75)
+            cc_lbl = "2 CC fusibles MT"
         else:
-            _u_disc(ax, xc, cc_y, INK, 1.0)
-            cc_lbl = "Seccionador MT"
-        ax.text(xc-6, cc_y, cc_lbl, ha="right", va="center",
+            _u_fuse(ax, xc, cc_y, INK, 0.85)
+            cc_lbl = "CC fusible MT"
+        ax.text(xc - 6, cc_y, cc_lbl, ha="right", va="center",
                 fontsize=7.5, color=INK, fontweight="bold")
-        vline(cc_y, cc_y-4); y = cc_y - 4
+        vline(cc_y, cc_y - 4); y = cc_y - 4
 
         node_dot(y); vline(y, y-4)
         tc_y = y - 4
@@ -1558,12 +1583,20 @@ def draw_unifilar_generico(cfg, out_path):
             trafo_lbl = f"Trafo {trafo_tipo}"
             if kva: trafo_lbl += f"\n{kva} kVA"
 
-        ax.text(xc-8, trafo_y, trafo_lbl,
-                ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
+        # Grupo vectorial estándar para distribución MT/BT en Colombia (NTC 3485 / IEC 60076)
+        if sistema in ("tri3h", "tri4h") and "mono" not in trafo_tipo.lower():
+            trafo_lbl += "\nDyn11"
+
+        # Si hay medicion indirecta MT encima, el TP ocupa la izquierda — mover etiqueta a la derecha
+        t_ha  = "left"  if tipo == "indirecta" else "right"
+        t_xpos = xc + 8 if tipo == "indirecta" else xc - 8
+        ax.text(t_xpos, trafo_y, trafo_lbl,
+                ha=t_ha, va="center", fontsize=8.5, color=INK, fontweight="bold")
         vline(y, trafo_y-5); y = trafo_y - 6
 
-        # Interruptor totalizador BT (entre trafo y medida)
-        if interruptor:
+        # Interruptor totalizador BT — solo en indirecta (queda entre trafo y carga BT)
+        # Para semidirecta y directa, el interruptor va DESPUES de la medicion (aguas abajo)
+        if interruptor and tipo == "indirecta":
             int_y = y - 4
             vline(y, int_y - 3)
             _u_breaker(ax, xc, int_y, INK, 1.0)
@@ -1584,9 +1617,24 @@ def draw_unifilar_generico(cfg, out_path):
                 ha="right", va="center", fontsize=8, color=COL["R"], fontweight="bold")
         draw_medida_box(tc_y)
         vline(y, y-9); y -= 9
+        # Interruptor totalizador DESPUES de la medicion (CREG 038/2014 — aguas abajo del punto de medida)
+        if interruptor:
+            int_y = y - 4
+            vline(y, int_y - 3)
+            _u_breaker(ax, xc, int_y, INK, 1.0)
+            ax.text(xc - 4, int_y, f"Int. Totalizador\n{interruptor}",
+                    ha="right", va="center", fontsize=8, color=INK, fontweight="bold")
+            y = int_y - 4
 
     # ── DIRECTA: medidor en línea sobre el conductor (sin bloque de prueba) ────
     if tipo == "directa":
+        # Interruptor/fusible de protección antes del medidor (RETIE 2024 — obligatorio)
+        prot_lbl = f"Interruptor\n{interruptor}" if interruptor else "Interruptor\nproteccion"
+        vline(y, y - 3)
+        _u_breaker(ax, xc, y - 3, INK, 0.85)
+        ax.text(xc - 5, y - 3, prot_lbl, ha="right", va="center",
+                fontsize=7.5, color=INK, fontweight="bold")
+        vline(y - 3, y - 6); y -= 6
         y_mid = y - 5          # centro del medidor
         med_w = 14; med_h = 8
         mx = xc - med_w / 2
@@ -1638,17 +1686,19 @@ def draw_unifilar_generico(cfg, out_path):
             ha="center", fontsize=7.5, color="#888", style="italic")
 
     sym_items = [
-        ("Transformador de potencia",      lambda x,y: _u_xfmr(ax,x,y,INK,0.72)),
-        ("Transformador de corriente (TC)",lambda x,y: _u_ct(ax,x,y,COL["R"],0.82)),
-        ("Transformador de tension (TP)",  lambda x,y: _u_vt(ax,x,y,COL["S"],0.82,False)),
-        ("Interruptor automatico",         lambda x,y: _u_breaker(ax,x,y,INK,0.82)),
-        ("Seccionador",                    lambda x,y: _u_disc(ax,x,y,INK,0.82)),
-        ("Bloque de prueba",               lambda x,y: ax.add_patch(
+        ("Transformador de potencia (Dyn11)",  lambda x,y: _u_xfmr(ax,x,y,INK,0.72)),
+        ("Transformador de corriente (TC)",    lambda x,y: _u_ct(ax,x,y,COL["R"],0.82)),
+        ("Transformador de tension (TP)",      lambda x,y: _u_vt(ax,x,y,COL["S"],0.82,False)),
+        ("Cortacircuitos fusible MT",          lambda x,y: _u_fuse(ax,x,y,INK,0.82)),
+        ("Interruptor automatico",             lambda x,y: _u_breaker(ax,x,y,INK,0.82)),
+        ("Seccionador",                        lambda x,y: _u_disc(ax,x,y,INK,0.82)),
+        ("Pararrayos / DPS (ZnO)",             lambda x,y: _u_arrester(ax,x,y,COL["G"],0.72)),
+        ("Bloque de prueba",                   lambda x,y: ax.add_patch(
             Rectangle((x-3,y-1.8),6,3.6,fill=True,fc="#E8EFF7",ec="#444",lw=1.0))),
-        ("Medidor de energia (kWh)",       lambda x,y: ax.add_patch(
+        ("Medidor de energia (kWh)",           lambda x,y: ax.add_patch(
             Rectangle((x-3,y-1.8),6,3.6,fill=True,fc=INK,ec=INK))),
-        ("Barra / barraje",                lambda x,y: ax.plot([x-3.5,x+3.5],[y,y],color=INK,lw=3.5)),
-        ("Carga (general)",                lambda x,y: ax.add_patch(
+        ("Barra / barraje",                    lambda x,y: ax.plot([x-3.5,x+3.5],[y,y],color=INK,lw=3.5)),
+        ("Carga (general)",                    lambda x,y: ax.add_patch(
             Polygon([[x-2,y+2],[x+2,y+2],[x,y-2]],closed=True,fill=False,ec=INK,lw=1.6))),
     ]
     sx = px0+8; tx = px0+16
