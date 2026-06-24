@@ -1,0 +1,389 @@
+NTC 2050 — CÓDIGO ELÉCTRICO COLOMBIANO
+Equivalente a NFPA 70 (National Electrical Code) adaptado para Colombia
+Organismo: ICONTEC
+Aplicación: Instalaciones eléctricas en edificaciones, industria y comercio
+Versión de referencia: 1ª Edición (vigente; complementada por RETIE 2024)
+
+NOTA: El RETIE 2024 y las resoluciones CREG prevalecen sobre NTC 2050 en caso
+de contradicción. NTC 2050 es la base técnica de diseño; RETIE es el reglamento
+de cumplimiento obligatorio.
+
+==============================================================
+SECCIÓN 90 — INTRODUCCIÓN
+==============================================================
+
+Propósito: Salvaguardar personas y bienes de peligros derivados del uso
+de la electricidad.
+
+Campo de aplicación:
+- Instalaciones eléctricas en edificios públicos, residenciales, comerciales
+  e industriales.
+- Conductores y equipos para conexión a fuentes de energía.
+- Instalaciones de comunicaciones que se conectan a sistemas eléctricos.
+
+No aplica a:
+- Líneas de distribución y transmisión de energía (rigen normas CREG/RETIE).
+- Instalaciones de ferrocarriles.
+- Instalaciones de plantas de generación (tienen normas propias).
+
+==============================================================
+SECCIÓN 100 — DEFINICIONES
+==============================================================
+
+ACOMETIDA: Conductores y equipos para entregar energía desde las redes
+del proveedor al sistema de alambrado del usuario. Incluye desde el punto
+de derivación hasta el medidor (exclusive).
+
+ALIMENTADOR: Todo conductor de circuito entre el equipo de acometida y
+el último dispositivo de protección contra sobrecorriente del circuito ramal.
+
+CIRCUITO RAMAL: Conductores entre el último dispositivo de protección
+contra sobrecorriente y las salidas.
+
+TIERRA (Ground): Conexión conductora, intencional o accidental, entre
+un circuito eléctrico o equipo y la tierra, o a un cuerpo conductor que
+sirva como tierra.
+
+NEUTRO: Conductor de un sistema conectado al punto neutro del sistema.
+En Colombia: N en sistemas monofásicos y trifásicos.
+
+TENSIÓN NOMINAL: Valor de tensión asignado a un circuito o sistema
+que sirve para designar y diferenciar clases de circuitos.
+En Colombia: 120/240 V mono; 120/208 V trifásico; 220/380 V trifásico.
+
+==============================================================
+SECCIÓN 200 — USO E IDENTIFICACIÓN DE CONDUCTORES
+==============================================================
+
+COLOR DE CONDUCTORES (Colombia — RETIE prevalece):
+- Fase R/L1: Rojo
+- Fase S/L2: Amarillo (o Azul en algunos sistemas BT)
+- Fase T/L3: Azul (o Negro en algunos sistemas)
+- Neutro (N): Blanco o Gris claro
+- Tierra de protección (PE): Verde o Verde-Amarillo
+
+IMPORTANTE: En Colombia el RETIE 2024, Libro 3, Título 5 es la norma
+de obligatorio cumplimiento para colores. NTC 2050 aplica como referencia.
+
+Regla clave:
+- El conductor neutro (blanco/gris) NUNCA puede ser usado como fase.
+- El conductor de tierra (verde/verde-amarillo) NUNCA puede conectarse
+  en bornes del medidor.
+
+==============================================================
+SECCIÓN 210 — CIRCUITOS RAMALES
+==============================================================
+
+Tabla de calibres mínimos para circuitos ramales residenciales:
+- 15 A: AWG 14 (2,08 mm²) — iluminación y tomacorrientes generales
+- 20 A: AWG 12 (3,31 mm²) — cocinas, lavadoras, baños
+- 30 A: AWG 10 (5,26 mm²) — secadoras, equipos 240 V
+- 40 A: AWG 8 (8,37 mm²) — hornos, duchas eléctricas
+- 50 A: AWG 6 (13,3 mm²) — acometidas residenciales medianas
+
+Demanda máxima en tomacorrientes: 1.500 W por circuito de 20 A (general).
+
+==============================================================
+SECCIÓN 215 — ALIMENTADORES
+==============================================================
+
+Capacidad mínima del alimentador:
+- 125% de la carga continua más el 100% de la carga no continua.
+- La protección del alimentador debe ser al menos la mayor de:
+  125% de la carga del motor más grande, o suma total de las cargas.
+
+Caída de tensión máxima recomendada (no obligatorio en NTC 2050,
+sí en muchas especificaciones de diseño):
+- 3% en el alimentador.
+- 5% total (alimentador + circuito ramal).
+- RETIE 2024 no fija un porcentaje único; remite a NTC 2050 y al
+  criterio del diseñador.
+
+==============================================================
+SECCIÓN 220 — CÁLCULO DE CARGAS EN CIRCUITOS RAMALES Y ALIMENTADORES
+==============================================================
+
+Demanda unitaria para viviendas (Tabla 220-11):
+- Primeros 3.000 VA: al 100%
+- Siguientes 3.001 a 120.000 VA: al 35%
+- Por encima de 120.000 VA: al 25%
+
+Carga de iluminación general en residencias: 33 VA/m² (o 3 W/ft²).
+
+Cargas de cocinas y hornos (Tabla 220-19):
+- 1 horno o cocina eléctrica: carga de demanda según tabla (varía de
+  6 kW a 12 kW dependiendo de la capacidad nominal del equipo).
+
+==============================================================
+SECCIÓN 230 — ACOMETIDAS
+==============================================================
+
+Requisitos de acometida aérea:
+- Altura mínima sobre terreno: 3,0 m en patios/accesos peatonales.
+- Altura mínima sobre calles vehiculares: 5,5 m.
+- Punto de conexión del servicio (mastil): mínimo 3,0 m sobre el nivel
+  del techo.
+
+Protección de la acometida:
+- El punto de entrada debe tener cabezote de acometida (servicio head)
+  curvado hacia abajo para evitar entrada de agua.
+- Los conductores de acometida deben protegerse mecánicamente donde
+  atraviesan paredes, techos o estructuras.
+
+Equipos de acometida (service entrance equipment):
+- Interruptor principal o caja de fusibles como dispositivo de desconexión.
+- Medidor de energía instalado por el operador de red.
+- El interruptor principal debe estar en un lugar accesible y señalizado.
+
+Número máximo de desconexiones: 6 dispositivos de desconexión de acometida.
+
+==============================================================
+SECCIÓN 240 — PROTECCIÓN CONTRA SOBRECORRIENTE
+==============================================================
+
+Principio: Todo conductor debe estar protegido contra sobrecorriente
+a su capacidad nominal o menor.
+
+Calibre del conductor vs. corriente nominal del interruptor:
+- AWG 14 → máximo 15 A
+- AWG 12 → máximo 20 A
+- AWG 10 → máximo 30 A
+- AWG 8 → máximo 40 A (o 50 A si conductor es de 60°C)
+- AWG 6 → máximo 55 A
+- AWG 4 → máximo 70 A
+- AWG 2 → máximo 95 A (o 100 A con corrección de temperatura)
+- AWG 1/0 → máximo 125 A
+- AWG 2/0 → máximo 145 A (o 150 A con temperaturas consideradas)
+- AWG 3/0 → máximo 165 A (o 200 A en condiciones específicas)
+- AWG 4/0 → máximo 230 A
+
+Conductores de cobre clase B a 75°C (THWN) — Tabla 310-16.
+En Colombia: temperatura ambiente promedio 30-35°C; aplicar factores
+de corrección de la Tabla 310-16.
+
+DISYUNTORES (Circuit Breakers):
+- Deben ser de la capacidad adecuada para la carga.
+- En tableros residenciales: mínimo 100 A en acometida principal
+  (recomendado 150-200 A para viviendas modernas).
+- Interruptores para circuitos de iluminación: 15 A o 20 A.
+
+FUSIBLES:
+- En sistemas con medidor indirecto (semidirecta/indirecta): los fusibles
+  de los TPs deben ser del tipo y capacidad especificado por el fabricante.
+- Fusibles en circuito secundario de TC: PROHIBIDO (riesgo de apertura
+  del secundario; se usan cortocircuitadores).
+
+==============================================================
+SECCIÓN 250 — PUESTA A TIERRA (GROUNDING)
+==============================================================
+
+Este es uno de los artículos más importantes de NTC 2050 y con mayor
+relación directa con el RETIE 2024.
+
+OBJETIVO DE LA PUESTA A TIERRA:
+1. Limitar tensiones por descargas atmosféricas, sobretensiones de línea.
+2. Estabilizar la tensión de línea a tierra durante la operación normal.
+3. Facilitar la operación de los dispositivos de protección contra
+   sobrecorriente en caso de falla a tierra.
+
+SISTEMAS QUE DEBEN PONERSE A TIERRA (Art. 250-5):
+- Sistemas de CA de 50 V a 1.000 V donde la tensión a tierra no exceda
+  de 150 V (sistemas 120/240 V, 120/208 V).
+- Sistemas trifásicos en estrella donde el neutro se use como conductor.
+- Circuitos de instrumentación si así lo requiere la norma del equipo.
+
+CONDUCTORES DE PUESTA A TIERRA:
+
+Electrodo de tierra:
+- Varilla de tierra: mínimo 15 mm de diámetro, 2,4 m de largo, cobre
+  o acero galvanizado. Resistencia máxima: 25 ohm (si no se logra,
+  instalar electrodo adicional).
+- Anillo de tierra: conductor desnudo de cobre enterrado a 750 mm mínimo.
+- Malla de tierra (en subestaciones): diseñada según IEEE 80.
+
+Calibre mínimo del conductor de puesta a tierra del equipo (EGC):
+- Circuito protegido por 15 A: AWG 14 Cu
+- Circuito protegido por 20 A: AWG 12 Cu
+- Circuito protegido por 30 A: AWG 10 Cu
+- Circuito protegido por 60 A: AWG 10 Cu
+- Circuito protegido por 100 A: AWG 8 Cu
+- Circuito protegido por 200 A: AWG 6 Cu
+- Circuito protegido por 400 A: AWG 3 Cu
+- Circuito protegido por 600 A: AWG 1 Cu
+
+REGLAS CRÍTICAS:
+- El conductor de tierra (verde/verde-amarillo) NUNCA se abre con
+  un interruptor ni se fusible.
+- El neutro y la tierra SE UNEN únicamente en el tablero principal
+  de acometida (NUNCA en tableros secundarios).
+- En tableros secundarios (paneles de distribución): neutro y tierra
+  van en barras SEPARADAS y NO se conectan entre sí.
+- El medidor de energía NO tiene conexión de tierra en sus bornes
+  de corriente o tensión.
+
+RESISTIVIDAD DEL SUELO EN COLOMBIA:
+- Varía enormemente según la región: 10 Ω·m (suelos húmedos/arcillosos)
+  a más de 5.000 Ω·m (rocas/arena seca).
+- En Bogotá (sabana): resistividad moderada-alta (100-500 Ω·m).
+- En costa Atlántica (clima húmedo): resistividad baja (20-100 Ω·m).
+
+==============================================================
+SECCIÓN 300 — MÉTODOS DE ALAMBRADO: REQUISITOS GENERALES
+==============================================================
+
+Protección mecánica de conductores:
+- En paredes, pisos y techos: deben protegerse en conduit (tubería EMT,
+  IMC o rígida según exposición).
+- Conductores expuestos en exteriores: conduit metálico o PVC tipo DB.
+- En áreas con riesgo de daño físico: conduit metálico rígido (IMC/RMC).
+
+Métodos de alambrado permitidos en Colombia (los más usados):
+- EMT (Electrical Metallic Tubing): tubería metálica delgada. Interior
+  seco o húmedo, no expuesto a daño físico severo.
+- IMC (Intermediate Metal Conduit): mayor resistencia mecánica. Interiores
+  y exteriores.
+- PVC (Rigid Nonmetallic Conduit): exteriores enterrados, áreas corrosivas.
+- Bandeja portacables (Cable Tray): grandes instalaciones industriales.
+- Cables tipo THHN/THWN en conduit: el más común en Colombia.
+
+Relleno máximo de conduit (conductores dentro del tubo):
+- 1 conductor: 53% del área interior del tubo.
+- 2 conductores: 31%.
+- 3 o más conductores: 40%.
+
+==============================================================
+SECCIÓN 310 — CONDUCTORES PARA USO GENERAL
+==============================================================
+
+TIPOS DE CONDUCTOR MÁS USADOS EN COLOMBIA:
+
+THHN (90°C seco):
+- Aislamiento de nylon termoplástico, temperatura máxima 90°C en seco.
+- Solo en conduit o bandejas, interior seco.
+- No sumergible.
+
+THWN-2 (75°C/90°C seco-húmedo):
+- Aislamiento de PVC + cubierta de nylon, temperatura 75°C húmedo / 90°C seco.
+- El más usado en Colombia: sirve interior y exterior, húmedo y seco.
+- Aislamiento nominal: 600 V.
+
+XHHW-2 (90°C seco/húmedo):
+- Aislamiento de polietileno reticulado (XLPE).
+- Usado en instalaciones exigentes, industria pesada.
+
+ACSR (Aluminum Conductor Steel Reinforced):
+- Conductor de aluminio con refuerzo de acero.
+- Usado en redes aéreas de distribución.
+
+Capacidad de corriente — Tabla 310-16 (conductores de cobre en conduit,
+temperatura ambiente 30°C, temperatura del conductor 75°C THWN):
+- AWG 14: 15 A
+- AWG 12: 20 A
+- AWG 10: 30 A
+- AWG 8: 50 A
+- AWG 6: 65 A
+- AWG 4: 85 A
+- AWG 3: 100 A
+- AWG 2: 115 A
+- AWG 1: 130 A
+- AWG 1/0: 150 A
+- AWG 2/0: 175 A
+- AWG 3/0: 200 A
+- AWG 4/0: 230 A
+- 250 kcmil: 255 A
+- 300 kcmil: 285 A
+- 350 kcmil: 310 A
+- 400 kcmil: 335 A
+- 500 kcmil: 380 A
+
+Factor de corrección por temperatura ambiente (si T > 30°C):
+- 35°C: factor 0,94
+- 40°C: factor 0,88
+- 45°C: factor 0,82
+- 50°C: factor 0,75
+
+Factor de corrección por número de conductores (más de 3 en conduit):
+- 4-6 conductores: factor 0,80
+- 7-9 conductores: factor 0,70
+- 10-20 conductores: factor 0,50
+
+==============================================================
+SECCIÓN 408 — TABLEROS DE DISTRIBUCIÓN Y PANELES
+==============================================================
+
+Requisitos de los tableros (panelboards):
+- Deben estar en lugares accesibles, ventilados y protegidos.
+- PROHIBIDO instalar en baños, clósets de ropa, o sobre escaleras.
+- El frente del tablero debe tener un espacio mínimo de 0,9 m de
+  profundidad y 0,75 m de ancho libre (zona de trabajo).
+- Todos los espacios de disyuntores deben estar cubiertos (no dejar
+  ranuras abiertas).
+- Etiquetado obligatorio de todos los circuitos (identificación clara).
+
+Barras de neutro y tierra:
+- En el tablero PRINCIPAL: neutro y tierra se unen en la misma barra
+  (o en barras unidas por puente de unión).
+- En tableros SECUNDARIOS o subpaneles: neutro y tierra en barras
+  SEPARADAS. La barra de tierra conectada al conductor de puesta a
+  tierra del equipo (EGC) que viene del tablero principal.
+
+Capacidad mínima del tablero principal:
+- Vivienda unifamiliar pequeña: 100 A (mínimo por NTC 2050).
+- Vivienda moderna con equipos de 240 V: 150-200 A.
+- Comercio y pequeña industria: 200-400 A según carga calculada.
+
+==============================================================
+SECCIÓN 430 — MOTORES
+==============================================================
+
+Protección de motores:
+- Interruptor de motor (Motor Starter / Arrancador): 125% de la
+  corriente a plena carga para selección del dispositivo de protección.
+- Conductor de alimentación al motor: mínimo 125% de la corriente
+  a plena carga del motor.
+- Protección térmica (guardamotor/relé bimetálico): ajustada al 115-125%
+  de la corriente nominal del motor.
+
+Corriente de arranque:
+- Motores de inducción en arranque directo (DOL): 6 a 8 veces la
+  corriente nominal. Interruptores con curva D o K.
+- Arrancadores suaves o variadores de frecuencia: limitan la corriente
+  de arranque a 2-3 veces la nominal.
+
+==============================================================
+SECCIÓN 501-517 — LUGARES CLASIFICADOS (HAZARDOUS LOCATIONS)
+==============================================================
+
+Zonas peligrosas por inflamables/explosivos:
+- Clase I (gases y vapores): divisiones 1 y 2, o Zonas 0, 1 y 2.
+- Clase II (polvos): divisiones 1 y 2.
+- Clase III (fibras): divisiones 1 y 2.
+
+En la industria eléctrica colombiana:
+- Plantas de generación con combustibles: clasificadas Clase I.
+- Almacenamiento de combustible (ACPM/gasolina): Clase I, Div. 1.
+- Talleres de pintura: Clase I, Div. 1 o 2 según ventilación.
+- Las instalaciones en zonas clasificadas requieren equipos con certificación
+  Ex (IEC 60079 o equivalente NEC).
+
+==============================================================
+CALIBRES MÍNIMOS PARA ACOMETIDAS ELÉCTRICAS EN COLOMBIA
+(NTC 2050 + RETIE 2024 + Prácticas de operadores de red)
+==============================================================
+
+Servicio monofásico 120/240 V:
+- Hasta 100 A: AWG 4 Cu THWN (o AWG 2 Al)
+- Hasta 150 A: AWG 1 Cu THWN (o AWG 1/0 Al)
+- Hasta 200 A: AWG 2/0 Cu THWN (o AWG 4/0 Al)
+
+Servicio trifásico 120/208 V o 220/380 V:
+- Hasta 100 A: AWG 4 Cu THWN
+- Hasta 150 A: AWG 1 Cu THWN
+- Hasta 200 A: AWG 3/0 Cu THWN
+- Hasta 400 A: 500 kcmil Cu (o 2 x AWG 3/0 en paralelo)
+
+NOTA: Los operadores de red (Enel/Codensa, EPM, Afinia) pueden exigir
+calibres superiores a los mínimos de NTC 2050. Verificar siempre el
+reglamento técnico del operador específico.
+
+FIN DEL DOCUMENTO

@@ -1,0 +1,240 @@
+TRABAJO EN TENSIÓN EN REDES ELÉCTRICAS — COLOMBIA
+Reglamentación técnica y de seguridad
+Versión: 2026
+
+DOCUMENTOS CUBIERTOS:
+- NTC 5282: Trabajo en tensión en instalaciones eléctricas (hasta 36 kV)
+- RETIE 2024, Libro 3: Trabajos en redes y distancias de seguridad
+- Reglamentos internos de operadores de red (OR)
+- Resolución 4272/2021 (Ministerio de Trabajo): Alturas
+- OSHA (referencia internacional para buenas prácticas)
+
+==============================================================
+1. DEFINICIONES
+==============================================================
+
+TRABAJO EN TENSIÓN (TET o Live Line Work):
+Trabajo en el que el trabajador entra en contacto deliberado con partes
+desnudas en tensión usando herramientas, equipos y técnicas especializadas.
+Es distinto al "trabajo sin tensión" donde se desenergiza primero.
+
+TRABAJO EN PROXIMIDAD:
+Trabajo en el que el trabajador NO entra en contacto con partes
+energizadas pero trabaja dentro de las zonas de peligro definidas
+por la tensión del sistema.
+
+ZONA DE PELIGRO (Zona 1 — RETIE 2024, Libro 3, Título 10):
+Zona donde existe riesgo de contacto directo o indirecto con partes
+energizadas. Las distancias dependen del nivel de tensión.
+
+ZONA DE ADVERTENCIA (Zona 2):
+Zona exterior a la zona de peligro. El personal puede entrar sin EPP
+especial pero debe estar bajo supervisión.
+
+ZONA SEGURA (Zona 3):
+Fuera de toda zona de riesgo eléctrico.
+
+==============================================================
+2. DISTANCIAS MÍNIMAS DE SEGURIDAD (RETIE 2024, Libro 3, Título 10)
+==============================================================
+
+Las distancias se miden desde la parte más próxima de la instalación
+energizada hasta la parte más próxima del trabajador o su herramienta.
+
+DISTANCIAS A PARTES DESNUDAS ENERGIZADAS:
+
+BT (Baja Tensión — hasta 1.000 V):
+- Distancia mínima de seguridad a partes desnudas: 0,30 m
+- Personal no calificado: no debe acercarse a menos de 1,0 m de
+  partes desnudas energizadas en BT sin protección.
+- Con EPP dieléctrico y procedimiento controlado: puede llegar a 0 m
+  (contacto directo con herramienta aislada).
+
+MT (Media Tensión — 1 kV a 57,5 kV):
+- 1 kV a 10 kV: distancia mínima 0,60 m
+- 10 kV a 25 kV: distancia mínima 0,80 m
+- 25 kV a 35 kV: distancia mínima 1,00 m
+- 35 kV a 57,5 kV: distancia mínima 1,20 m
+
+AT (Alta Tensión — 57,5 kV a 230 kV):
+- 57,5 kV a 110 kV: distancia mínima 1,50 m
+- 110 kV a 230 kV: distancia mínima 2,10 m
+
+EAT (Extra Alta Tensión — mayor de 230 kV):
+- 230 kV a 345 kV: distancia mínima 2,80 m
+- 345 kV a 500 kV: distancia mínima 3,50 m
+
+NOTA: Las distancias anteriores son las mínimas establecidas en el
+RETIE 2024. Cada operador de red puede fijar distancias mayores en
+sus procedimientos internos.
+
+Distancias para vehículos y equipos (carro canasta, grúas):
+- BT: el equipo puede acercarse hasta 1,0 m del conductor (metal del equipo).
+- MT: el equipo debe mantenerse a la distancia correspondiente a MT + margen
+  de seguridad (mínimo 1,5 m para 13,2 kV).
+- Para trabajo en tensión desde PEMP (carro canasta dieléctrico): se
+  siguen los procedimientos del fabricante y del OR.
+
+==============================================================
+3. CLASIFICACIÓN DE TRABAJADORES
+==============================================================
+
+TRABAJADOR CERTIFICADO EN TRABAJO EN TENSIÓN:
+- Persona con formación específica en TET (NTC 5282).
+- Entrenado en la técnica de trabajo a potencial (contacto directo).
+- Con EPP dieléctrico certificado y vigente.
+- Normalmente son trabajadores de los operadores de red o de empresas
+  contratistas especializadas.
+
+TRABAJADOR NO CERTIFICADO EN TET:
+- NO puede realizar trabajo en tensión.
+- Puede trabajar en proximidad solo con supervisión y EPP básico.
+- Debe respetar todas las distancias de seguridad.
+
+ELECTRICISTA CALIFICADO (Técnico/Ingeniero Eléctrico):
+- Puede diseñar y supervisar instalaciones eléctricas.
+- Para trabajar en tensión: requiere certificación adicional específica.
+
+==============================================================
+4. TÉCNICAS DE TRABAJO EN TENSIÓN
+==============================================================
+
+A POTENCIAL (Barehand / Método a potencial):
+- El trabajador se pone al mismo potencial que el conductor energizado.
+- Usa traje conductor o guantes conductores para igualar potencial.
+- Se usa principalmente en AT y EAT.
+- El trabajador va en carro canasta con pluma aislada.
+
+A DISTANCIA (Hot Stick / Pértiga):
+- El trabajador usa herramientas con mango aislado (pértigas).
+- Mantiene la distancia de seguridad.
+- Más común en MT y BT.
+- Herramientas deben estar certificadas para el nivel de tensión.
+
+CON GUANTES DIELÉCTRICOS (Glove Method):
+- El trabajador usa guantes aislantes + protectores de cuero.
+- Para BT y algunas operaciones en MT hasta 36 kV.
+- Los guantes deben probarse eléctricamente cada 6 meses.
+
+PROTECTORES Y CUBIERTAS AISLANTES:
+- Se instalan cubiertas de goma o plástico aislante sobre los
+  conductores, boquillas y crucetas adyacentes.
+- Protegen contra contacto accidental del trabajador o sus herramientas.
+
+==============================================================
+5. EPP PARA TRABAJO EN TENSIÓN
+==============================================================
+
+BT (hasta 1.000 V):
+- Guantes dieléctricos Clase 0 (hasta 1.000 V) o Clase 1 (hasta 7.500 V).
+- Gafas de seguridad o careta facial.
+- Casco dieléctrico Clase E (hasta 20 kV).
+- Calzado dieléctrico.
+- Ropa ignífuga (algodón o Nomex) — protección contra arco eléctrico.
+- Mangas dieléctricas si el trabajo está cerca de partes energizadas.
+
+MT (1 kV a 36 kV):
+- Guantes dieléctricos Clase 3 (hasta 26.500 V) o Clase 4 (hasta 36.000 V).
+- Sobre los guantes dieléctricos: guantes de protección mecánica (cuero).
+- Traje de protección contra arco eléctrico (cal/cm² según ATPV de la zona).
+- Careta facial con visor de arco.
+- Casco Clase E.
+- Calzado dieléctrico con punta de acero.
+
+Clasificación de guantes dieléctricos (ASTM D120 / IEC 60903):
+- Clase 00: hasta 500 V (prueba a 2.500 V)
+- Clase 0: hasta 1.000 V (prueba a 5.000 V)
+- Clase 1: hasta 7.500 V (prueba a 10.000 V)
+- Clase 2: hasta 17.000 V (prueba a 20.000 V)
+- Clase 3: hasta 26.500 V (prueba a 30.000 V)
+- Clase 4: hasta 36.000 V (prueba a 40.000 V)
+
+Los guantes deben tener prueba dieléctrica vigente (máximo 6 meses
+desde la última prueba para uso en campo).
+
+==============================================================
+6. PROCEDIMIENTO ESTÁNDAR PARA TRABAJO EN TENSIÓN
+==============================================================
+
+Antes del trabajo:
+1. Verificar que existe autorización del OR (permiso de trabajo en tensión).
+2. Realizar el Análisis de Trabajo Seguro (ATS) con todo el equipo.
+3. Inspeccionar y verificar todos los EPP (guantes, casco, calzado,
+   herramientas) antes de usarlos.
+4. Delimitar y señalizar el área de trabajo.
+5. Verificar las distancias de seguridad al circuito donde no se trabaja.
+6. Socializar el Plan de Rescate.
+
+Durante el trabajo:
+7. Solo trabaja en tensión el personal certificado.
+8. El vigía/supervisor mantiene comunicación constante con el trabajador.
+9. No trabajar en condiciones de lluvia, tormenta eléctrica o vientos > 50 km/h.
+10. Si el trabajador detecta una condición insegura, detiene el trabajo
+    inmediatamente.
+
+Después del trabajo:
+11. Retirar herramientas y protecciones instaladas.
+12. Verificar que no quedaron herramientas abandonadas en el circuito.
+13. Cerrar el permiso de trabajo.
+14. Limpiar y guardar adecuadamente el EPP.
+15. Registrar la actividad realizada.
+
+==============================================================
+7. TRABAJO EN REDES DE DISTRIBUCIÓN MT DESDE CARRO CANASTA
+==============================================================
+
+Requisitos específicos para trabajo en MT desde PEMP (carro canasta):
+
+EQUIPO:
+- La pluma del carro canasta debe ser dieléctrica (aislada) si el trabajo
+  es en tensión a menos de la distancia de seguridad de la estructura metálica.
+- La canasta debe estar certificada para el nivel de tensión.
+- Nivel de aislamiento de la pluma: típicamente 46 kV o 69 kV de prueba.
+- El vehículo debe estar aterrizado (conectado a tierra) antes de levantar
+  la canasta.
+
+PERSONAL:
+- En la canasta: 1 trabajador certificado en TET (puede haber 2 si la
+  capacidad del equipo lo permite).
+- En piso: 1 operador del vehículo + 1 vigía mínimo.
+- Total mínimo en campo: 3 personas (canasta + operador + vigía).
+
+PROCEDIMIENTO ESPECÍFICO:
+- Antes de elevar la canasta: verificar la ruta de la pluma y que no
+  hay obstáculos ni redes no identificadas.
+- Elevar a distancia segura y luego aproximarse lentamente al conductor.
+- El operador en piso mantiene comunicación por radio con el trabajador.
+- En caso de emergencia: el operador puede bajar la canasta desde los
+  controles de piso (control de emergencia).
+
+==============================================================
+8. ACCIDENTES ELÉCTRICOS Y PRIMEROS AUXILIOS
+==============================================================
+
+ELECTROCUCIÓN (paso de corriente por el cuerpo):
+
+Efectos según corriente (a 60 Hz):
+- 1 mA: percepción (hormigueo).
+- 5-10 mA: contracción muscular leve.
+- 10-30 mA: contracción muscular fuerte (puede impedir soltar el conductor).
+- 30-100 mA: fibrilación ventricular, paro cardíaco.
+- > 100 mA: quemaduras graves, paro cardíaco casi seguro.
+
+Primeros auxilios ante electrocución:
+1. NUNCA tocar a la víctima si sigue en contacto con la fuente (riesgo
+   de electrocución en cadena).
+2. Cortar la energía si es posible de forma segura (interruptor, fusible).
+3. Si no se puede cortar: usar material aislante (madera seca, cuerda no
+   metálica) para apartar a la víctima del conductor.
+4. Llamar al 123 (emergencias Colombia).
+5. Iniciar RCP si la víctima no respira y no tiene pulso.
+6. No mover a la víctima si se sospecha lesión de columna (caída).
+
+Síndrome de suspensión inerte (en trabajo en alturas):
+- Ocurre cuando el trabajador queda colgado inconsciente en el arnés.
+- La presión del arnés en las piernas puede generar paro cardíaco
+  en 6-8 minutos.
+- El rescate debe ser INMEDIATO (no más de 6 minutos).
+- Al bajar al trabajador: ponerlo en posición semisentada, no horizontal.
+
+FIN DEL DOCUMENTO

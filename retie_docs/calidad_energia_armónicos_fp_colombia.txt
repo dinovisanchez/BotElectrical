@@ -1,0 +1,239 @@
+CALIDAD DE LA ENERGÍA ELÉCTRICA — ARMÓNICOS, FACTOR DE POTENCIA,
+PERTURBACIONES Y CORRECCIÓN — COLOMBIA
+Referencias: IEEE 519, IEC 61000, CREG 097/2008, NTC 5001
+Versión: 2026
+
+==============================================================
+1. DEFINICIONES DE CALIDAD DE ENERGÍA
+==============================================================
+
+CALIDAD DE LA ENERGÍA (Power Quality):
+Conjunto de parámetros eléctricos que determinan si la energía suministrada
+es adecuada para que los equipos del usuario funcionen correctamente y
+sin interrupción.
+
+Parámetros principales:
+- Tensión: nivel, estabilidad, variaciones rápidas (flicker) y lenta.
+- Frecuencia: debe mantenerse en 60 Hz ± 0,2 Hz en Colombia.
+- Forma de onda: ausencia de distorsión armónica.
+- Continuidad: número y duración de interrupciones (DES/FES).
+- Factor de potencia: relación entre potencia activa y aparente.
+
+==============================================================
+2. FACTOR DE POTENCIA (FP)
+==============================================================
+
+DEFINICIÓN:
+FP = P (kW activos) / S (kVA aparente)
+FP = cos(φ) en cargas lineales puras.
+En cargas no lineales: FP total incluye el efecto de los armónicos.
+
+VALORES DE FP:
+- FP = 1,0: carga puramente resistiva (calefacción, lámparas incandescentes).
+- FP = 0,8 a 0,95: típico en industria (motores, fluorescentes sin corrección).
+- FP < 0,85: deficiente; genera penalización en Colombia.
+- FP capacitivo (compensación en exceso): puede generar sobretensión.
+
+CONSECUENCIAS DE FP BAJO:
+- Mayor corriente circulando por la red (I = P / (V × FP)).
+- Mayores pérdidas en conductores y transformadores (I²R).
+- Caída de tensión mayor.
+- El OR factura un cargo adicional o reduce el kWh facturado neto.
+- Los transformadores y conductores trabajan con menor aprovechamiento.
+
+REQUISITO EN COLOMBIA (CREG 097/2008):
+- El usuario debe mantener FP >= 0,9 inductivo en el punto de entrega.
+- Si FP < 0,9: el OR puede cobrar cargo adicional.
+- FP < 0,85: algunas empresas aplican multas o reducen la energía
+  facturada para penalizar al usuario.
+
+CORRECCIÓN DEL FACTOR DE POTENCIA:
+
+Banco de condensadores:
+- Método más común y económico.
+- Condensadores conectados en paralelo con la carga inductiva.
+- La capacidad (kVAR) se calcula:
+  kVAR_necesarios = P_kW × (tan(φ1) - tan(φ2))
+  Donde φ1 = ángulo actual y φ2 = ángulo deseado (FP objetivo).
+
+Ejemplo de cálculo:
+  Carga: 100 kW, FP actual = 0,75 (φ1 = 41,4°)
+  FP objetivo = 0,95 (φ2 = 18,2°)
+  kVAR = 100 × (tan(41,4°) - tan(18,2°))
+  kVAR = 100 × (0,882 - 0,329) = 55,3 kVAR
+  → Se instalan condensadores de 60 kVAR (valor estándar comercial).
+
+Tipos de banco de condensadores:
+- Fijo: instalado permanentemente. Para cargas constantes.
+- Automático (escalonado): controlador mide FP y conecta/desconecta
+  pasos según la demanda. Para cargas variables.
+- Automático con filtros de armónicos: cuando hay alta distorsión armónica,
+  los condensadores simples pueden resonar con la red; se usan reactores
+  en serie para dessintonizar la resonancia.
+
+==============================================================
+3. ARMÓNICOS
+==============================================================
+
+DEFINICIÓN:
+Las corrientes y tensiones armónicas son componentes de frecuencia que
+son múltiplos enteros de la frecuencia fundamental (60 Hz en Colombia).
+
+Orden de armónico:
+- Fundamental: 60 Hz (h = 1)
+- Segundo armónico: 120 Hz (h = 2)
+- Tercer armónico: 180 Hz (h = 3) — el más problemático en redes trifásicas.
+- Quinto armónico: 300 Hz (h = 5) — muy común en convertidores de potencia.
+- Séptimo armónico: 420 Hz (h = 7) — también común.
+
+FUENTES DE ARMÓNICOS:
+- Variadores de frecuencia (VFD / inversores).
+- Rectificadores (fuentes de poder de PCs, servidores).
+- UPS (sistemas de alimentación ininterrumpida).
+- Hornos de arco eléctrico.
+- Balastos electrónicos.
+- Transformadores con núcleo saturado.
+- Lámparas LED con drivers de baja calidad.
+
+INDICADORES:
+- THD (Total Harmonic Distortion): distorsión armónica total.
+  THD_V = raíz(suma(Vh²)) / V1 × 100%
+  Donde Vh = tensión del armónico h, V1 = tensión fundamental.
+- THD_I: para corriente.
+
+LÍMITES (IEEE 519-2014 / IEC 61000-3-6, referencia en Colombia):
+Para THD de tensión en el punto de acoplamiento común (PCC):
+- BT (< 1 kV): THD_V máximo 8%.
+- MT (1 kV a 69 kV): THD_V máximo 5%.
+- AT (> 69 kV): THD_V máximo 3%.
+
+Para THD de corriente (depende de la relación Isc/IL):
+- Usuarios con baja capacidad de cortocircuito (carga grande vs. red): THD_I < 5%.
+- Usuarios con alta capacidad de cortocircuito: THD_I hasta 20%.
+
+CONSECUENCIAS DE LOS ARMÓNICOS:
+- Sobrecalentamiento de transformadores (pérdidas adicionales por corrientes
+  de Foucault y corrientes parásitas a frecuencias elevadas).
+- Sobrecalentamiento del neutro en sistemas trifásicos (los armónicos de
+  orden 3, 9, 15... son cophasales y se suman en el neutro).
+- Resonancia con bancos de condensadores.
+- Errores en medidores de energía (especialmente medidores electromecánicos).
+- Disparos intempestivos de interruptores termomagnéticos.
+- Interferencia en sistemas de comunicación y control.
+- Reducción de la vida útil de motores y transformadores.
+
+SOLUCIONES:
+- Filtros de armónicos pasivos: circuito LC sintonizado en el armónico
+  problemático. Económico pero rígido (sintonizado para un armónico específico).
+- Filtros activos: inversor que inyecta corriente de compensación para
+  cancelar los armónicos. Más costoso pero flexible.
+- Reactores de línea (chokes): limitadores de dV/dt y reducción de armónicos
+  de corriente en la entrada de VFDs. Económico y efectivo hasta cierto grado.
+- Transformadores de 12 pulsos o 18 pulsos: múltiples rectificadores
+  desplazados en fase. Cancela armónicos 5° y 7°.
+
+==============================================================
+4. FLICKER (PARPADEO DE TENSIÓN)
+==============================================================
+
+DEFINICIÓN: Variaciones rápidas de tensión que causan parpadeo visible
+en la iluminación y pueden dañar equipos sensibles.
+
+CAUSAS:
+- Hornos de arco eléctrico (principal causa).
+- Motores de arranque brusco (compresores, bombas grandes).
+- Soldadoras de punto.
+- Cargas variables de gran potencia.
+
+INDICADORES:
+- Pst (Short-term flicker severity): nivel de molestia en 10 minutos.
+  Pst < 1: aceptable según IEC 61000-4-15.
+- Plt (Long-term flicker severity): valor ponderado en 2 horas.
+
+IMPACTO EN EL SISTEMA:
+- Las variaciones de tensión > 3% son perceptibles en iluminación fluorescente.
+- Las variaciones > 5% pueden resetear equipos electrónicos sensibles.
+- En Colombia: el OR debe mantener la tensión en ±10% de la nominal.
+
+==============================================================
+5. DESEQUILIBRIO DE TENSIÓN
+==============================================================
+
+DEFINICIÓN: Condición en la que las tres fases de un sistema trifásico
+no tienen la misma amplitud o no están separadas exactamente 120°.
+
+CAUSAS:
+- Cargas monofásicas desbalanceadas en la red trifásica.
+- Transformadores de distribución monofásicos que alimentan parte de
+  la carga trifásica.
+- Conductor de neutro de alta impedancia (mal dimensionado o deteriorado).
+
+INDICADOR:
+- Factor de desequilibrio = (V_negativa / V_positiva) × 100%
+- Máximo aceptable según NEMA MG-1 para motores: 1%.
+- Por encima del 2%: los motores sufren sobrecalentamiento severo.
+
+EFECTO EN MOTORES:
+- Un desequilibrio de tensión del 3,5% puede causar un desequilibrio
+  de corriente del 17,5% (factor de amplificación ~5).
+- Esto genera sobrecalentamiento, reducción de vida útil y pérdida de torque.
+- En casos extremos: disparo del relé de protección del motor.
+
+CORRECCIÓN:
+- Redistribuir cargas monofásicas entre las tres fases.
+- Revisar el calibre del neutro (debe soportar la corriente de desequilibrio).
+- Instalar reguladores de tensión trifásico si la red es muy desequilibrada.
+
+==============================================================
+6. TRANSITORIOS Y SOBRETENSIONES
+==============================================================
+
+TIPOS DE TRANSITORIOS:
+- Impulso de rayo: duración microsegundos, amplitud de miles de voltios.
+- Sobretensión de maniobra: al abrir/cerrar interruptores en redes inductivas.
+- Micro-cortes (sags) y picos (swells): duración ms a ciclos.
+
+PROTECCIÓN CONTRA SOBRETENSIONES:
+- Pararrayos (descargadores de sobretensión): en entradas MT y BT.
+- DPS (Dispositivos de Protección contra Sobretensiones) en BT:
+  - Clase I (T1): protege contra impulso de rayo (10/350 μs). En acometidas.
+  - Clase II (T2): protege contra sobretensiones de maniobra. En tableros.
+  - Clase III (T3): protección fina en equipos sensibles.
+- Varistores (MOV): protección rápida en equipos electrónicos.
+
+COORDINACIÓN DE LA PROTECCIÓN:
+- T1 aguas arriba absorbe la mayor energía.
+- T2 en el tablero principal reduce el residual.
+- T3 en el equipo final como última barrera.
+- Se debe dejar una distancia mínima de cable entre cada nivel (mínimo 10 m
+  de cable para que haya suficiente inductancia que coordine la acción).
+
+==============================================================
+7. MEDICIÓN DE CALIDAD DE ENERGÍA
+==============================================================
+
+ANALIZADORES DE CALIDAD DE ENERGÍA:
+Equipos que miden simultáneamente tensión, corriente, frecuencia, THD,
+FP, desequilibrio, flicker, armónicos individualmente.
+
+Marcas comunes en Colombia: Fluke 43x/435/437, Hioki PQ3198,
+Chauvin Arnoux PEL103, AEMC PowerPad.
+
+PARÁMETROS A MEDIR EN UN DIAGNÓSTICO TÍPICO:
+1. Tensión RMS por fase (V1, V2, V3).
+2. Corriente RMS por fase y neutro (I1, I2, I3, IN).
+3. Potencia activa (kW), reactiva (kVAR) y aparente (kVA).
+4. Factor de potencia (FP total y desplazamiento).
+5. THD de tensión y corriente por fase.
+6. Espectro armónico (magnitud de cada armónico h=2 a h=50 mínimo).
+7. Desequilibrio de tensión y corriente (%).
+8. Frecuencia.
+9. Eventos de tensión: sags, swells, interrpuciones.
+10. Flicker Pst y Plt (si hay quejas de parpadeo).
+
+DURACIÓN DEL ESTUDIO:
+- Para diagnóstico rápido: 1 semana de medición continua (cubre variaciones
+  de demanda semanal y diferencias día/noche).
+- Para estudio completo: 1 mes (cubre ciclo mensual de facturación).
+
+FIN DEL DOCUMENTO

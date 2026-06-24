@@ -1,0 +1,225 @@
+SUBESTACIONES ELÉCTRICAS Y TRANSFORMADORES DE DISTRIBUCIÓN — COLOMBIA
+Referencia técnica: RETIE 2024 Libro 3, NTC 3485, IEC 60076
+Versión: 2026
+
+==============================================================
+1. CLASIFICACIÓN DE SUBESTACIONES
+==============================================================
+
+POR FUNCIÓN:
+- Subestación de Transmisión: reduce tensión de EAT/AT a MT.
+  (345/115 kV, 230/115 kV, 115/34,5 kV, etc.)
+- Subestación de Distribución (SD): reduce de MT a BT.
+  (13,2 kV / 220 V, 13,2 kV / 440 V, 34,5 kV / 13,2 kV, etc.)
+- Subestación de Cliente (Subestación Propia): instalación del usuario
+  para transformar la MT del OR a BT para uso propio.
+
+POR CONSTRUCCIÓN:
+- Aérea (Convencional): equipos al aire libre sobre estructura metálica.
+- En Caseta: equipos en edificio cerrado.
+- Compacta (Tipo Pedestal): transformador en poste o plataforma.
+  Común en redes de distribución urbana.
+- Blindada (GIS — Gas Insulated Switchgear): equipos encapsulados en SF6.
+  Usada en espacios reducidos y alta tensión.
+- Prefabricada: celdas o armarios prefabricados. Común en subestaciones
+  de usuario en MT/BT.
+
+POR TENSIÓN:
+- Subestación BT/BT: transformadores de aislamiento, AVR. Tensión < 1 kV.
+- Subestación MT/BT: transformadores de distribución. Más común en Colombia.
+- Subestación AT/MT o AT/AT: en el SIN (sistema interconectado nacional).
+
+==============================================================
+2. TRANSFORMADORES DE DISTRIBUCIÓN
+==============================================================
+
+DEFINICIÓN: Transformador que reduce la tensión de MT (11,4 / 13,2 / 34,5 kV)
+a la tensión de utilización en BT (120/240 V, 220/440 V, 120/208 V).
+
+TIPOS EN COLOMBIA:
+
+Monofásico:
+- Conexión fase-neutro del sistema trifásico.
+- Tensión primaria: 13.200 V, 7.620 V, 11.400 V.
+- Tensión secundaria: 120/240 V (servicio residencial bifiliar/trifiliar).
+- Potencias típicas: 10, 15, 25, 37,5, 50, 75, 100 kVA.
+- Muy usados en zonas rurales y redes aéreas.
+
+Trifásico:
+- Para cargas trifásicas industriales o comerciales grandes.
+- Tensión primaria: 13.200 V (estrella o delta), 34.500 V, etc.
+- Tensión secundaria: 208/120 V (estrella), 440/254 V (estrella),
+  220 V (delta) según la necesidad.
+- Potencias típicas: 30, 45, 75, 112,5, 150, 225, 300, 500, 750, 1000 kVA.
+- Usados en industria, centros comerciales, edificios de oficinas.
+
+Trifásico autotransformador:
+- No tiene aislamiento galvánico entre primario y secundario.
+- Solo para reducción de tensión dentro del mismo sistema (ej. 440 V a 220 V).
+- NO se usa para transformar MT a BT.
+
+CARACTERÍSTICAS TÉCNICAS (NTC 3485 / IEC 60076):
+
+Refrigeración:
+- ONAN (Oil Natural Air Natural): aceite en circulación natural. El más común.
+- ONAF (Oil Natural Air Forced): aceite natural + ventiladores en radiadores.
+- OFAN (Oil Forced Air Natural): bomba de circulación de aceite + aire natural.
+- OFAF: bomba de aceite + ventiladores. Para grandes transformadores.
+- Seco (cast resin): resina epóxica, sin aceite. Para interiores.
+
+Fluido dieléctrico (aceite):
+- Aceite mineral (ASTM D3487): el más común en Colombia. Inflamable.
+- Aceite vegetal (biodegradable): menos inflamable, apto para zonas
+  con restricciones ambientales.
+- Silicona: no inflamable, pero más costoso.
+
+Grupos de conexión (Grupo Vectorial):
+- Dyn11: delta en primario, estrella con neutro en secundario, 30° de desfase.
+  El más común en Colombia para transformadores de distribución MT/BT.
+- YNyn0: estrella con neutro en primario y secundario, 0° de desfase.
+  Usado en AT/MT.
+- Dd0: delta-delta, sin neutro secundario. Para cargas industriales puras.
+
+Norma de pruebas (IEC 60076-1):
+- Prueba de relación de transformación.
+- Prueba de resistencia de devanados.
+- Prueba de aislamiento (tensión aplicada y tensión inducida).
+- Prueba de pérdidas en vacío y en carga.
+- Prueba de temperatura (térmica).
+- Prueba de sobretensión de rayo (BIL — Basic Impulse Insulation Level).
+
+==============================================================
+3. SELECCIÓN DEL TRANSFORMADOR
+==============================================================
+
+POTENCIA:
+- La potencia instalada (kVA) debe ser al menos 125% de la demanda máxima
+  prevista de la carga.
+- Factor de demanda y factor de diversidad: permiten reducir la potencia
+  aparente total instalada (no toda la carga funciona simultáneamente).
+
+TENSIÓN SECUNDARIA ESTÁNDAR EN COLOMBIA:
+- 120/240 V: residencial monofásico bifiliar/trifiliar.
+- 120/208 V (trifásico 4H): edificios de oficinas, centros comerciales.
+- 220/380 V (trifásico 4H): industrial estándar. También 440/254 V.
+- 440 V delta (trifásico 3H): motores industriales, sin neutro.
+
+CLASIFICACIÓN DE CARGAS:
+- Resistivas puras (FP = 1): calefacción, iluminación incandescente.
+- Inductivas (FP < 1): motores, balastos de vapor de mercurio.
+- Capacitivas (FP > 1): baterías de condensadores mal ajustadas.
+- No lineales (armónicas): variadores de velocidad, UPS, rectificadores.
+
+Para cargas con alta componente armónica: usar transformadores con factor K
+(K-factor transformer) que toleran la distorsión sin sobrecalentarse.
+
+==============================================================
+4. INSTALACIÓN DE SUBESTACIONES DE USUARIO (RETIE 2024, Libro 3)
+==============================================================
+
+REQUISITOS GENERALES:
+- Toda subestación de usuario debe tener Declaración de Conformidad
+  emitida por un inspector RETIE habilitado.
+- El diseño debe realizarse por un profesional matriculado (Ingeniería
+  Eléctrica con tarjeta profesional vigente).
+- Los equipos deben tener certificación de conformidad (placa de producto).
+
+DISTANCIAS DE SEGURIDAD:
+- La subestación no puede ubicarse debajo de líneas de transmisión.
+- Debe haber una distancia mínima a colindancias (varía por tensión).
+- Para subestaciones MT/BT en interior: acceso restringido solo a personal
+  autorizado (mínimo 2 personas para trabajos en tensión).
+
+PUESTA A TIERRA:
+- La malla de tierra de la subestación debe garantizar un potencial de
+  paso y de contacto seguros (IEEE 80 / NTC-IEC 60364-5-54).
+- Resistencia de la malla: lo más baja posible. No hay un valor único
+  reglamentario; depende del cálculo de seguridad de la malla.
+- El neutro del transformador (secundario BT) se conecta a la malla de tierra.
+- El blindaje metálico de los cables MT se conecta a la malla de tierra.
+
+SISTEMA DE PROTECCIONES:
+- Protección primaria MT: celdas de media tensión con interruptor y relés
+  (50/51, 50/51N, 67, 87T según el tamaño y el tipo de instalación).
+- Protección del transformador:
+  - Relé Buchholz: detecta gas en el aceite (falla interna).
+  - Termómetro con alarma y disparo.
+  - Relé diferencial (87T): para transformadores > 5 MVA.
+- Protección BT: interruptor automático de baja tensión (IACT o ACB)
+  con relés de sobrecarga y cortocircuito.
+
+PROTECCIÓN CONTRA SOBRETENSIONES:
+- Pararrayos de óxido de zinc (ZnO / MOV): instalados en las entradas MT.
+- Tensión nominal del pararrayo: 15 kV para sistemas 13,2 kV.
+- En sistemas 34,5 kV: pararrayos de 36 kV o 39 kV según la red.
+- BIL del transformador debe ser mayor al nivel de protección del pararrayo.
+
+==============================================================
+5. BANCO DE TRANSFORMADORES
+==============================================================
+
+Cuando la carga supera la capacidad de un transformador, se pueden conectar
+varios en paralelo (banco de transformadores).
+
+Requisitos para paralelo:
+- Misma relación de transformación.
+- Mismo grupo vectorial (Dyn11 con Dyn11, etc.).
+- Misma impedancia de cortocircuito (Zk%). Si difieren: reparto desigual
+  de carga proporcional a la impedancia.
+- Misma tensión de cortocircuito.
+
+Conexión banco monofásico para servicio trifásico:
+- 3 transformadores monofásicos idénticos.
+- Primarios en estrella o delta según la red MT.
+- Secundarios en estrella con neutro (para 120/240 V) o delta.
+- El banco monofásico es más flexible pero ocupa más espacio que un
+  solo trifásico.
+
+Conexión V (Open Delta):
+- Solo 2 transformadores monofásicos para un servicio trifásico.
+- Capacidad útil: 57,7% de la capacidad de 2 transformadores similares
+  en delta cerrado.
+- Solo para cargas trifásicas pequeñas o como solución temporal.
+- Alta distorsión de tensión si la carga es desbalanceada.
+
+==============================================================
+6. MANTENIMIENTO DE TRANSFORMADORES (CREG 038/2014 / Buenas Prácticas)
+==============================================================
+
+MANTENIMIENTO PREVENTIVO:
+- Inspección visual mensual: nivel de aceite, temperatura, fugas,
+  condición de bujes y conexiones.
+- Análisis de aceite dieléctrico: cada 2 años mínimo.
+  Parámetros: rigidez dieléctrica (mínimo 30 kV/2,5 mm), contenido de agua,
+  índice de acidez, color (ASTM).
+- Pruebas eléctricas: cada 4-5 años. Resistencia de aislamiento (Megger),
+  factor de potencia (Tangente delta), relación de transformación.
+- Limpieza de aletas de refrigeración: anual.
+- Verificación de puesta a tierra: anual.
+
+MANTENIMIENTO CORRECTIVO (fallas comunes):
+- Fuga de aceite: sellar con empaques o cambiar empaque deteriorado.
+  Aceite por debajo del nivel mínimo: el transformador puede sobrecalentarse.
+- Ennegrecimiento del aceite: indica sobrecalentamiento o descarga
+  interna. Análisis de gases disueltos (DGA) para diagnosticar.
+- Ruido anormal (zumbido excesivo): vibración de la laminación o
+  armónicos en la red. Verificar tensión de alimentación y carga.
+- Temperatura elevada: falla de refrigeración, sobrecarga, o cortocircuito
+  en el devanado. Revisar ventiladores, carga conectada y prueba Megger.
+
+ANÁLISIS DE GASES DISUELTOS (DGA — Dissolved Gas Analysis):
+- Hidrógeno (H2): falla de corona o arco eléctrico de baja energía.
+- Metano (CH4): sobrecalentamiento leve del aceite.
+- Etano (C2H6): sobrecalentamiento moderado.
+- Etileno (C2H4): sobrecalentamiento severo (> 500°C).
+- Acetileno (C2H2): arco eléctrico de alta energía. ALARMA CRÍTICA.
+- Monóxido de carbono (CO): sobrecalentamiento del papel (aislamiento sólido).
+- Dióxido de carbono (CO2): descomposición del papel. Normal en pequeñas
+  cantidades.
+
+Interpretación con Triángulo de Duval o Relaciones de Rogers:
+- La combinación de gases indica el tipo y severidad de la falla.
+- Acetileno > 5 ppm: inspección inmediata (posible arco).
+- Acetileno en aumento rápido: sacar de servicio el transformador.
+
+FIN DEL DOCUMENTO

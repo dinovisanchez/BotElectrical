@@ -1,0 +1,283 @@
+REGULACIONES CREG — CALIDAD DEL SERVICIO DE ENERGÍA ELÉCTRICA
+Comisión de Regulación de Energía y Gas — Colombia
+Versión de referencia: 2026
+
+DOCUMENTOS CUBIERTOS:
+- CREG 097/2008: Calidad del servicio de energía eléctrica en el SEIN
+- CREG 015/2014: Código de Medida (complemento)
+- CREG 038/2014: Sistema de Medición Comercial (SMC)
+- CREG 099/2018: Actualización aspectos de medición
+- Ley 142/1994: Régimen de Servicios Públicos Domiciliarios
+- Ley 143/1994: Régimen del Sector Eléctrico
+
+==============================================================
+CREG 097/2008 — CALIDAD DEL SERVICIO DE ENERGÍA ELÉCTRICA
+==============================================================
+
+OBJETO: Establecer las condiciones de calidad que deben cumplir los
+operadores de red (OR) en la prestación del servicio de distribución
+de energía eléctrica en Colombia, y las compensaciones a los usuarios
+cuando no se cumplen dichas condiciones.
+
+ÍNDICES DE CALIDAD:
+
+1. DES (Duración de las Interrupciones del Servicio):
+   - Tiempo total de interrupción del servicio por usuario por período.
+   - Se mide en horas por usuario por año (h/usuario/año).
+   - Se calcula por nivel de tensión y por circuito de distribución.
+
+2. FES (Frecuencia de las Interrupciones del Servicio):
+   - Número de interrupciones por usuario por período.
+   - Se mide en interrupciones/usuario/año.
+
+NIVELES DE CALIDAD POR ZONA (referencia CREG 097/2008):
+
+Zona Urbana (alta densidad):
+- DES máximo permitido: varía según el OR, típicamente 8-12 h/usuario/año.
+- FES máximo: 8-15 interrupciones/usuario/año.
+
+Zona Rural:
+- Estándares más laxos por las condiciones de infraestructura.
+- DES puede ser 20-40 h/usuario/año según el OR.
+
+COMPENSACIONES POR INCUMPLIMIENTO:
+- Si el OR supera los índices de calidad permitidos, debe compensar
+  económicamente a los usuarios afectados.
+- La compensación se refleja como descuento en la factura del mes
+  siguiente al incumplimiento.
+- El monto de la compensación se calcula sobre la energía no suministrada
+  y el costo del kWh al usuario.
+
+CALIDAD DE LA TENSIÓN (Tensión en el punto de entrega):
+- La tensión nominal de entrega debe mantenerse dentro de ±10% de la
+  tensión nominal de la red.
+- Para BT (< 1 kV): la tensión debe estar entre 0,90 Vn y 1,10 Vn.
+- Para MT (1 kV a 57,5 kV): tolerancias similares pero con medición
+  en el punto de conexión del usuario.
+
+ARMÓNICOS Y CALIDAD DE LA ONDA:
+- El OR debe garantizar que la distorsión armónica total (THD) de tensión
+  no supere el 5% en BT y el 3% en MT.
+- THD de corriente: el usuario industrial debe garantizar no inyectar
+  armónicos que superen los límites de la CREG en el punto de conexión.
+
+FACTOR DE POTENCIA:
+- El usuario debe mantener un factor de potencia (FP) >= 0,9 inductivo.
+- Si el FP < 0,9: el OR puede cobrar un cargo por baja potencia o exigir
+  la instalación de banco de condensadores.
+- FP capacitivo (por encima de 1,0): también puede generar penalización
+  si causa problemas de sobretensión en la red.
+
+==============================================================
+CREG 015/2014 — CÓDIGO DE MEDIDA
+==============================================================
+
+OBJETO: Establecer los aspectos técnicos y comerciales del sistema de
+medición en los mercados de energía mayorista y minorista.
+
+ÁMBITO: Aplica a todos los activos del mercado eléctrico: generadores,
+transmisores, distribuidores, comercializadores y usuarios no regulados.
+
+REQUISITOS GENERALES DEL SISTEMA DE MEDIDA:
+
+1. Todo punto de conexión a la red nacional debe tener un sistema de
+   medición aprobado por el OR y el ASIC (Administrador del Sistema
+   de Intercambios Comerciales).
+
+2. Los datos de medida deben almacenarse como mínimo durante 5 años.
+
+3. Los equipos de medida deben cumplir con las clases de exactitud
+   definidas en CREG 038/2014.
+
+4. Las lecturas de los medidores se transmiten al ASIC vía
+   concentrador de datos (para usuarios con telemedida).
+
+TIPOS DE MEDIDA SEGÚN CREG 015/2014:
+- Medida Principal: el sistema de medición oficial para facturación.
+- Medida de Respaldo (Chequeo): sistema paralelo para verificar
+  la exactitud del sistema principal. Obligatorio en Tipos 1 y 2.
+- Medida de Control: para monitoreo operativo, no facturación.
+
+SISTEMA DE TELEMEDIDA:
+- Obligatorio para usuarios Tipo 1, 2 y recomendado para Tipo 3.
+- El medidor debe tener puerto de comunicación RS-485, GPRS o
+  similar para transmisión remota.
+- Concentrador de datos: equipo que recopila la información de
+  varios medidores y la transmite al OR y al ASIC.
+- Frecuencia de reporte: cada 15 minutos (medidores de intervalo).
+
+VERIFICACIÓN PERIÓDICA:
+- Los sistemas de medida se verifican periódicamente según la
+  frecuencia establecida en CREG 038/2014 (Tabla 4).
+- Tipo 1: cada 2 años.
+- Tipos 2-3: cada 4 años.
+- Tipos 4-5: cada 10 años.
+- El OR puede adelantar la verificación si detecta anomalías o
+  sospecha de fraude.
+
+REPOSICIÓN DE ENERGÍA POR ERROR DE MEDIDA:
+- Si se detecta que el medidor tenía un error dentro del período
+  de prescripción (normalmente 5 años): se repone la diferencia.
+- Si el error favoreció al usuario (medía menos): reliquidación retroactiva.
+- Si el error favoreció al OR (medía más): devolución o compensación.
+
+==============================================================
+CREG 038/2014 — SISTEMA DE MEDICIÓN COMERCIAL (SMC)
+(Datos clave — también en el prompt del sistema)
+==============================================================
+
+CLASIFICACIÓN DE PUNTOS DE MEDICIÓN (Tabla 1):
+- Tipo 1: Consumo >= 15.000 MWh/mes O CI >= 30 MVA
+- Tipo 2: 500 <= C < 15.000 MWh/mes O 1 <= CI < 30 MVA
+- Tipo 3: 50 <= C < 500 MWh/mes O 0,1 <= CI < 1 MVA
+- Tipo 4: 5 <= C < 50 MWh/mes O 0,01 <= CI < 0,1 MVA
+- Tipo 5: C < 5 MWh/mes O CI < 0,01 MVA
+Si CI y C dan tipos distintos: usar el de MAYORES exigencias.
+
+EXACTITUD DE EQUIPOS (Tabla 2):
+- Tipo 1: medidor 0,2S | TC 0,2S | TP 0,2
+- Tipos 2-3: medidor 0,5S | TC 0,5S | TP 0,5
+- Tipo 4: medidor clase 1 | TC 0,5 | TP 0,5
+- Tipo 5: medidor clase 1 o 2 | sin TC ni TP
+
+TIPOS DE CONEXIÓN:
+- Directa: V e I directos al medidor. Sin TC ni TP.
+- Semidirecta: V directo al medidor, I por TC.
+- Indirecta: V por TP, I por TC. Obligatoria en MT/AT.
+
+BLOQUE DE PRUEBAS:
+- Obligatorio en medida semidirecta e indirecta.
+- Permite verificación in situ sin interrumpir el servicio.
+- Norma CENS: 13 terminales, neutro en terminal 11.
+- Norma RA8: bornes B1-B26, neutro en B10.
+
+==============================================================
+LEY 142/1994 — RÉGIMEN DE SERVICIOS PÚBLICOS DOMICILIARIOS
+==============================================================
+
+RELEVANCIA PARA EL SECTOR ELÉCTRICO:
+
+Art. 14.25 — Definición de empresa de servicios públicos:
+Empresa que presta servicios de energía eléctrica, acueducto, gas,
+telecomunicaciones, aseo, entre otros.
+
+Art. 95 — Facturación:
+- El usuario tiene derecho a recibir la factura con al menos 5 días
+  de anticipación a la fecha de pago.
+- La factura debe indicar: período facturado, consumo en kWh,
+  tarifas aplicadas, cargos fijos y variables, impuestos y contribuciones.
+
+Art. 150 — Fraude al servicio:
+- Es ilegal alterar, manipular o conectarse ilegalmente a las redes.
+- Las empresas pueden cortar el servicio inmediatamente si detectan
+  fraude, sin previo aviso.
+- El costo de la energía no facturada por fraude se reliquida retroactivamente
+  hasta 5 años.
+
+Estratos socioeconómicos y subsidios:
+- Estratos 1 y 2: subsidio al consumo básico (hasta cierto límite de kWh/mes).
+- Estrato 3: subsidio parcial.
+- Estratos 4, 5 y 6: pagan tarifa plena + contribución solidaria.
+- Sector industrial y comercial: pagan tarifa plena + contribución.
+
+La contribución solidaria (recargo) pagada por estratos 4-6 e industriales
+financia los subsidios de estratos 1-3.
+
+==============================================================
+LEY 143/1994 — RÉGIMEN DEL SECTOR ELÉCTRICO
+==============================================================
+
+Establece el marco legal del sector eléctrico colombiano:
+
+Actividades del sector (Art. 7):
+1. GENERACIÓN: producción de energía eléctrica.
+2. INTERCONEXIÓN: transporte de grandes bloques de energía (líneas 115 kV+).
+3. TRANSMISIÓN: transporte en el Sistema de Transmisión Nacional (STN).
+4. DISTRIBUCIÓN: transporte en el Sistema de Distribución Local (SDL).
+5. COMERCIALIZACIÓN: compra-venta de energía al usuario final.
+
+Principios del servicio (Art. 3):
+- Eficiencia (minimizar costos).
+- Calidad (continuidad y confiabilidad).
+- Neutralidad (acceso no discriminatorio a redes).
+- Adaptabilidad (respuesta a cambios tecnológicos).
+- Solidaridad (subsidios a estratos bajos).
+
+Organismos del sector (Art. 3 y siguientes):
+- CREG: regulación técnica y económica.
+- UPME: planeación minero-energética.
+- SSPD (Superservicios): vigilancia y control.
+- XM: operador del mercado y del sistema (administra el despacho).
+- ASIC: liquidación y facturación del mercado mayorista.
+- SSPD: vigilancia y control del servicio al usuario.
+
+Libre competencia en generación y comercialización:
+- La generación y comercialización son actividades libres (mercado abierto).
+- La transmisión y distribución son monopolios naturales regulados.
+- Un mismo grupo empresarial puede tener varias actividades pero deben
+  estar en empresas legalmente separadas (desintegración vertical).
+
+==============================================================
+DECRETO 1073/2015 — DECRETO ÚNICO SECTOR MINAS Y ENERGÍA
+==============================================================
+
+Compila y organiza todas las normas del sector minero-energético.
+
+Partes relevantes para el sector eléctrico:
+- Libro 2, Parte 3: Energía eléctrica.
+  - Título 1: Organización del sector y funciones de las entidades.
+  - Título 3: Generación de energía (incluye energías renovables).
+  - Título 6: Uso eficiente de energía (Ley 697/2001 y Decreto 895/2008).
+  - Título 7: Alumbrado público.
+
+Uso Racional y Eficiente de Energía (URE):
+- La Ley 697/2001 y el Decreto 895/2008 (compilado en Decreto 1073/2015)
+  obligan a las empresas de ciertos sectores a cumplir metas de eficiencia
+  energética.
+- Empresas con consumo > 50 MTEP (Miles de Toneladas Equivalentes de
+  Petróleo) deben reportar al UPME.
+
+==============================================================
+CREG 038/2018 — AUTOGENERACIÓN EN ZONAS NO INTERCONECTADAS (ZNI)
+==============================================================
+
+Aplica a sistemas de generación en zonas rurales y remotas no conectadas
+al Sistema de Interconexión Nacional (SIN).
+
+Sistemas de autogeneración permitidos en ZNI:
+- Solar fotovoltaico + almacenamiento.
+- Diésel o gas (plantas diesel).
+- Sistemas híbridos.
+- Eólico en zonas con recurso adecuado.
+
+Requisitos de medición en ZNI:
+- Los sistemas de más de 10 kW deben tener medición de energía generada.
+- La medición puede ser más simple que en el SIN (CREG define excepciones).
+- Los datos de medición se reportan al operador del sistema ZNI.
+
+==============================================================
+NORMAS RELACIONADAS CON CALIDAD Y MEDIDA
+==============================================================
+
+NTC 4552 — Seguridad en instalaciones eléctricas de baja tensión:
+- Complementa NTC 2050 en aspectos de seguridad de diseño.
+- Aplica para instalaciones en edificios.
+
+NTC 2955 — Medidores de energía eléctrica (residencial):
+- Requisitos técnicos para medidores de kWh de uso doméstico.
+- Exactitud clase 1 o 2 según el tipo de medidor.
+
+NTC 2967 — Cajas para medidores eléctricos:
+- Requisitos de material, hermeticidad y resistencia mecánica.
+- IP mínimo: IP 44 (Enel/Codensa exige IPC-1 con cerradura de seguridad).
+
+NTC-IEC 61869-1: Requisitos generales de transformadores de medida.
+NTC-IEC 61869-2: TC — Transformadores de Corriente para medida.
+NTC-IEC 61869-3: TP — Transformadores de Tensión/Potencial para medida.
+
+Exactitud de TC según NTC-IEC 61869-2:
+- Clases de medida: 0,1 — 0,2 — 0,2S — 0,5 — 0,5S — 1 — 3
+- Clases de protección: 5P — 10P — PS — PX
+- Sufijo S: linealidad extendida desde 1% hasta 120% de In.
+
+FIN DEL DOCUMENTO

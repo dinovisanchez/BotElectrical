@@ -1,0 +1,277 @@
+RESOLUCIÓN 4272 DE 2021 — TRABAJO EN ALTURAS EN COLOMBIA
+Ministerio de Trabajo — Reemplaza Resolución 1409 de 2012
+Versión: 2026
+
+ÍNDICE
+1. Definiciones clave
+2. Alcance y campo de aplicación
+3. Roles y responsabilidades
+4. Trabajo en vehículos tipo canasta (plataformas elevadoras)
+5. Capacitación y certificación
+6. Documentos y permisos requeridos
+7. Elementos de Protección Personal (EPP)
+8. Plan de rescate
+9. Requisitos para trabajos en redes eléctricas en altura
+10. Sanciones
+
+==============================================================
+1. DEFINICIONES CLAVE
+==============================================================
+
+TRABAJO EN ALTURAS: Todo trabajo que se realice a 1,5 metros o más sobre
+el nivel del suelo o sobre un nivel inferior. A partir de esta altura es
+OBLIGATORIO aplicar todas las medidas de esta resolución.
+
+PLATAFORMA ELEVADORA MÓVIL DE PERSONAL (PEMP): Máquina de trabajo
+que tiene una plataforma de trabajo elevable, articulada o telescópica,
+destinada a permitir a los operarios realizar tareas en altura. Incluye:
+carro canasta, brazo articulado, tijera elevadora.
+
+COORDINADOR DE TRABAJO EN ALTURAS: Persona con formación certificada
+en trabajo seguro en alturas y con experiencia en labores similares.
+Responsable de analizar las condiciones del sitio, identificar peligros
+y coordinar las medidas de prevención. No requiere ser el mismo trabajador
+que ejecuta la tarea.
+
+TRABAJADOR AUTORIZADO: Persona certificada para realizar trabajo en alturas.
+Debe tener formación complementaria vigente (renovación cada 3 años).
+
+VIGÍA: Persona entrenada y designada para garantizar la seguridad del área
+de trabajo, comunicarse con el trabajador en altura y activar el plan de
+rescate si es necesario.
+
+PERMISO DE TRABAJO EN ALTURAS: Documento escrito que autoriza la
+realización de trabajos en alturas en un lugar y tiempo determinados.
+Es de carácter OBLIGATORIO para cada labor.
+
+==============================================================
+2. ALCANCE Y CAMPO DE APLICACIÓN
+==============================================================
+
+Aplica a:
+- Todos los empleadores, contratantes y trabajadores del sector público
+  y privado que realicen trabajos en alturas (= 1,5 m o más).
+- Empresas de energía eléctrica, telecomunicaciones, construcción,
+  mantenimiento industrial y cualquier actividad que implique trabajo en
+  alturas.
+- Contratistas y subcontratistas que realicen actividades de alto riesgo
+  por cuenta de terceros.
+
+No aplica a:
+- Minería subterránea (regulada por Ministerio de Minas).
+- Buceo (regulado por la DIMAR).
+
+==============================================================
+3. ROLES Y RESPONSABILIDADES
+==============================================================
+
+EMPLEADOR / CONTRATANTE:
+- Elaborar el Programa de Prevención y Protección contra Caídas.
+- Garantizar que todos los trabajadores en alturas tengan certificación vigente.
+- Proveer los EPP adecuados y en buen estado.
+- Garantizar la existencia de un Plan de Rescate antes de iniciar el trabajo.
+- Asegurar que se realice el Análisis de Trabajo Seguro (ATS) y el permiso
+  de trabajo para cada actividad.
+
+COORDINADOR DE TRABAJO EN ALTURAS:
+- Verificar condiciones del sitio antes de iniciar.
+- Autorizar el permiso de trabajo en altura.
+- Verificar EPP y sistemas de protección.
+- Supervisar la actividad desde el inicio hasta el cierre.
+
+TRABAJADOR AUTORIZADO (en canasta):
+- Portar y usar correctamente el EPP asignado.
+- Conocer y aplicar el Plan de Rescate.
+- Reportar cualquier condición insegura al coordinador.
+- No operar la plataforma sin la autorización del coordinador.
+
+VIGÍA (en piso):
+- Delimitar y señalizar el área de trabajo.
+- Mantener comunicación constante con el trabajador en altura.
+- Activar el plan de rescate si se presenta una emergencia.
+- Impedir el acceso de personal no autorizado al área.
+
+==============================================================
+4. TRABAJO EN VEHÍCULOS TIPO CANASTA (PLATAFORMAS ELEVADORAS)
+==============================================================
+
+NÚMERO DE PERSONAS:
+
+En la canasta:
+- El fabricante especifica en la PLACA DEL EQUIPO el número máximo de
+  ocupantes permitidos y la carga útil máxima.
+- En la práctica, las PEMP de distribución eléctrica tienen capacidad
+  para 1 o 2 personas según el modelo.
+- NUNCA superar el número de personas ni la carga útil indicada en placa.
+- Si la placa dice 2 personas: pueden ir 2, pero ambas deben estar
+  certificadas en trabajo en alturas.
+- Si la placa dice 1 persona: solo 1 persona puede estar en la canasta.
+
+En piso (equipo mínimo requerido):
+- 1 operador del vehículo (con licencia C2 para camiones + certificación
+  en operación de PEMP del fabricante).
+- 1 vigía mínimo para señalización del área y comunicación.
+- Si el trabajo es en vía pública o con tráfico vehicular:
+  señaleros adicionales según plan de manejo de tráfico.
+- Para trabajos en redes eléctricas energizadas: el equipo en piso debe
+  tener personal con conocimiento de trabajo en tensión para activar
+  procedimientos de emergencia.
+
+REQUISITOS ESPECÍFICOS PARA LA PEMP:
+- Revisión técnico-mecánica (RTM) vigente del vehículo.
+- SOAT vigente del vehículo.
+- Concepto técnico del fabricante o mantenimiento certificado de la pluma.
+- Lista de chequeo de inspección pre-operacional (diligenciada antes de
+  cada uso): nivel de aceite, presión llantas, funcionamiento de la canasta
+  en vacío, botón de parada de emergencia, radio de comunicación.
+- Certificado de la empresa de que el equipo tiene mantenimiento al día.
+
+POSICIONAMIENTO DEL VEHÍCULO:
+- Estabilizadores desplegados en superficie nivelada y firme antes de
+  elevar la canasta.
+- No estacionar sobre alcantarillas, tapas de servicios o terreno blando
+  sin tablones de apoyo.
+- Respetar las distancias mínimas de seguridad a redes eléctricas
+  energizadas (ver RETIE 2024, Libro 3, Título 10).
+
+==============================================================
+5. CAPACITACIÓN Y CERTIFICACIÓN
+==============================================================
+
+NIVELES DE FORMACIÓN (Art. 10 Res. 4272/2021):
+
+Nivel Avanzado (trabajadores que ejecutan la tarea):
+- Duración mínima: 8 horas teóricas + 8 horas prácticas = 16 horas.
+- Contenido: normativa vigente, riesgos de caída, sistemas de anclaje,
+  uso de EPP, rescate básico en alturas.
+- Certificado emitido por entidad SENA o autorizada por el Ministerio de Trabajo.
+- Vigencia: 3 años. Al vencerse se debe hacer la actualización (8 h mínimo).
+
+Coordinador de Trabajo en Alturas:
+- Formación adicional en coordinación y supervisión.
+- Mínimo 50 horas para empresas con 10 o más trabajadores en altura.
+- Mínimo 20 horas para coordinadores en empresas pequeñas.
+
+CERTIFICACIÓN COMO OPERADOR DE PEMP:
+- Adicionalmente a la certificación en trabajo en alturas, el operador
+  de la plataforma debe tener capacitación certificada en la operación
+  del equipo específico (fabricante o empresa autorizada).
+
+==============================================================
+6. DOCUMENTOS Y PERMISOS REQUERIDOS ANTES DE INICIAR EL TRABAJO
+==============================================================
+
+DOCUMENTOS DEL TRABAJADOR (portar en campo):
+1. Certificado vigente de trabajo seguro en alturas (nivel avanzado).
+   - Emitido por el SENA o entidad autorizada.
+   - Vigencia 3 años.
+2. Carné de la empresa (identificación del personal autorizado).
+3. Examen médico ocupacional con aptitud para trabajo en alturas (vigente).
+   - Incluye evaluación de vértigo, presión arterial, visión, etc.
+
+DOCUMENTOS DEL EQUIPO (carro canasta):
+4. Licencia de conducción del operador (categoría C2 o superior).
+5. SOAT vigente del vehículo.
+6. Revisión técnico-mecánica (RTM) vigente.
+7. Lista de chequeo pre-operacional diligenciada y firmada (del día).
+8. Certificado de mantenimiento de la pluma/plataforma (al día).
+9. Manual del fabricante del equipo (o resumen de capacidad/limitaciones).
+
+DOCUMENTOS DE LA LABOR (por actividad):
+10. Permiso de trabajo en alturas (formato empresa, firmado por coordinador
+    y trabajador, con fecha y hora de inicio/cierre).
+11. Análisis de Trabajo Seguro (ATS): identificación de peligros, controles
+    y medidas preventivas para esa labor específica.
+12. Plan de rescate en alturas (disponible y socializado al equipo antes
+    de iniciar).
+13. Si es en vía pública: plan de manejo de tráfico y permisos municipales.
+14. Si es en instalaciones de un tercero: permiso de ingreso / coordinación
+    con el dueño de la instalación.
+15. Para trabajo en redes eléctricas energizadas: permiso de trabajo en
+    tensión (conforme al RETIE y procedimientos del operador de red).
+
+REGISTROS QUE DEBEN QUEDAR (evidencia):
+- Acta de socialización del ATS firmada por todo el personal.
+- Listas de asistencia a capacitaciones.
+- Registro fotográfico del área de trabajo y EPP en uso.
+- Cierre del permiso de trabajo al finalizar.
+
+==============================================================
+7. ELEMENTOS DE PROTECCIÓN PERSONAL (EPP) — OBLIGATORIOS
+==============================================================
+
+Para trabajo en alturas genérico:
+- Arnés de cuerpo completo (NTC 2561 o ANSI Z359.1).
+- Eslinga de doble vía con absorbedor de impacto (o conectores de
+  posicionamiento dentro de la canasta).
+- Casco de seguridad con barbuquejo (no se acepta casco sin barbuquejo).
+- Gafas de seguridad.
+- Calzado de seguridad con suela antideslizante.
+
+Adicionalmente para trabajos en redes eléctricas:
+- Casco dieléctrico (clase E, resistencia 20 kV).
+- Guantes dieléctricos de la clase correspondiente a la tensión de trabajo.
+- Ropa de trabajo de algodón o materiales ignífugos (sin poliéster).
+- Calzado dieléctrico.
+- Gafas de protección UV si hay riesgo de arco eléctrico.
+
+Dentro de la canasta PEMP:
+- El arnés debe estar anclado al punto de anclaje certificado de la canasta.
+- Se usa eslinga corta (posicionamiento) o eslinga retráctil.
+- NUNCA se pone la eslinga sobre la barandilla de la canasta (no es un punto
+  de anclaje certificado).
+
+==============================================================
+8. PLAN DE RESCATE
+==============================================================
+
+Requisitos (Art. 24 Res. 4272/2021):
+- Debe elaborarse ANTES de iniciar cualquier trabajo en alturas.
+- Debe ser socializado con todo el personal que participa en la labor.
+- Debe indicar: procedimiento paso a paso, equipos disponibles para rescate,
+  responsables de cada acción, números de emergencia (ARL, ambulancia, bomberos).
+- Para PEMP: incluir procedimiento si la plataforma queda atascada o sin energía
+  (bajada manual de emergencia, comunicación con operador).
+- Los trabajadores deben conocer cómo activar la parada de emergencia del equipo
+  desde el piso.
+
+Tiempo máximo de rescate recomendado: 6 minutos desde el momento del incidente
+(riesgo de sindrome por suspension inerte).
+
+==============================================================
+9. REQUISITOS ADICIONALES PARA TRABAJOS EN REDES ELÉCTRICAS EN ALTURA
+==============================================================
+
+Normativa adicional aplicable (además de esta resolución):
+- RETIE 2024, Libro 3: distancias mínimas de seguridad a partes energizadas.
+- Procedimientos del Operador de Red (OR): cada empresa distribuidora
+  tiene su propio reglamento de trabajo en tensión y en proximidad.
+- NTC 5282: Trabajo en tensión en instalaciones eléctricas (hasta 36 kV).
+
+Distancias mínimas de seguridad (RETIE 2024, Libro 3, Título 10):
+- BT (hasta 1 kV): 0,30 m a partes desnudas energizadas.
+- MT (1 kV a 57,5 kV): distancias que varían de 0,60 m a 1,20 m según tensión.
+- AT (mayor de 57,5 kV): distancias mayores, requieren protocolos especiales.
+
+PROHIBICIONES:
+- No trabajar en altura en condiciones de lluvia, tormenta eléctrica
+  o vientos superiores a 50 km/h sin evaluación específica de riesgo.
+- No usar PEMP con estructura metálica sin aislar dentro de las distancias
+  de seguridad a conductores energizados (usar versión dieléctrica si aplica).
+
+==============================================================
+10. SANCIONES
+==============================================================
+
+Las infracciones a la Resolución 4272/2021 son sancionadas por el
+Ministerio de Trabajo bajo el Código Sustantivo del Trabajo y la
+Ley 1562/2012:
+- Multas de 1 a 5.000 SMMLV según la gravedad.
+- Cierre temporal del centro de trabajo.
+- Responsabilidad penal del empleador/contratante en caso de accidente
+  fatal por incumplimiento de las normas de seguridad.
+
+En el caso de accidentes en redes eléctricas: también aplica
+responsabilidad ante la CREG y el operador de red (RETIE 2024).
+
+FIN DEL DOCUMENTO
