@@ -1098,6 +1098,13 @@ async def _consulta_retie(update: Update, texto: str):
 
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
     """Conversacion guiada por Gemini. Historial = lista de {"role":"user"|"model","text":"..."}"""
+    if not _genai_client:
+        await update.message.reply_text(
+            "⚠️ Servicio IA no configurado (GEMINI_API_KEY ausente).\n"
+            "Usa /menu para el flujo guiado sin IA."
+        )
+        return
+
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
     historial.append({"role": "user", "text": texto_usuario})
 
@@ -1120,18 +1127,29 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         except Exception as e:
             last_err = e
             msg = str(e)
-            if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
-                if intento < 2:
-                    await asyncio.sleep(2 * (intento + 1))
-                    continue
+            retryable = (
+                "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower()
+                or "429" in msg or "RESOURCE_EXHAUSTED" in msg
+            )
+            if retryable and intento < 2:
+                await asyncio.sleep(4 * (intento + 1))
+                continue
             break
 
     if response is None:
-        log.error(f"Error dialogo_diagrama: {last_err}")
-        await update.message.reply_text(
-            "⚠️ Error temporal con el servicio IA.\n"
-            "Intenta de nuevo o escribe los datos directamente."
-        )
+        log.error(f"Error dialogo_diagrama [{type(last_err).__name__}]: {last_err}")
+        msg = str(last_err)
+        if "401" in msg or "api key" in msg.lower() or "API_KEY" in msg:
+            txt = "⚠️ Clave API de Gemini inválida. Verifica GEMINI_API_KEY en Render."
+        elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
+            txt = "⏳ Cuota de Gemini agotada. Intenta en unos minutos."
+        elif "404" in msg or "not found" in msg.lower():
+            txt = "⚠️ Modelo Gemini no disponible. Contacta al administrador."
+        elif "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+            txt = "⏳ Servicio IA saturado. Intenta de nuevo en unos segundos."
+        else:
+            txt = f"⚠️ Error con el servicio IA ({type(last_err).__name__}).\nIntenta de nuevo o escribe los datos directamente."
+        await update.message.reply_text(txt)
         return
 
     try:
