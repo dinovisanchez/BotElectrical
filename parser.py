@@ -123,34 +123,63 @@ def parse_spec(text):
         cfg["salida"] = "ambos" if ("conexion" in t or "ambos" in t or "los dos" in t) else "unifilar"
         entendido.append(f"Diagrama: {cfg['salida']}")
 
-    # --- TENSION ---
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*kv", t)
+    # --- TENSION MT (kV) — excluir kVA para no confundir 75kVA con 75 kV ---
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*kv(?!a)", t)
     if m:
         cfg["tension"] = m.group(1).replace(",", ".") + " kV"
 
+    # --- CALIBRE CONDUCTOR ---
+    # Formato N/0 (AWG 1/0, 2/0, 4/0) — la barra con cero no es relacion TC/TP
+    mc_s0 = re.search(r"\b(\d+)/0\b", t)
+    mc_awg = re.search(r"\bawg\s*(\d+(?:/0)?)\b", t)
+    if mc_awg:
+        cfg["calibre_conductor"] = "AWG " + mc_awg.group(1)
+        entendido.append(f"Calibre AWG {mc_awg.group(1)}")
+    elif mc_s0:
+        cfg["calibre_conductor"] = mc_s0.group(1) + "/0"
+        entendido.append(f"Calibre {mc_s0.group(1)}/0")
+
     # --- PROTECCIONES ---
-    if "rele" in t or "proteccion" in t or "ansi" in t:
+    if "rele" in t or "ansi" in t:
         cfg["rele"] = True
     if "sin pararrayos" in t or "sin dps" in t:
         cfg["dps"] = False
     elif "pararrayos" in t or "dps" in t:
         cfg["dps"] = True
 
-    # --- TRANSFORMADOR (trafo en MT) ---
-    if any(x in t for x in ["transformador", "trafo"]) and any(x in t for x in ["unifilar", "totalizador", "kva"]):
-        cfg["unifilar_trafo"] = True
-        cfg["salida"] = "unifilar"
+    # --- INTERRUPTOR / PROTECCION (deteccion global) ---
+    ma_int = re.search(
+        r"(?:proteccion|interruptor|breaker|totalizador)\s*(?:de\s*)?(\d+)\s*a(?:mp|mps|mperios)?\b", t
+    )
+    if ma_int:
+        cfg["interruptor"] = ma_int.group(1) + " A"
+        entendido.append(f"Interruptor {ma_int.group(1)} A")
+
+    # --- TRANSFORMADOR ---
+    tiene_trafo = any(x in t for x in ["transformador", "trafo"])
+    if tiene_trafo and any(x in t for x in ["kva", "compartido", "propio", "privado", "unifilar", "totalizador"]):
+        cfg["instalacion"] = "trafo"
         mk = re.search(r"(\d+(?:[.,]\d+)?)\s*kva", t)
-        if mk: cfg["trafo_kva"] = mk.group(1).replace(",", ".")
-        if "bifasic" in t: cfg["trafo_tipo"] = "bifasico"
-        elif "monofasic" in t: cfg["trafo_tipo"] = "monofasico"
-        elif "trifasic" in t: cfg["trafo_tipo"] = "trifasico"
+        if mk:
+            cfg["trafo_kva"] = mk.group(1).replace(",", ".")
+        if "bifasic" in t:
+            cfg["trafo_tipo"] = "bifasico"
+        elif "monofasic" in t:
+            cfg["trafo_tipo"] = "monofasico"
+        elif "trifasic" in t:
+            cfg["trafo_tipo"] = "trifasico"
         mcc = re.search(r"(\d+)\s*cortacircuit", t)
         if mcc: cfg["n_cc"] = int(mcc.group(1))
         mtc = re.search(r"(\d+)\s*tc", t)
         if mtc: cfg["n_tc"] = int(mtc.group(1))
-        ma = re.search(r"(\d+)\s*a(?:mp|mps|mperios)?\b", t)
-        if ma: cfg["interruptor"] = ma.group(1) + " A"
+        # interruptor dentro del bloque trafo si no fue detectado antes
+        if not cfg.get("interruptor"):
+            ma = re.search(r"(\d+)\s*a(?:mp|mps|mperios)?\b", t)
+            if ma: cfg["interruptor"] = ma.group(1) + " A"
+        # unifilar_trafo solo si hay trafo propio (no compartido)
+        if "compartido" not in t:
+            cfg["unifilar_trafo"] = True
+            cfg["salida"] = "unifilar"
 
     # --- CONEXION (simetrica / asimetrica) — solo aplica a medida directa ---
     if re.search(r"asimetr", t):
