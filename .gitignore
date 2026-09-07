@@ -11,6 +11,11 @@ muestra_*.png
 # Entornos virtuales
 .venv_setup/
 .venv/
+venv/
+.qa_venv/
+
+# Logs
+*.log
 
 # Documentos RETIE (pesados, no necesarios en el repo)
 retie_docs/
