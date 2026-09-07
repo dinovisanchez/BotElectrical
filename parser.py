@@ -6,6 +6,9 @@ DEFAULT = dict(sistema="tri4h", tipo="indirecta", respaldo=False,
                norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="",
                conexion="simetrica",
                trafo_presente=False,
+               trafo_uso="",           # "exclusivo" | "compartido" | "" (sin especificar)
+               trafo_n_usuarios="",    # cantidad de otros usuarios (solo si compartido)
+               trafo_gabinete=None,    # True=gabinete/cuarto cerrado, False=red abierta, None=sin especificar
                interruptor_pos=None,   # G5: era "antes", forzaba elemento falso en diagramas
                interruptor_antes_kva="", interruptor_despues_kva="")
 
@@ -71,8 +74,8 @@ def parse_spec(text):
                   ("trifasic" in t and not tiene_tri3h)
 
     detected_sistemas = []
-    if any(p in t for p in ["monofasic", "mono"]): detected_sistemas.append("mono")
-    if any(p in t for p in ["bifasic", "bi"]):      detected_sistemas.append("bifasico")
+    if "monofasic" in t or re.search(r"\bmono\b", t): detected_sistemas.append("mono")
+    if "bifasic" in t or re.search(r"\bbi\b", t):      detected_sistemas.append("bifasico")
     if tiene_tri3h: detected_sistemas.append("tri3h")
     if tiene_tri4h: detected_sistemas.append("tri4h")
 
@@ -157,7 +160,7 @@ def parse_spec(text):
 
     # --- TRANSFORMADOR ---
     tiene_trafo = any(x in t for x in ["transformador", "trafo"])
-    if tiene_trafo and any(x in t for x in ["kva", "compartido", "propio", "privado", "unifilar", "totalizador"]):
+    if tiene_trafo and any(x in t for x in ["kva", "compartido", "propio", "privado", "exclusivo", "unifilar", "totalizador"]):
         cfg["instalacion"] = "trafo"
         mk = re.search(r"(\d+(?:[.,]\d+)?)\s*kva", t)
         if mk:
@@ -176,9 +179,32 @@ def parse_spec(text):
         if not cfg.get("interruptor"):
             ma = re.search(r"(\d+)\s*a(?:mp|mps|mperios)?\b", t)
             if ma: cfg["interruptor"] = ma.group(1) + " A"
-        # unifilar_trafo solo si hay trafo propio (no compartido)
-        if "compartido" not in t:
-            cfg["unifilar_trafo"] = True
+        # --- USO DEL TRAFO: exclusivo vs compartido ---
+        # Un trafo COMPARTIDO alimenta un barraje BT del que se derivan varios
+        # usuarios, cada uno con su propio medidor DIRECTO (no hay un solo
+        # medidor semidirecta/indirecta para todos). Si el texto no especifico
+        # un tipo de medida explicito, el punto de este usuario es DIRECTA.
+        if "compartido" in t:
+            cfg["trafo_uso"] = "compartido"
+            if tipo_count == 0:
+                cfg["tipo"] = "directa"
+                entendido.append(
+                    "Trafo compartido -> tipo forzado a DIRECTA "
+                    "(cada usuario con medidor propio)"
+                )
+            m_us = re.search(r"(\d+)\s*(?:otros?\s*)?usuario", t)
+            if m_us:
+                cfg["trafo_n_usuarios"] = m_us.group(1)
+                entendido.append(f"{m_us.group(1)} usuarios compartiendo el trafo")
+            if any(x in t for x in ["gabinete", "cuarto de medidor", "cajilla compartida", "encerrado"]):
+                cfg["trafo_gabinete"] = True
+            elif any(x in t for x in ["red abierta", "a la intemperie", "poste", "aereo", "aérea"]):
+                cfg["trafo_gabinete"] = False
+        else:
+            if any(x in t for x in ["exclusivo", "propio", "privado"]):
+                cfg["trafo_uso"] = "exclusivo"
+            # Trafo de uso propio/exclusivo: casi siempre se quiere ver la
+            # cadena completa RED->TRAFO->MEDIDOR, por eso se fuerza unifilar.
             cfg["salida"] = "unifilar"
 
     # --- CONEXION (simetrica / asimetrica) — solo aplica a medida directa ---

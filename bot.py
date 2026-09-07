@@ -572,7 +572,8 @@ PROMPT_DIAGRAMA = (
     "=== DATOS OPCIONALES (pregunta solo si aplica al tipo de medida) ===\n"
     "- Semidirecta/Indirecta: relacion TC (ej. 200/5). Indirecta: relacion TP (ej. 13200/120).\n"
     "- Instalacion: trafo propio / barra BT / red directa (omite si no aplica).\n"
-    "  Si hay trafo: cantidad, kVA, tipo (mono/bi/tri).\n"
+    "  Si hay trafo: cantidad, kVA, tipo (mono/bi/tri), y USO (exclusivo o "
+    "compartido — pregunta siempre que instalacion=trafo).\n"
     "- PROTECCION (pregunta siempre): ¿Tiene interruptor/proteccion en la acometida?\n"
     "  Si/No. ¿De cuantos amperios? ¿Va ANTES del medidor, DESPUES, o en AMBOS lados?\n"
     "  Referencia: directa -> tipicamente ANTES. Semi/indirecta -> tipicamente DESPUES.\n"
@@ -584,10 +585,20 @@ PROMPT_DIAGRAMA = (
     "- Trafo COMPARTIDO (edificios, conjuntos residenciales): cada usuario tiene su "
     "propia acometida BT y medidor DIRECTO. No hay un solo medidor semidirecta/indirecta "
     "para todos. Si el usuario menciona trafo compartido o varios usuarios, el tipo de "
-    "medida del punto es DIRECTA. Si lo confirma, incluye el trafo en el unifilar "
-    "como contexto (instalacion=trafo) pero tipo=directa.\n"
+    "medida del punto es DIRECTA (salvo que el usuario ya haya confirmado explicitamente "
+    "otro tipo, ej. un local con corriente alta que igual comparte el trafo del edificio). "
+    "Si lo confirma, incluye el trafo en el unifilar como contexto (instalacion=trafo) "
+    "con trafo_uso='compartido'.\n"
     "- Trafo PROPIO del usuario (subestacion propia): puede ser semidirecta o indirecta "
-    "segun la corriente y tension.\n"
+    "segun la corriente y tension. Usa trafo_uso='exclusivo'.\n"
+    "- SIEMPRE que instalacion=trafo, el campo trafo_uso del JSON debe quedar en "
+    "'exclusivo' o 'compartido' (nunca vacio) — el unifilar dibuja el barraje BT y la "
+    "derivacion a otros usuarios de forma distinta segun este dato.\n"
+    "- Si trafo_uso='compartido', pregunta ADEMAS (una pregunta a la vez): "
+    "(1) cuantos otros usuarios comparten aprox. (trafo_n_usuarios), y "
+    "(2) si el punto de derivacion esta en un gabinete/cuarto cerrado "
+    "(trafo_gabinete=true, se dibuja encerrado) o en red abierta / poste "
+    "(trafo_gabinete=false, no se encierra).\n"
     "\n"
     "=== SENAL DE DIAGRAMA LISTO ===\n"
     "Cuando tengas TODA la informacion critica, responde EXACTAMENTE:\n"
@@ -600,6 +611,7 @@ PROMPT_DIAGRAMA = (
     '  "salida": "ambos",\n'
     '  "norma": "RA8",\n'
     '  "instalacion": "trafo",\n'
+    '  "trafo_uso": "exclusivo",\n'
     '  "n_trafos": 1,\n'
     '  "trafo_kva": "225",\n'
     '  "trafo_tipo": "trifasico",\n'
@@ -617,6 +629,10 @@ PROMPT_DIAGRAMA = (
     'salida: "conexiones" | "unifilar" | "ambos"\n'
     'norma: "RA8" | "CENS"\n'
     'instalacion: "trafo" | "barraje" | "" (vacio = red sin trafo)\n'
+    'trafo_uso: "exclusivo" | "compartido" (obligatorio si instalacion="trafo")\n'
+    "trafo_n_usuarios: string ej '6' (solo si trafo_uso='compartido')\n"
+    'trafo_gabinete: true | false (solo si trafo_uso=\'compartido\'; '
+    "true=gabinete/cuarto cerrado, false=red abierta/poste)\n"
     "n_trafos: entero >= 1\n"
     "trafo_kva: string ej '225'\n"
     "trafo_kva_list: lista ej ['225','112'] si hay varios trafos\n"
@@ -739,25 +755,79 @@ def _caption(tipo_diagrama, cfg):
     return "\n".join(lineas)
 
 # ── Generación de diagramas ────────────────────────────────────────────────────
+def _verificar_coherencia(cfg):
+    """Chequeo previo a dibujar: corrige valores que no pueden coexistir con el
+    tipo de medida elegido y detecta cuando el flujo tuvo que ASUMIR un dato
+    (p.ej. si el trafo es exclusivo o compartido) que cambia lo que se dibuja.
+    Devuelve (cfg_corregido, notas_para_el_usuario)."""
+    cfg = dict(cfg)
+    notas_usuario = []
+    tipo = cfg.get("tipo", "directa")
+    inst = cfg.get("instalacion", "")
+
+    if tipo in ("directa", "semidirecta") and cfg.get("v_mt"):
+        cfg.pop("v_mt", None)
+        log.warning(f"[coherencia] v_mt ignorado: tipo={tipo} es siempre en B.T.")
+
+    if tipo == "indirecta" and not cfg.get("rel_tc"):
+        log.warning("[coherencia] indirecta sin relacion de TC")
+    if tipo == "indirecta" and not cfg.get("rel_tp"):
+        log.warning("[coherencia] indirecta sin relacion de TP")
+    if tipo == "semidirecta" and not cfg.get("rel_tc"):
+        log.warning("[coherencia] semidirecta sin relacion de TC")
+
+    if inst == "trafo":
+        if not cfg.get("trafo_kva"):
+            log.warning("[coherencia] instalacion=trafo sin kVA")
+        if not cfg.get("trafo_uso"):
+            cfg["trafo_uso"] = "exclusivo"
+            notas_usuario.append(
+                "No especificaste si el transformador es EXCLUSIVO o COMPARTIDO "
+                "con otros usuarios: el diagrama asume EXCLUSIVO."
+            )
+        elif cfg.get("trafo_uso") == "compartido":
+            if tipo == "indirecta":
+                log.warning("[coherencia] trafo compartido + tipo indirecta (combinacion inusual)")
+            if cfg.get("trafo_gabinete") is None:
+                cfg["trafo_gabinete"] = False
+                notas_usuario.append(
+                    "No especificaste si el punto compartido está en gabinete "
+                    "cerrado o red abierta: el diagrama asume RED ABIERTA (sin encerrar)."
+                )
+
+    return cfg, notas_usuario
+
+def _verificar_render(path, nombre):
+    """'Prueba' minima antes de entregar la imagen: el archivo debe existir y
+    tener un tamaño compatible con un render real (no vacio ni truncado)."""
+    if not os.path.exists(path) or os.path.getsize(path) < 3000:
+        raise RuntimeError(
+            f"{nombre}: el render resulto invalido (archivo ausente o demasiado pequeño)"
+        )
+
 def _generar(cfg):
+    cfg, notas = _verificar_coherencia(cfg)
     salida = cfg.get("salida", "conexiones")
     out = []
     if salida in ("conexiones", "ambos"):
         t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
         diagram_engine.draw_conexiones_retie(cfg, t.name)
+        _verificar_render(t.name, "Diagrama de Conexiones")
         out.append(("Diagrama de Conexiones", t.name))
     if salida in ("unifilar", "ambos"):
         t = tempfile.NamedTemporaryFile(suffix=".png", delete=False); t.close()
         diagram_engine.draw_unifilar_generico(cfg, t.name)
+        _verificar_render(t.name, "Diagrama Unifilar")
         out.append(("Diagrama Unifilar", t.name))
-    return out
+    return out, notas, cfg
 
 async def _enviar_foto(mensaje, cfg):
     await mensaje.reply_chat_action("upload_photo")
-    imgs = _generar(cfg)
+    imgs, notas, cfg = _generar(cfg)
+    extra = ("\n\n⚠️ " + " ".join(notas)) if notas else ""
     for tipo_diagrama, path in imgs:
         with open(path, "rb") as f:
-            await mensaje.reply_photo(photo=f, caption=_caption(tipo_diagrama, cfg))
+            await mensaje.reply_photo(photo=f, caption=_caption(tipo_diagrama, cfg) + extra)
         try: os.remove(path)
         except OSError: pass
 
@@ -1199,12 +1269,18 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 for k, v in ia_cfg.items():
                     if v is not None and v != "":
                         cfg[k] = v
-                if cfg.get("trafo_tipo") and not cfg.get("trafo_uso"):
-                    cfg["trafo_uso"] = cfg["trafo_tipo"]
                 ctx.user_data["modo_diagrama_ia"] = False
                 ctx.user_data["historial_diagrama"] = []
                 await update.message.reply_text("Generando diagrama…")
-                await _enviar_foto(update.message, cfg)
+                # _verificar_coherencia() (dentro de _enviar_foto) asume
+                # trafo_uso="exclusivo" y lo avisa si la IA no lo pregunto.
+                try:
+                    await _enviar_foto(update.message, cfg)
+                except Exception as e:
+                    log.error(f"Error diagrama (dialogo IA): {e}")
+                    await update.message.reply_text(
+                        "⚠️ No pude generar el diagrama.\n\nUsa /menu para configuración guiada."
+                    )
                 return
             except (json.JSONDecodeError, KeyError) as e:
                 log.error(f"JSON malformado de Gemini diagrama: {e}\n{respuesta}")
@@ -1791,6 +1867,25 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif campo == "trafo_uso":
         cfg["trafo_uso"] = val
         _adv()
+        if val == "compartido":
+            ctx.user_data["esperando_n_usuarios_compartido"] = True
+            await q.edit_message_text(
+                _header(n, cfg,
+                        "¿Cuántos otros usuarios comparten este transformador "
+                        "(aprox.)?\n\n"
+                        "  Escribe el número  ej: 4  10  20")
+            )
+        else:
+            ctx.user_data["esperando_n_trafos"] = True
+            await q.edit_message_text(
+                _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
+                                "  Escribe el número  ej: 1  2  3  ...")
+            )
+
+    # ── Gabinete compartido vs red abierta ───────────────────────────────────
+    elif campo == "trafo_gabinete":
+        cfg["trafo_gabinete"] = (val == "gabinete")
+        _adv()
         ctx.user_data["esperando_n_trafos"] = True
         await q.edit_message_text(
             _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
@@ -2093,6 +2188,30 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.user_data.get("clasificando"):
         ctx.user_data["clasificando"] = False
         await _hacer_clasificacion(update, txt)
+        return
+
+    # ── Cantidad de usuarios que comparten el trafo (texto libre) ────────────
+    if ctx.user_data.get("esperando_n_usuarios_compartido"):
+        val_str, err = _validar_numero(txt, "número de usuarios")
+        if err:
+            await update.message.reply_text(f"⚠️ {err}\n\nEscribe solo el número  ej: 4  10  20")
+            return
+        ctx.user_data["esperando_n_usuarios_compartido"] = False
+        cfg["trafo_n_usuarios"] = str(int(float(val_str)))
+        ctx.user_data["cfg"] = cfg
+        n += 1; ctx.user_data["paso_n"] = n
+        kb = _kb([
+            ("🗄  Gabinete/cuarto cerrado", "gabinete"),
+            ("🌤  Red abierta (poste)",     "red_abierta"),
+        ], "trafo_gabinete")
+        await update.message.reply_text(
+            _header(n, cfg,
+                    "¿El punto de derivación compartido está en un "
+                    "gabinete/cuarto cerrado o en red abierta (poste)?\n\n"
+                    "  🗄  Gabinete   se dibuja encerrado\n"
+                    "  🌤  Red abierta   no se encierra"),
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
         return
 
     # ── Número de transformadores (texto libre) ───────────────────────────────

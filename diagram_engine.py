@@ -1338,7 +1338,8 @@ def draw_unifilar_generico(cfg, out_path):
     norma       = cfg.get("norma", "RA8")
     rel_tc      = cfg.get("rel_tc", "")
     rel_tp      = cfg.get("rel_tp", "")
-    instalacion = cfg.get("instalacion", "") or cfg.get("instalacion", "barraje")
+    instalacion = cfg.get("instalacion") or "barraje"
+    trafo_uso   = cfg.get("trafo_uso", "")   # "exclusivo" | "compartido" | ""
     respaldo    = bool(cfg.get("respaldo", False))
     kva         = cfg.get("trafo_kva", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
@@ -1371,6 +1372,10 @@ def draw_unifilar_generico(cfg, out_path):
     if rel_tc:  sub_parts.append(f"RTC {rel_tc}")
     if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
     if respaldo: sub_parts.append("Principal + Respaldo")
+    if instalacion == "trafo" and trafo_uso == "compartido":
+        sub_parts.append("Trafo COMPARTIDO (varios usuarios)")
+    elif instalacion == "trafo" and trafo_uso == "exclusivo":
+        sub_parts.append("Trafo exclusivo")
     cal = cfg.get("calibre_conductor") or cfg.get("calibre_acometida")
     if cal: sub_parts.append(f"Calibre {cal}")
     ax.text(W/2, H-5.5, "  ·  ".join(sub_parts),
@@ -1578,6 +1583,22 @@ def draw_unifilar_generico(cfg, out_path):
 
     # ── TRAFO (instalacion=trafo) ──────────────────────────────────────────────
     if instalacion == "trafo":
+        # Proteccion MT del trafo (RETIE): en indirecta el punto de medida ya
+        # se protegio arriba (CC fusibles del TC/TP); en directa/semidirecta
+        # el trafo cuelga directo de "RED (M.T.)" y esta es su PRIMERA
+        # proteccion, por eso se dibuja siempre (pararrayos + cortacircuitos).
+        if tipo != "indirecta":
+            arrx = xc + 12
+            ax.plot([xc, arrx], [y, y], color=COL["G"], lw=1.3, zorder=3)
+            _u_arrester(ax, arrx, y - 3, COL["G"], 0.72)
+            ax.text(arrx + 2.5, y - 1.5, "Pararrayos ZnO",
+                    ha="left", va="center", fontsize=6.8, color=COL["G"], fontweight="bold")
+            vline(y, y - 3); y -= 3
+            _u_fuse(ax, xc, y - 2, INK, 0.78)
+            ax.text(xc - 5, y - 2, "Cortacircuitos\nMT", ha="right", va="center",
+                    fontsize=7, color=INK, fontweight="bold")
+            vline(y - 2, y - 4); y -= 4
+
         if seccionador_pos == "antes":
             vline(y, y - 3)
             _u_disc(ax, xc, y - 3, INK, 1.0)
@@ -1600,10 +1621,19 @@ def draw_unifilar_generico(cfg, out_path):
             for dx in xs:
                 ax.add_patch(Circle((xc+dx, trafo_y+2.2), 2.0, fill=False, ec=INK, lw=1.6))
                 ax.add_patch(Circle((xc+dx, trafo_y-2.2), 2.0, fill=False, ec=INK, lw=1.6))
-                _ground(ax, xc+dx, trafo_y-4.2, 0.35)
+                # tierra en ramal lateral (no tapada por la linea principal)
+                ax.plot([xc+dx, xc+dx+2.2], [trafo_y-2.2, trafo_y-2.2], color=COL["G"], lw=1.1, zorder=3)
+                _ground(ax, xc+dx+2.2, trafo_y-2.2, 0.32)
             trafo_lbl = f"Trafo\n{_banco_lbl(n_trafos)}" if _banco_lbl(n_trafos) else "Trafo"
         else:
-            _u_xfmr(ax, xc, trafo_y, INK, 1.25, ground=True)
+            _u_xfmr(ax, xc, trafo_y, INK, 1.25, ground=False)
+            # Tierra del neutro secundario en ramal lateral: si se dibujara
+            # sobre el eje (xc) la tapa la linea principal que sigue derecho
+            # hacia el medidor (ver _u_xfmr, que la dibuja en (xc, y) por
+            # defecto). Se saca a un lado para que quede siempre visible.
+            gnd_y = trafo_y - 1.5 * 1.25
+            ax.plot([xc, xc + 3.5], [gnd_y, gnd_y], color=COL["G"], lw=1.3, zorder=3)
+            _ground(ax, xc + 3.5, gnd_y, 0.5)
             trafo_lbl = f"Trafo {trafo_tipo}\n{kva} kVA" if kva else f"Trafo {trafo_tipo}"
 
         if sistema in ("tri3h", "tri4h") and "mono" not in trafo_tipo.lower():
@@ -1612,15 +1642,43 @@ def draw_unifilar_generico(cfg, out_path):
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
         vline(y, trafo_y - 5); y = trafo_y - 6
 
-        if calibre:
-            cable_lbl(y + 2, y - 2, calibre, lado=-1)
+        if trafo_uso == "compartido":
+            # El secundario del trafo alimenta un barraje BT del que se
+            # derivan VARIOS usuarios (cada uno con su propio medidor directo).
+            # Este punto de medida es solo UNO de esos derivados.
+            bt_y = trafo_y - 5
+            n_us = str(cfg.get("trafo_n_usuarios", "") or "").strip()
+            gabinete = bool(cfg.get("trafo_gabinete", False))
+            lbl_otros = f"+ {n_us} otros\nusuarios" if n_us else "+ otros\nusuarios"
+
+            if gabinete:
+                # Punto de derivacion encerrado (gabinete/cuarto de medidores
+                # compartido): se dibuja un recinto punteado alrededor.
+                gx0, gx1 = xc - 11, xc + 11
+                gy0, gy1 = bt_y - 0.5, trafo_y + 4.5
+                ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
+                             boxstyle="round,pad=0.3,rounding_size=1",
+                             fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
+                ax.text(gx1 + 1, gy1 - 1, "GABINETE\nCOMPARTIDO", ha="left", va="top",
+                        fontsize=6.3, color="#8a4b00", fontweight="bold")
+
+            busbar(bt_y, "BARRAJE BT\n(COMPARTIDO)")
+            ax.plot([xc + 14, xc + 22], [bt_y, bt_y], color="#8a4b00", lw=1.4,
+                    ls=(0, (3, 2)), zorder=3)
+            ax.text(xc + 23, bt_y, lbl_otros, ha="left", va="center",
+                    fontsize=7, color="#8a4b00", style="italic", fontweight="bold")
+            if not gabinete:
+                ax.text(xc - 16, bt_y - 3.2, "(red abierta — a la intemperie)",
+                        ha="right", va="center", fontsize=6, color="#8a4b00", style="italic")
+
+        cable_lbl(y + 2, y - 2, calibre or "cal. ?", lado=-1)
 
     # ── SEMIDIRECTA: TC como rama horizontal → bloque + medidor ───────────────
     if tipo == "semidirecta":
         tc_y = y
-        # Calibre solo si viene de barraje (si viene de trafo ya se etiqueto arriba)
-        if calibre and instalacion == "barraje":
-            cable_lbl(y + 3, y, calibre, lado=-1)
+        # Conductor solo si viene de barraje (si viene de trafo ya se etiqueto arriba)
+        if instalacion == "barraje":
+            cable_lbl(y + 3, y, calibre or "cal. ?", lado=-1)
         draw_medida_lateral(tc_y)
         vline(tc_y, tc_y - 5); y = tc_y - 5
         # Proteccion ANTES del medidor (si aplica)
@@ -1629,8 +1687,9 @@ def draw_unifilar_generico(cfg, out_path):
 
     # ── DIRECTA: medidor en linea, sin bloque de prueba ───────────────────────
     if tipo == "directa":
-        if calibre and instalacion in ("trafo", "barraje"):
-            cable_lbl(y + 3, y - 1, calibre, lado=-1)
+        # Si viene de trafo, el conductor ya se etiqueto al final del bloque TRAFO.
+        if instalacion == "barraje":
+            cable_lbl(y + 3, y - 1, calibre or "cal. ?", lado=-1)
         # Proteccion ANTES del medidor
         if prot_antes:
             draw_prot("Proteccion", prot_antes)
@@ -1670,8 +1729,8 @@ def draw_unifilar_generico(cfg, out_path):
     # ── CARGA ─────────────────────────────────────────────────────────────────
     ax.add_patch(Polygon([[xc-5, y], [xc+5, y], [xc, y-9]],
                  closed=True, fill=False, ec=INK, lw=2.4))
-    if calibre and tipo not in ("semidirecta", "directa"):
-        cable_lbl(y, y - 5, calibre, lado=-1)
+    ax.text(xc - 6.5, y - 3, calibre or "cal. ?", ha="right", va="center",
+            fontsize=7.5, color="#444", style="italic")
     ax.text(xc, y - 11, "CARGA",
             ha="center", va="top", fontsize=11, fontweight="bold", color=INK)
 
