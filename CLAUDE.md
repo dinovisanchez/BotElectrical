@@ -58,15 +58,30 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
   y si el punto de derivación está en gabinete/cuarto cerrado o en red abierta/poste
   (`trafo_gabinete`) — esto decide si el dibujo lo encierra o no.
 - `draw_unifilar_generico` dibuja el trafo distinto según `trafo_uso`: si es
-  `'compartido'`, agrega un barraje BT explícito con una rama punteada "+ N
-  otros usuarios" y, si `trafo_gabinete=True`, un recinto punteado alrededor
-  (si es `False`/red abierta, NO se encierra); si es `'exclusivo'` (o no se
-  especifica), dibuja la línea directa trafo→medidor sin esa rama.
-- Para tipo directa/semidirecta con `instalacion='trafo'` siempre se dibuja
-  protección MT (pararrayos ZnO + cortacircuitos fusible) antes del trafo, y
-  su puesta a tierra en un ramal lateral (no tapada por la línea principal).
-  El conductor se etiqueta en ambos extremos (trafo/red → medidor, y
-  medidor → carga), con placeholder `"cal. ?"` si no se especificó.
+  `'compartido'`, agrega un BARRAJE BT explícito con la cantidad real de
+  medidores adicionales ("+N medidores más en este punto", a la IZQUIERDA
+  para no cruzarse nunca con la conexión propia de este usuario que sigue
+  más abajo) y, si `trafo_gabinete=True`, un recinto punteado alrededor
+  limitado al trafo+barraje (si es `False`/red abierta, NO se encierra).
+  Después del barraje se deja un espacio vertical explícito (no cosmético:
+  evita que el TC/bloque/medidor de este usuario se solape con el barraje)
+  y se marca "▼/◀ ESTE MEDIDOR" junto a la conexión propia, para distinguirla
+  de los demás medidores del punto compartido. Si es `'exclusivo'` (o no se
+  especifica), no se dibuja nada de esto.
+- Para tipo directa/semidirecta con `instalacion='trafo'` siempre se dibuja:
+  una línea horizontal corta en "RED (M.T.)" (la MT es una derivación de un
+  alimentador que sigue sirviendo otros puntos, no una acometida exclusiva
+  en punta de línea), protección MT (pararrayos ZnO + cortacircuitos
+  fusible) antes del trafo, y su puesta a tierra en un ramal lateral (no
+  tapada por la línea principal). El conductor se etiqueta en ambos
+  extremos (trafo/red → medidor, y medidor → carga), con placeholder
+  `"cal. ?"` si no se especificó.
+- Si agregas más elementos a la rama del trafo/barraje compartido, respeta
+  el espacio reservado a la derecha del eje para el TC/bloque/medidor de
+  ESTE usuario (draw_medida_lateral lo usa siempre) — cualquier anotación
+  del punto compartido (otros medidores, gabinete, etc.) debe ir a la
+  izquierda o con separación vertical explícita, nunca compartiendo x/y
+  con esa zona.
 - `_verificar_coherencia()` en `bot.py` asume `'exclusivo'` como default
   conservador si ningún flujo de entrada capturó `trafo_uso` (y `red abierta`
   si no se especificó `trafo_gabinete`), y avisa al usuario en el caption de
@@ -78,12 +93,33 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
 - 2 elem (Aron): corrientes en R y T, tensión de referencia en S.
 - Normas base: **CENS Cap. 6** (bornera 13 term., neutro=11) y **PA-NC-RA8** (bornera 1-10, B1-B26).
 - Simbología unifilar: **IEC/UNE 60617**. Todo unifilar lleva "plano de simbología".
+- Estilo del unifilar (v2, tras research de SLDs profesionales reales): NADA
+  de cajas con degradado/sombra/estilo "app UI" — eso se ve como mockup de
+  interfaz, no como plano de ingeniería. Un unifilar profesional real (ETAP,
+  AutoCAD Electrical, planos as-built de utility) es minimalista: líneas
+  finas negras, símbolos geométricos simples, sin relleno de color salvo
+  las fases. El medidor de energía se dibuja como **círculo con "kWh"**
+  (misma convención que un amperímetro = círculo con "A"), NUNCA como caja
+  oscura con pantalla LCD. El bloque de prueba es un rectángulo blanco de
+  borde fino, sin degradado azul. Antes de agregar "pulido visual" a un
+  símbolo, pregúntate si un ingeniero reconocería ese símbolo en un plano
+  real — si no, es decoración, no diseño.
+- En la entrada MT del unifilar (`draw_unifilar_generico`) NO se dibuja un
+  "Seccionador MT" separado antes de los CC fusibles: los cortacircuitos
+  fusibles YA sirven como elemento de seccionamiento (se abren en vacío)
+  además de proteger. Poner ambos es redundante e incoherente — no lo
+  reintroduzcas salvo que un caso real lo justifique explícitamente.
+- TC (serie) vs TP (paralelo) en el unifilar se diferencian a propósito:
+  línea del TC más gruesa + etiqueta "(serie)"; línea del TP más delgada +
+  etiqueta "(paralelo)". El TC es el que lleva la corriente hacia la medida;
+  no iguales el grosor de ambas líneas "para que se vea simétrico".
 
 ## Estado / pendientes (v2)
 - [ ] **Diagrama fasorial** (tercera salida del bot).
 - [ ] Numeración exacta de bornes B1–B26 (norma RA8) sobre cada terminal del bloque.
 - [ ] 2 elementos: opción de 2 TP línea-línea (hoy dibuja 1 TP por fase).
-- [ ] DPS/pararrayos y puesta a tierra del neutro en el caso con transformador.
+- [x] DPS/pararrayos y puesta a tierra del neutro en el caso con transformador
+      (directa/semidirecta+trafo; indirecta ya los tenía en su punto de medida).
 - [ ] Exportar a PDF y cajetín de proyecto.
 - [ ] Tests unitarios del parser y de mapeo de terminales.
 
@@ -98,6 +134,33 @@ python diagram_engine.py
 ```
 
 ## Reglas de trabajo para el agente
+- **"Energiza" cada diagrama antes de darlo por bueno — SIEMPRE, no solo la
+  primera vez.** No basta con que `draw_conexiones_retie` /
+  `draw_unifilar_generico` corran sin excepción ni con que `_verificar_render()`
+  confirme un PNG no vacío: eso solo prueba que matplotlib no truena, no que
+  el circuito sea coherente. "Energizar" = trazar a mano, elemento por
+  elemento, si la secuencia dibujada representa un flujo real y completo para
+  el `cfg` dado:
+  1. RED → protecciones obligatorias para ese tipo/instalación (pararrayos,
+     cortacircuitos/fusibles, seccionador) → trafo (con tierra) si aplica →
+     punto de derivación/barraje → bloque de prueba/TC/TP si aplica → medidor
+     → carga. Ningún tramo obligatorio puede faltar ni quedar implícito.
+  2. Si `trafo_uso='compartido'`: debe quedar señalado explícitamente CUÁL
+     medidor es el de este usuario (no basta con dibujar "hay más
+     usuarios"; el bug real que motivó esta regla fue que esa rama quedaba
+     dibujada EXACTAMENTE encima del TC/bloque/medidor propio, invisible).
+  3. Ningún elemento (texto, símbolo, recuadro) puede compartir el mismo
+     rango x/y que otro con significado distinto — dos elementos que se
+     tapan entre sí no es un detalle estético, es información perdida.
+  4. Renderiza el PNG de verdad y revísalo con tus propios ojos (Read del
+     archivo) antes de decir que algo quedó corregido — no asumas que un
+     cambio de coordenadas "debería" funcionar. Prueba explícitamente al
+     menos: exclusivo, compartido+gabinete, compartido+red abierta, y la
+     combinación tipo × instalación que estés tocando.
+  5. Si encuentras una discrepancia (aunque no te la hayan pedido a ti
+     arreglar), no la ignores: es exactamente el tipo de bug que ya se
+     coló dos veces en este proyecto (compartido/exclusivo idénticos, luego
+     la rama de "otros usuarios" tapada).
 - Verifica los diagramas renderizando un PNG y revisándolo antes de dar por hecho un cambio.
 - No alteres el esquema de colores ni el mapeo de terminales sin confirmación.
 - Mantén `parser.py` sin dependencias (solo `re`).
