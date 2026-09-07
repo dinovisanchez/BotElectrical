@@ -1341,6 +1341,8 @@ def draw_unifilar_generico(cfg, out_path):
     instalacion = cfg.get("instalacion") or "barraje"
     trafo_uso   = cfg.get("trafo_uso", "")   # "exclusivo" | "compartido" | ""
     es_compartido = (instalacion == "trafo" and trafo_uso == "compartido")
+    bt_y = None       # nivel del barraje BT compartido (se fija mas abajo si aplica)
+    gabinete = False  # True = encerrar barraje+medidores en un recinto (gabinete cerrado)
     respaldo    = bool(cfg.get("respaldo", False))
     kva         = cfg.get("trafo_kva", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
@@ -1535,6 +1537,20 @@ def draw_unifilar_generico(cfg, out_path):
             ax.annotate("ESTE MEDIDOR", xy=(mcx, med_span[1]), xytext=(mcx, med_span[1] + 6),
                         ha="center", va="bottom", fontsize=7, color="#8a4b00", fontweight="bold",
                         arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
+            if gabinete and bt_y is not None:
+                # El gabinete/cuarto de medidores compartido encierra el
+                # BARRAJE BT y LOS MEDIDORES (TC/bloque/medidor de este
+                # usuario incluidos) -- NUNCA el transformador, que
+                # fisicamente esta afuera (poste o camara propia).
+                gx0 = xc - 15
+                gx1 = mcx + r + 2
+                gy1 = bt_y + 2
+                gy0 = med_span[0] - 2
+                ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
+                             boxstyle="round,pad=0.4,rounding_size=1.5",
+                             fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
+                ax.text(gx1 + 1, gy1 - 0.5, "GABINETE\nCOMPARTIDO", ha="left", va="top",
+                        fontsize=6.3, color="#8a4b00", fontweight="bold")
 
     # ── FUENTE / ENTRADA ──────────────────────────────────────────────────────
     if tipo == "indirecta":
@@ -1672,18 +1688,10 @@ def draw_unifilar_generico(cfg, out_path):
             if not gabinete:
                 lbl_otros += "\n(red abierta)"
 
-            if gabinete:
-                # Punto de derivacion encerrado (gabinete/cuarto de medidores
-                # compartido): se dibuja un recinto punteado alrededor,
-                # limitado al trafo + barraje (no baja hasta el medidor).
-                gx0, gx1 = xc - 11, xc + 11
-                gy0, gy1 = bt_y - 0.5, trafo_y + 4.5
-                ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
-                             boxstyle="round,pad=0.3,rounding_size=1",
-                             fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
-                ax.text(gx1 + 1, gy1 - 1, "GABINETE\nCOMPARTIDO", ha="left", va="top",
-                        fontsize=6.3, color="#8a4b00", fontweight="bold")
-
+            # NOTA: el recinto de "gabinete compartido" (si aplica) se dibuja
+            # MAS ABAJO, despues del medidor -- el gabinete de medidores
+            # encierra el barraje + los medidores, NUNCA el transformador
+            # (que fisicamente esta afuera: en su propio poste o camara).
             busbar(bt_y, "BARRAJE BT\n(COMPARTIDO)")
             # TODA nota del punto compartido va del lado IZQUIERDO: el
             # derecho lo ocupa, mas abajo, la conexion de este usuario
@@ -1737,6 +1745,16 @@ def draw_unifilar_generico(cfg, out_path):
                 ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid), xytext=(xc + r + 8, y_mid),
                             ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
                             arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
+                if gabinete and bt_y is not None:
+                    # Encierra barraje BT + medidor -- NUNCA el trafo (queda
+                    # arriba de bt_y, fuera del recinto).
+                    gx0, gx1 = xc - 15, xc + 15
+                    gy1, gy0 = bt_y + 2, y_mid - r - 4
+                    ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
+                                 boxstyle="round,pad=0.4,rounding_size=1.5",
+                                 fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
+                    ax.text(gx1 + 1, gy1 - 0.5, "GABINETE\nCOMPARTIDO", ha="left", va="top",
+                            fontsize=6.3, color="#8a4b00", fontweight="bold")
             vline(y_mid - r, y - 12)
             y -= 12
         else:
@@ -1770,6 +1788,15 @@ def draw_unifilar_generico(cfg, out_path):
                             xytext=(xc + dxs[1] + r + 8, y_mid),
                             ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
                             arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
+                if gabinete and bt_y is not None:
+                    # Encierra barraje BT + ambos medidores -- NUNCA el trafo.
+                    gx0, gx1 = xc + dxs[0] - 3, xc + dxs[1] + 3
+                    gy1, gy0 = bt_y + 2, out_y - 2
+                    ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
+                                 boxstyle="round,pad=0.4,rounding_size=1.5",
+                                 fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
+                    ax.text(gx1 + 1, gy1 - 0.5, "GABINETE\nCOMPARTIDO", ha="left", va="top",
+                            fontsize=6.3, color="#8a4b00", fontweight="bold")
             ax.plot([xc + dxs[0], xc + dxs[1]], [out_y, out_y], color=INK, lw=1.8, zorder=3)
             vline(out_y, out_y - 8); y = out_y - 8
 

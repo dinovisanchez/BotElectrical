@@ -28,6 +28,30 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   sin Telegram, contra las funciones reales de producción (no las legacy).
 - `requirements.txt`, `README.md`.
 
+## Precisión en `PROMPT_SISTEMA_RETIE` (consultas normativas por IA)
+- Regla de comportamiento: el bot debe responder EXACTAMENTE lo preguntado; si
+  la pregunta es ambigua o la respuesta depende de una condición no
+  especificada (ej. conexión nueva vs. instalación existente), debe enumerar
+  las interpretaciones y responder cada una — nunca elegir una sola por su
+  cuenta ni reducir una regla condicionada a un único número.
+- Dato verificado (no repitas sin citar la fuente real): el umbral de **15
+  kVA** que circula para "transformador exclusivo → medida indirecta" viene
+  de la **Res. CREG 015/2018, Art. 3** (modificado por CREG 036/2019) —
+  define qué transformadores de conexión ≤15 kVA que alimentan a 2+ usuarios
+  cuentan como **activo de Nivel de Tensión 1** (clasificación de activos
+  para remuneración). Es un criterio de clasificación de ACTIVOS, no la regla
+  que decide si la medida es indirecta. Esa regla es el **Art. 19, CREG
+  038/2014**: si la conexión es a través de un transformador, el punto de
+  medida va en el lado de ALTA — aplica de lleno a conexiones NUEVAS con
+  transformador exclusivo, independiente del kVA exacto. Para instalaciones
+  YA EXISTENTES no hay migración automática solo por superar 15 kVA (hay que
+  evaluar fecha de instalación, si cambia el sistema de medición, y si la
+  capacidad técnica sube >50%). Si vas a agregar más "hechos memorizados"
+  regulatorios al prompt, verifica el texto contra la fuente primaria
+  (gestornormativo.creg.gov.co) antes de darlo por bueno — un dato citado por
+  otra IA sin verificar es exactamente el tipo de error que este proyecto ya
+  sufrió (ver el resto de este documento).
+
 ## Modelo de configuración (cfg)
 ```
 sistema : 'mono' | 'bifasico' | 'tri3h' (2 elem) | 'tri4h' (3 elem)
@@ -61,13 +85,24 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
   `'compartido'`, agrega un BARRAJE BT explícito con la cantidad real de
   medidores adicionales ("+N medidores más en este punto", a la IZQUIERDA
   para no cruzarse nunca con la conexión propia de este usuario que sigue
-  más abajo) y, si `trafo_gabinete=True`, un recinto punteado alrededor
-  limitado al trafo+barraje (si es `False`/red abierta, NO se encierra).
-  Después del barraje se deja un espacio vertical explícito (no cosmético:
-  evita que el TC/bloque/medidor de este usuario se solape con el barraje)
-  y se marca "▼/◀ ESTE MEDIDOR" junto a la conexión propia, para distinguirla
-  de los demás medidores del punto compartido. Si es `'exclusivo'` (o no se
-  especifica), no se dibuja nada de esto.
+  más abajo). Después del barraje se deja un espacio vertical explícito (no
+  cosmético: evita que el TC/bloque/medidor de este usuario se solape con
+  el barraje) y se marca "ESTE MEDIDOR" con una flecha apuntando al círculo
+  del medidor mismo (nunca cerca del TC ni del trafo/barraje), para
+  distinguirla de los demás medidores del punto compartido. Si `trafo_gabinete=True`,
+  el recinto punteado ("GABINETE COMPARTIDO") se dibuja DESPUÉS de resolver
+  la posición del medidor y encierra **barraje BT + TC/bloque/medidor de
+  este usuario** — el gabinete de medidores compartido es donde están los
+  medidores, NUNCA el transformador (que físicamente está afuera: en su
+  propio poste o cámara). El transformador queda siempre por ENCIMA del
+  borde superior del recinto (`gy1 = bt_y + 2`), fuera de la caja. Si es
+  `'exclusivo'` (o `trafo_gabinete` no se especifica/`False`), no se dibuja
+  nada de esto.
+- Variables `bt_y`/`gabinete` se inicializan en `None`/`False` al principio
+  de `draw_unifilar_generico` (antes de que `draw_medida_lateral` se
+  defina) precisamente porque para `tipo='indirecta'` esa función se llama
+  ANTES de que el bloque TRAFO fije esos valores — sin el default, referenciarlas
+  ahí lanzaría `NameError`. Si tocas ese flujo, respeta el orden.
 - Para tipo directa/semidirecta con `instalacion='trafo'` siempre se dibuja:
   una línea horizontal corta en "RED (M.T.)" (la MT es una derivación de un
   alimentador que sigue sirviendo otros puntos, no una acometida exclusiva
