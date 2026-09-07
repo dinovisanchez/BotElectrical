@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Test del flujo de menu interactivo (simulación)."""
+"""Test del flujo de menu interactivo (simulación).
+
+Usa draw_conexiones_retie(), la función real que usa el bot en producción
+(draw() está obsoleta, ver diagram_engine.py). El campo de conexión
+simétrica/asimétrica se llama 'conexion' en el cfg (no 'asimetrico')."""
 import sys
 sys.path.insert(0, '.')
-from parser import DEFAULT, parse_spec
-from diagram_engine import draw
+from parser import DEFAULT
+from diagram_engine import draw_conexiones_retie
 
 # Simular menu flow para DIRECTA
 print("=" * 60)
@@ -14,10 +18,10 @@ cfg['tipo'] = 'directa'
 cfg['sistema'] = 'tri4h'
 cfg['norma'] = 'RA8'
 cfg['respaldo'] = False
-cfg['asimetrico'] = False
+cfg['conexion'] = 'simetrica'
 cfg['salida'] = 'conexiones'
 try:
-    draw(cfg, '/tmp/test_directa_simetrica.png')
+    draw_conexiones_retie(cfg, '/tmp/test_directa_simetrica.png')
     print("✓ Diagram generated: /tmp/test_directa_simetrica.png")
 except Exception as e:
     print(f"✗ Error: {e}")
@@ -26,9 +30,9 @@ except Exception as e:
 print("\n" + "=" * 60)
 print("TEST 2: DIRECTA + ASIMÉTRICO + CONEXIONES")
 print("=" * 60)
-cfg['asimetrico'] = True
+cfg['conexion'] = 'asimetrica'
 try:
-    draw(cfg, '/tmp/test_directa_asimetrica.png')
+    draw_conexiones_retie(cfg, '/tmp/test_directa_asimetrica.png')
     print("✓ Diagram generated: /tmp/test_directa_asimetrica.png")
 except Exception as e:
     print(f"✗ Error: {e}")
@@ -38,9 +42,9 @@ print("\n" + "=" * 60)
 print("TEST 3: DIRECTA + RESPALDO")
 print("=" * 60)
 cfg['respaldo'] = True
-cfg['asimetrico'] = False
+cfg['conexion'] = 'simetrica'
 try:
-    draw(cfg, '/tmp/test_directa_respaldo.png')
+    draw_conexiones_retie(cfg, '/tmp/test_directa_respaldo.png')
     print("✓ Diagram generated: /tmp/test_directa_respaldo.png")
 except Exception as e:
     print(f"✗ Error: {e}")
@@ -52,7 +56,7 @@ print("=" * 60)
 cfg['sistema'] = 'mono'
 cfg['respaldo'] = False
 try:
-    draw(cfg, '/tmp/test_directa_mono.png')
+    draw_conexiones_retie(cfg, '/tmp/test_directa_mono.png')
     print("✓ Diagram generated: /tmp/test_directa_mono.png")
 except Exception as e:
     print(f"✗ Error: {e}")

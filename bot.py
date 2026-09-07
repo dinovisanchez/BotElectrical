@@ -181,6 +181,15 @@ PROMPT_SISTEMA_RETIE = (
     "conocimiento tecnico de ingenieria. NUNCA te limitas a decir que no puedes responder "
     "cuando si tienes el conocimiento para hacerlo.\n"
     "\n"
+    "=== IDIOMA (OBLIGATORIO) ===\n"
+    "- Responde SIEMPRE en espanol de Colombia, sin ninguna excepcion.\n"
+    "- Esto aplica incluso si el usuario escribe en ingles, en otro idioma, con errores "
+    "ortograficos, abreviado, o mezclando idiomas en la misma pregunta.\n"
+    "- No traduzcas ni repitas la pregunta del usuario en su idioma original.\n"
+    "- NUNCA cambies de idioma a mitad de la respuesta ni agregues palabras o frases sueltas "
+    "en ingles (ej: no escribas 'the', 'note:', 'warning:', 'summary'). Usa solo terminos "
+    "tecnicos en espanol o el nombre propio de la norma (RETIE, CREG, NTC, IEC).\n"
+    "\n"
     "=== REGLAS DE PRECISION ===\n"
     "- NUNCA inventes articulos, numerales o cifras normativas que no conozcas con certeza.\n"
     "- NUNCA presentes una recomendacion tecnica como si fuera una obligacion normativa.\n"
@@ -539,6 +548,10 @@ PROMPT_DIAGRAMA = (
     "Tu tarea UNICA es recopilar la informacion necesaria y generar el diagrama. "
     "No das conceptos tecnicos extensos. Solo preguntas y confirmaciones tecnicas breves.\n"
     "\n"
+    "=== IDIOMA (OBLIGATORIO) ===\n"
+    "- Responde SIEMPRE en espanol de Colombia, incluso si el usuario escribe en ingles, "
+    "en otro idioma o mezcla idiomas. Nunca cambies de idioma a mitad de la respuesta.\n"
+    "\n"
     "=== REGLAS ESTRICTAS ===\n"
     "- Si el usuario ya proporciono TODOS los datos necesarios en su mensaje, "
     "emite DIAGRAMA_LISTO de inmediato sin hacer preguntas.\n"
@@ -756,6 +769,7 @@ PROMPT_VALIDACION_CX = (
     "No eres un transcriptor. ANALIZA, INTERPRETA y CORRIGE antes de responder. "
     "Si ves algo tecnicamente incorrecto en la imagen, señalalo aunque el usuario "
     "no lo haya preguntado.\n\n"
+    "IDIOMA: responde SIEMPRE en español de Colombia, sin excepción.\n\n"
     "Analiza la imagen del bloque de pruebas / bornera de medida.\n\n"
     "TIPO DE MEDIDA: {tipo}\n"
     "NORMA APLICABLE: {norma}\n\n"
@@ -941,9 +955,10 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
                 types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                 prompt,
             ],
+            config=types.GenerateContentConfig(temperature=0.2),
         )
         texto = (response.text or "").strip()
-        texto = texto.replace("**", "").replace("__", "")
+        texto = texto.replace("**", "").replace("__", "").replace("`", "")
         return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
     except Exception as e:
         log.error(f"Error Gemini Vision: {e}")
@@ -1001,7 +1016,10 @@ async def _consulta_retie(update: Update, texto: str):
             else:
                 log.warning("types.FileSearch no disponible en esta versión de google-genai; continuando sin RAG indexado.")
 
-        prompt = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA:\n{texto}"
+        cfg_kwargs = dict(system_instruction=PROMPT_SISTEMA_RETIE, temperature=0.25)
+        if tools:
+            cfg_kwargs["tools"] = tools
+        gen_config = types.GenerateContentConfig(**cfg_kwargs)
 
         response = None
         last_err = None
@@ -1009,8 +1027,8 @@ async def _consulta_retie(update: Update, texto: str):
             try:
                 response = await _genai_client.aio.models.generate_content(
                     model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(tools=tools) if tools else None,
+                    contents=texto,
+                    config=gen_config,
                 )
                 break
             except Exception as e:
@@ -1037,7 +1055,7 @@ async def _consulta_retie(update: Update, texto: str):
             if str(finish_reason) and "RECITATION" in str(finish_reason):
                 log.warning("Respuesta bloqueada por RECITATION, reintentando con parafraseo forzado.")
                 prompt_retry = (
-                    f"{prompt}\n\n"
+                    f"{texto}\n\n"
                     "NOTA: tu intento anterior fue bloqueado por citar texto "
                     "demasiado literal del documento. Responde de nuevo a la "
                     "misma consulta, pero PARAFRASEANDO TODO con tus propias "
@@ -1049,7 +1067,7 @@ async def _consulta_retie(update: Update, texto: str):
                     response = await _genai_client.aio.models.generate_content(
                         model=GEMINI_MODEL,
                         contents=prompt_retry,
-                        config=types.GenerateContentConfig(tools=tools) if tools else None,
+                        config=gen_config,
                     )
                     respuesta = (response.text or "").strip()
                 except Exception as e:
@@ -1063,7 +1081,7 @@ async def _consulta_retie(update: Update, texto: str):
             )
             return
 
-        respuesta = respuesta.replace("**", "").replace("__", "")
+        respuesta = respuesta.replace("**", "").replace("__", "").replace("`", "")
         respuesta = re.sub(r"\[([^\[\]]+)\]\([^\(\)]*\)", r"\1", respuesta)
 
         if not tools:
@@ -1112,11 +1130,15 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
     historial.append({"role": "user", "text": texto_usuario})
 
-    # Construir prompt plano (mismo patron que _consulta_retie)
-    conv = PROMPT_DIAGRAMA + "\n\n--- CONVERSACION ---\n"
+    # Construir conversacion (el prompt del sistema va aparte, en system_instruction)
+    conv = "--- CONVERSACION ---\n"
     for m in historial:
         lbl = "USUARIO" if m["role"] == "user" else "INGENIERO"
         conv += f"\n{lbl}: {m['text']}"
+
+    dialogo_config = types.GenerateContentConfig(
+        system_instruction=PROMPT_DIAGRAMA, temperature=0.2
+    )
 
     await update.message.reply_chat_action("typing")
     response = None
@@ -1126,6 +1148,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
             response = await _genai_client.aio.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=conv,
+                config=dialogo_config,
             )
             break
         except Exception as e:
@@ -1165,7 +1188,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
             "Intenta reformular tu descripcion."
         )
         return
-    respuesta_clean = respuesta.replace("**", "").replace("__", "")
+    respuesta_clean = respuesta.replace("**", "").replace("__", "").replace("`", "")
 
     if "DIAGRAMA_LISTO" in respuesta:
         json_m = re.search(r"```json\s*(\{.*?\})\s*```", respuesta, re.DOTALL)
@@ -2410,6 +2433,17 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None
     )
 
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE):
+    """Manejador global: evita que una excepcion no capturada deje al usuario sin respuesta."""
+    log.error(f"Excepcion no manejada: {ctx.error}", exc_info=ctx.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ Ocurrió un error inesperado procesando tu solicitud. Intenta de nuevo."
+            )
+        except Exception:
+            pass
+
 # ── Arranque ──────────────────────────────────────────────────────────────────
 def main():
     token = os.environ.get("BOT_TOKEN")
@@ -2428,6 +2462,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_error_handler(on_error)
     log.info("Bot iniciado.")
 
     webhook_url = os.environ.get("RENDER_EXTERNAL_URL")

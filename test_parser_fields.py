@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Demostración: Parser extrae nuevos campos (asimetrico, trafo, interruptor).
+Demostración: Parser extrae nuevos campos (conexion, trafo, interruptor).
 """
 import sys
 sys.path.insert(0, '.')
@@ -22,7 +22,7 @@ for text in tests:
     cfg, entendido, faltante = parse_spec(text)
     print(f"\n📄 Input: \"{text}\"")
     print(f"   tipo: {cfg['tipo']}")
-    print(f"   asimetrico: {cfg['asimetrico']}")
+    print(f"   conexion: {cfg['conexion']}")
     print(f"   trafo_presente: {cfg['trafo_presente']}")
     print(f"   interruptor_pos: {cfg['interruptor_pos']}")
     print(f"   ✓ Understood: {', '.join(entendido) if entendido else 'basics only'}")
