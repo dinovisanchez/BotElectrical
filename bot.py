@@ -1113,7 +1113,9 @@ async def _enviar_largo(update: Update, texto: str):
         await update.message.reply_text(prefijo + parte)
 
 
-async def _consulta_retie(update: Update, texto: str):
+RETIE_HISTORIAL_MAX = 8  # ventana deslizante: ~4 intercambios usuario/modelo
+
+async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto: str):
     if not GEMINI_KEY:
         await update.message.reply_text(
             "⚠️ Consultas normativas no disponibles en este momento.\n"
@@ -1121,6 +1123,21 @@ async def _consulta_retie(update: Update, texto: str):
         )
         return
     await update.message.reply_chat_action("typing")
+
+    # Mismo hilo de conversacion mientras el usuario siga preguntando sobre lo
+    # mismo (ver PRECISION EN LA RESPUESTA / _dialogo_diagrama para el mismo
+    # patron). El hilo se corta explicitamente al entrar a otro flujo (menu,
+    # diagrama, clasificador) o con /cancelar -- ver esos puntos de entrada.
+    historial: list = ctx.user_data.setdefault("historial_retie", [])
+    historial.append({"role": "user", "text": texto})
+    if len(historial) > RETIE_HISTORIAL_MAX:
+        del historial[:len(historial) - RETIE_HISTORIAL_MAX]
+
+    conv = "--- CONSULTA ---\n"
+    for m in historial:
+        lbl = "USUARIO" if m["role"] == "user" else "INGENIERO"
+        conv += f"\n{lbl}: {m['text']}"
+
     try:
         tools = []
         if RETIE_STORE_NAME:
@@ -1146,7 +1163,7 @@ async def _consulta_retie(update: Update, texto: str):
             try:
                 response = await _genai_client.aio.models.generate_content(
                     model=GEMINI_MODEL,
-                    contents=texto,
+                    contents=conv,
                     config=gen_config,
                 )
                 break
@@ -1174,7 +1191,7 @@ async def _consulta_retie(update: Update, texto: str):
             if str(finish_reason) and "RECITATION" in str(finish_reason):
                 log.warning("Respuesta bloqueada por RECITATION, reintentando con parafraseo forzado.")
                 prompt_retry = (
-                    f"{texto}\n\n"
+                    f"{conv}\n\n"
                     "NOTA: tu intento anterior fue bloqueado por citar texto "
                     "demasiado literal del documento. Responde de nuevo a la "
                     "misma consulta, pero PARAFRASEANDO TODO con tus propias "
@@ -1202,6 +1219,12 @@ async def _consulta_retie(update: Update, texto: str):
 
         respuesta = respuesta.replace("**", "").replace("__", "").replace("`", "")
         respuesta = re.sub(r"\[([^\[\]]+)\]\([^\(\)]*\)", r"\1", respuesta)
+
+        # Guarda la respuesta LIMPIA en el historial (sin el disclaimer de
+        # abajo, que es informativo para el usuario, no parte de la consulta).
+        historial.append({"role": "model", "text": respuesta})
+        if len(historial) > RETIE_HISTORIAL_MAX:
+            del historial[:len(historial) - RETIE_HISTORIAL_MAX]
 
         if not tools:
             respuesta += (
@@ -1346,7 +1369,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     await update.message.reply_text(respuesta_clean)
 
 
-async def _procesar_texto(update, texto):
+async def _procesar_texto(update, ctx, texto):
     try:
         cfg, entendido, faltante = parse_spec(texto)
     except ValueError as e:
@@ -1363,6 +1386,9 @@ async def _procesar_texto(update, texto):
         "muestrame el diagrama","esquema de conexion","esquema de conexión",
     ]
     if any(p in texto.lower() for p in palabras_diagrama):
+        # Se paso a pedir un diagrama: cierra cualquier hilo de consulta
+        # normativa que estuviera abierto (no aplica seguirlo aqui).
+        ctx.user_data["historial_retie"] = []
         if faltante:
             await update.effective_message.reply_text(
                 "⚠️ Generando con lo que entendí. Te recomiendo agregar:\n"
@@ -1376,7 +1402,7 @@ async def _procesar_texto(update, texto):
                 "⚠️ No pude generar el diagrama.\n\nUsa /menu para configuración guiada."
             )
     else:
-        await _consulta_retie(update, texto)
+        await _consulta_retie(update, ctx, texto)
 
 # ── Comandos básicos ──────────────────────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1454,12 +1480,14 @@ async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "O usa /menu para configuración guiada."
         )
         return
-    await _procesar_texto(update, texto)
+    ctx.user_data["historial_retie"] = []
+    await _procesar_texto(update, ctx, texto)
 
 # ── /clasificar — Clasificador de punto de medida (CREG 038/2014) ─────────────
 async def cmd_clasificar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _access_ok(update, ctx): return
     ctx.user_data["clasificando"] = True
+    ctx.user_data["historial_retie"] = []
     await update.message.reply_text(
         "🔍 Clasificador de punto de medida\n"
         "─────────────────────────\n\n"
@@ -1672,6 +1700,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if _genai_client:
                 ctx.user_data["modo_diagrama_ia"] = True
                 ctx.user_data["historial_diagrama"] = []
+                ctx.user_data["historial_retie"] = []
                 await q.edit_message_text(
                     "📐 Diseño de Diagrama\n"
                     "──────────────────────────────\n\n"
@@ -2230,7 +2259,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Modo consulta (seleccionado desde /menu) ──────────────────────────────
     if ctx.user_data.get("modo_consulta"):
         ctx.user_data["modo_consulta"] = False
-        await _consulta_retie(update, txt)
+        await _consulta_retie(update, ctx, txt)
         return
 
     # ── Clasificador ──────────────────────────────────────────────────────────
@@ -2525,7 +2554,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Texto libre (consulta o diagrama rápido) ──────────────────────────────
-    await _procesar_texto(update, update.message.text)
+    await _procesar_texto(update, ctx, update.message.text)
 
 # ── Handler de fotos (validación de conexiones) ───────────────────────────────
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
