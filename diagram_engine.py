@@ -1340,6 +1340,7 @@ def draw_unifilar_generico(cfg, out_path):
     rel_tp      = cfg.get("rel_tp", "")
     instalacion = cfg.get("instalacion") or "barraje"
     trafo_uso   = cfg.get("trafo_uso", "")   # "exclusivo" | "compartido" | ""
+    es_compartido = (instalacion == "trafo" and trafo_uso == "compartido")
     respaldo    = bool(cfg.get("respaldo", False))
     kva         = cfg.get("trafo_kva", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
@@ -1431,37 +1432,44 @@ def draw_unifilar_generico(cfg, out_path):
         med_w  = 21
         med_x1 = med_x0 + med_w
 
-        # Centro vertical del conjunto bloque+medidor
+        # Centro vertical del conjunto bloque+medidor (proporciones ajustadas:
+        # antes el bloque quedaba exagerado, mucho mas alto de lo que un
+        # bloque de pruebas real necesita para verse).
         if tp_y is not None:
             bq_cy = (tp_y + tc_y) / 2
-            bq_h  = abs(tp_y - tc_y) + 14
+            bq_h  = abs(tp_y - tc_y) + (8 if not respaldo else 16)
         else:
             bq_cy = tc_y
-            bq_h  = 13 if not respaldo else 26
+            bq_h  = 12 if not respaldo else 22
 
-        # ── TC ──────────────────────────────────────────────────────────────
+        # ── TC: EN SERIE con la linea (lleva la corriente hacia la medida) ───
+        # Linea mas gruesa = tramo de corriente. Del TC sale el hilo que
+        # llega al bloque/medidor (la medida de energia depende de esta
+        # corriente); el TP solo aporta la referencia de tension.
         node_dot(tc_y)
-        ax.plot([xc, sym_x - 1.8], [tc_y, tc_y], color=COL["R"], lw=1.8, zorder=3)
+        ax.plot([xc, sym_x - 1.8], [tc_y, tc_y], color=COL["R"], lw=2.1, zorder=3)
         _u_ct(ax, sym_x, tc_y, COL["R"], 1.0)
-        ax.text(sym_x, tc_y - 3.5, f"TC\n{rel_tc or '---'}",
-                ha="center", va="top", fontsize=8, color=COL["R"], fontweight="bold")
+        ax.text(sym_x, tc_y - 3.3, f"TC {rel_tc or '---'}\n(serie)",
+                ha="center", va="top", fontsize=7, color=COL["R"], fontweight="bold")
         # hilo TC → entrada izquierda del bloque (a la altura bq_cy o tc_y)
-        entry_tc_y = bq_cy + bq_h/2 - 3.5 if tp_y is not None else bq_cy
-        ax.plot([sym_x + 1.8, bq_x0], [tc_y, tc_y], color=INK, lw=1.6, zorder=3)
+        entry_tc_y = bq_cy + bq_h/2 - 3 if tp_y is not None else bq_cy
+        ax.plot([sym_x + 1.8, bq_x0], [tc_y, tc_y], color=INK, lw=1.9, zorder=3)
         if abs(tc_y - entry_tc_y) > 0.5:
-            ax.plot([bq_x0, bq_x0], [tc_y, entry_tc_y], color=INK, lw=1.6, zorder=3)
+            ax.plot([bq_x0, bq_x0], [tc_y, entry_tc_y], color=INK, lw=1.9, zorder=3)
 
-        # ── TP (solo indirecta) ──────────────────────────────────────────────
+        # ── TP: EN PARALELO (solo tension de referencia, sin corriente) ──────
+        # Linea mas delgada a proposito -- no es el mismo tipo de conexion
+        # que el TC y no deberia verse igual de "gruesa"/prominente.
         if tp_y is not None:
             node_dot(tp_y)
-            ax.plot([xc, sym_x - 1.8], [tp_y, tp_y], color=COL["S"], lw=1.8, zorder=3)
+            ax.plot([xc, sym_x - 1.8], [tp_y, tp_y], color=COL["S"], lw=1.1, zorder=3)
             _u_vt(ax, sym_x, tp_y, COL["S"], 0.9, ground=False)
-            ax.text(sym_x, tp_y + 3.5, f"TP\n{rel_tp or '---'}",
-                    ha="center", va="bottom", fontsize=8, color=COL["S"], fontweight="bold")
-            entry_tp_y = bq_cy - bq_h/2 + 3.5
-            ax.plot([sym_x + 1.8, bq_x0], [tp_y, tp_y], color=INK, lw=1.6, zorder=3)
+            ax.text(sym_x, tp_y + 3.3, f"(paralelo)\nTP {rel_tp or '---'}",
+                    ha="center", va="bottom", fontsize=7, color=COL["S"], fontweight="bold")
+            entry_tp_y = bq_cy - bq_h/2 + 3
+            ax.plot([sym_x + 1.8, bq_x0], [tp_y, tp_y], color=INK, lw=1.1, zorder=3)
             if abs(tp_y - entry_tp_y) > 0.5:
-                ax.plot([bq_x0, bq_x0], [tp_y, entry_tp_y], color=INK, lw=1.6, zorder=3)
+                ax.plot([bq_x0, bq_x0], [tp_y, entry_tp_y], color=INK, lw=1.1, zorder=3)
 
         # ── Fusible de medida (opcional) ─────────────────────────────────────
         if interruptor_medida:
@@ -1472,58 +1480,61 @@ def draw_unifilar_generico(cfg, out_path):
                     fontsize=6, color=INK, fontweight="bold", zorder=5)
             ax.plot([fx + 0.7, bq_x0], [tc_y, tc_y], color=INK, lw=1.6, zorder=4)
 
-        # ── BLOQUE DE PRUEBA ─────────────────────────────────────────────────
-        ax.add_patch(FancyBboxPatch(
+        # ── BLOQUE DE PRUEBA ──────────────────────────────────────────────────
+        # Simbología limpia: rectángulo de línea fina, sin degradados ni
+        # sombras -- así se ven los unifilares profesionales reales
+        # (IEC 60617 / ANSI), no como una tarjeta de interfaz.
+        ax.add_patch(Rectangle(
             (bq_x0, bq_cy - bq_h/2), bq_w, bq_h,
-            boxstyle="round,pad=0.4,rounding_size=1",
-            fill=True, fc="#DDE8F5", ec="#2B4A7A", lw=1.8, zorder=3))
-        ax.text(bq_x0 + bq_w/2, bq_cy + 2,   "BLOQUE",
-                ha="center", va="center", fontsize=8, fontweight="bold", color="#1A3060")
-        ax.text(bq_x0 + bq_w/2, bq_cy - 1.5, "DE PRUEBA",
-                ha="center", va="center", fontsize=7, color="#1A3060")
-        ax.text(bq_x0 + bq_w/2, bq_cy - 5,   norma,
-                ha="center", va="center", fontsize=7.5, fontweight="bold", color="#1A3060")
+            fill=True, fc="white", ec=INK, lw=1.3, zorder=3))
+        ax.text(bq_x0 + bq_w/2, bq_cy + bq_h/2 - 3, "BLOQUE DE PRUEBA",
+                ha="center", va="center", fontsize=6.6, fontweight="bold", color=INK)
+        ax.text(bq_x0 + bq_w/2, bq_cy - bq_h/2 + 3, norma,
+                ha="center", va="center", fontsize=7.5, fontweight="bold", color=INK)
 
         # ── Hilo bloque → medidor ────────────────────────────────────────────
         ax.plot([bq_x1, med_x0], [bq_cy, bq_cy], color=INK, lw=1.8, zorder=3)
 
-        # ── MEDIDOR(ES) ──────────────────────────────────────────────────────
+        # ── MEDIDOR(ES) ───────────────────────────────────────────────────────
+        # Simbolo normalizado de medidor de energia: circulo con "kWh"
+        # (equivalente al circulo con "A"/"V" de amperimetro/voltimetro en
+        # IEC 60617 / ANSI). Nada de cajas oscuras con pantalla LCD.
         if not respaldo:
-            med_h = max(13, bq_h - 2)
-            ax.add_patch(FancyBboxPatch(
-                (med_x0, bq_cy - med_h/2), med_w, med_h,
-                boxstyle="round,pad=0.4,rounding_size=1.5",
-                fill=True, fc="#0D1117", ec="#0D1117", lw=1.8, zorder=3))
-            ax.text(med_x0 + med_w/2, bq_cy + 3, "MEDIDOR",
-                    ha="center", va="center", fontsize=8.5, fontweight="bold", color="white")
-            # pantalla LCD
-            ax.add_patch(Rectangle(
-                (med_x0 + 3, bq_cy - 4.5), med_w - 6, 5,
-                fc="#0B3D2E", ec="#09A854", lw=1.0, zorder=4))
-            ax.text(med_x0 + med_w/2, bq_cy - 2,  "kWh",
-                    ha="center", va="center", fontsize=7, color="#36df8f",
-                    family="monospace", zorder=5)
+            r = min(9, max(6, bq_h/2))
+            mcx = med_x0 + r + 1
+            ax.add_patch(Circle((mcx, bq_cy), r, fill=True, fc="white", ec=INK, lw=1.6, zorder=3))
+            ax.text(mcx, bq_cy + 1.6, "kWh", ha="center", va="center",
+                    fontsize=8, fontweight="bold", color=INK, family="monospace")
+            ax.text(mcx, bq_cy - r - 2.2, "MEDIDOR", ha="center", va="top",
+                    fontsize=6.3, color="#555", fontweight="bold")
+            med_span = (bq_cy - r, bq_cy + r)
         else:
-            # PRINCIPAL + RESPALDO apilados
-            sep  = bq_h / 2 - 1
-            y_p  = bq_cy + sep / 2
-            y_r  = bq_cy - sep / 2
-            med_h = max(10, sep - 3)
-            jx   = med_x0 - 1
+            # PRINCIPAL + RESPALDO: dos medidores EN PARALELO desde el mismo
+            # nodo (ambos miden la misma acometida, no en serie).
+            r = min(7, max(5, bq_h/4))
+            mcx = med_x0 + r + 1
+            sep = r * 2 + 3
+            y_p, y_r = bq_cy + sep/2, bq_cy - sep/2
+            jx = med_x0 - 1
             ax.plot([bq_x1, jx], [bq_cy, bq_cy], color=INK, lw=1.5, zorder=3)
             ax.plot([jx, jx], [y_p, y_r], color=INK, lw=1.5, zorder=3)
-            for etq, my, fc, lc in [("PRINCIPAL", y_p, "#0D1117", "white"),
-                                     ("RESPALDO",  y_r, "#1a3a6a", "white")]:
-                ax.plot([jx, med_x0], [my, my], color=INK, lw=1.4, zorder=3)
-                ax.add_patch(FancyBboxPatch(
-                    (med_x0, my - med_h/2), med_w, med_h,
-                    boxstyle="round,pad=0.3,rounding_size=1.5",
-                    fill=True, fc=fc, ec="#080C0F", lw=1.4, zorder=3))
-                ax.text(med_x0 + med_w/2, my + 1.5, etq,
-                        ha="center", va="center", fontsize=7.5, fontweight="bold", color=lc)
-                ax.text(med_x0 + med_w/2, my - 2.5, "kWh",
-                        ha="center", va="center", fontsize=6.5, color="#36df8f",
-                        family="monospace", zorder=4)
+            for etq, my in [("PRINCIPAL", y_p), ("RESPALDO", y_r)]:
+                ax.plot([jx, mcx - r], [my, my], color=INK, lw=1.4, zorder=3)
+                ax.add_patch(Circle((mcx, my), r, fill=True, fc="white", ec=INK, lw=1.5, zorder=3))
+                ax.text(mcx, my + 1.2, "kWh", ha="center", va="center",
+                        fontsize=6.8, fontweight="bold", color=INK, family="monospace")
+                ax.text(mcx, my - r - 1.8, etq, ha="center", va="top",
+                        fontsize=6, color="#555", fontweight="bold")
+            med_span = (y_r - r, y_p + r)
+
+        # Si el trafo es compartido, señalar EXPLICITAMENTE el medidor (no el
+        # trafo/barraje) como el punto que corresponde a este usuario -- ese
+        # es justamente el dato que importa distinguir entre los N medidores
+        # que cuelgan del mismo punto compartido.
+        if es_compartido:
+            ax.annotate("ESTE MEDIDOR", xy=(mcx, med_span[1]), xytext=(mcx, med_span[1] + 6),
+                        ha="center", va="bottom", fontsize=7, color="#8a4b00", fontweight="bold",
+                        arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
 
     # ── FUENTE / ENTRADA ──────────────────────────────────────────────────────
     if tipo == "indirecta":
@@ -1538,20 +1549,25 @@ def draw_unifilar_generico(cfg, out_path):
         ax.text(arrx + 3, y - 1.5, "Pararrayos ZnO",
                 ha="left", va="center", fontsize=7.5, color=COL["G"], fontweight="bold")
         vline(y, y - 3); y -= 3
-        # Seccionador / monopolar MT
-        _u_disc(ax, xc, y, INK, 1.0)
-        ax.text(xc - 5, y, "Seccionador MT", ha="right", va="center",
-                fontsize=8, color=INK, fontweight="bold")
-        vline(y, y - 4); y -= 4
+        # NOTA: no se dibuja un "seccionador MT" aparte aqui -- los CC
+        # fusibles de abajo YA cumplen esa funcion (se pueden abrir en vacio
+        # para seccionar, ademas de proteger); poner ambos es redundante e
+        # incoherente (dos elementos de corte en serie sin proposito real).
     elif instalacion == "barraje":
         ten_bt = cfg.get("tension_bt", "")
         bar_lbl = f"BARRAJE {ten_bt} V" if ten_bt else "BARRAJE B.T."
         busbar(y, bar_lbl)
         vline(y, y - 4); y -= 4
     else:
-        ax.text(xc, y+1, "RED (M.T.)", ha="center", va="bottom",
+        # instalacion == "trafo": la RED MT es una derivacion de un
+        # alimentador/anillo que sigue sirviendo otros puntos, no una
+        # acometida exclusiva en punta de linea -- se marca con una linea
+        # horizontal corta (tipo "T") para diferenciarla.
+        mt_y = y + 1
+        ax.plot([xc - 9, xc + 9], [mt_y, mt_y], color=INK, lw=2.2, zorder=2)
+        ax.text(xc, mt_y + 1.3, "RED (M.T.)", ha="center", va="bottom",
                 fontsize=9.5, fontweight="bold", color=INK)
-        vline(y+1, y - 4); y -= 4
+        vline(mt_y, y - 4); y -= 4
 
     # ── INDIRECTA: punto de medida MT (TC + TP → bloque lateral) ──────────────
     if tipo == "indirecta":
@@ -1642,18 +1658,24 @@ def draw_unifilar_generico(cfg, out_path):
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
         vline(y, trafo_y - 5); y = trafo_y - 6
 
-        if trafo_uso == "compartido":
+        if es_compartido:
             # El secundario del trafo alimenta un barraje BT del que se
-            # derivan VARIOS usuarios (cada uno con su propio medidor directo).
-            # Este punto de medida es solo UNO de esos derivados.
+            # derivan VARIOS medidores (cada uno con el suyo, tipicamente
+            # directo). Este diagrama sigue UNO solo de esos derivados; el
+            # resto se indica de forma esquematica, SIN invadir el espacio
+            # donde mas abajo se dibuja la conexion propia de este usuario
+            # (TC/bloque/medidor pueden ocupar bastante ancho a la derecha).
             bt_y = trafo_y - 5
             n_us = str(cfg.get("trafo_n_usuarios", "") or "").strip()
             gabinete = bool(cfg.get("trafo_gabinete", False))
-            lbl_otros = f"+ {n_us} otros\nusuarios" if n_us else "+ otros\nusuarios"
+            lbl_otros = f"+ {n_us} medidores mas\nen este punto" if n_us else "+ otros medidores\nen este punto"
+            if not gabinete:
+                lbl_otros += "\n(red abierta)"
 
             if gabinete:
                 # Punto de derivacion encerrado (gabinete/cuarto de medidores
-                # compartido): se dibuja un recinto punteado alrededor.
+                # compartido): se dibuja un recinto punteado alrededor,
+                # limitado al trafo + barraje (no baja hasta el medidor).
                 gx0, gx1 = xc - 11, xc + 11
                 gy0, gy1 = bt_y - 0.5, trafo_y + 4.5
                 ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
@@ -1663,15 +1685,22 @@ def draw_unifilar_generico(cfg, out_path):
                         fontsize=6.3, color="#8a4b00", fontweight="bold")
 
             busbar(bt_y, "BARRAJE BT\n(COMPARTIDO)")
-            ax.plot([xc + 14, xc + 22], [bt_y, bt_y], color="#8a4b00", lw=1.4,
-                    ls=(0, (3, 2)), zorder=3)
-            ax.text(xc + 23, bt_y, lbl_otros, ha="left", va="center",
-                    fontsize=7, color="#8a4b00", style="italic", fontweight="bold")
-            if not gabinete:
-                ax.text(xc - 16, bt_y - 3.2, "(red abierta — a la intemperie)",
-                        ha="right", va="center", fontsize=6, color="#8a4b00", style="italic")
+            # TODA nota del punto compartido va del lado IZQUIERDO: el
+            # derecho lo ocupa, mas abajo, la conexion de este usuario
+            # (TC/bloque/medidor), y ese bloque puede crecer bastante si
+            # hay respaldo -- un texto a la derecha terminaria tapado por
+            # esa caja opaca (bug real ya visto: "(red abierta)" quedaba
+            # oculto detras del BLOQUE DE PRUEBA cuando habia respaldo).
+            ax.text(xc - 14, bt_y - 2.8, lbl_otros, ha="right", va="top",
+                    fontsize=6.8, color="#8a4b00", style="italic", fontweight="bold")
 
-        cable_lbl(y + 2, y - 2, calibre or "cal. ?", lado=-1)
+            # Espacio explicito antes de la conexion propia de ESTE usuario,
+            # para que TC/bloque/medidor -- y su etiqueta "ESTE MEDIDOR" --
+            # nunca se crucen con el barraje ni con "(red abierta)".
+            cable_lbl(bt_y - 2, bt_y - 6, calibre or "cal. ?", lado=-1)
+            vline(bt_y, bt_y - 7); y = bt_y - 8
+        else:
+            cable_lbl(y + 2, y - 2, calibre or "cal. ?", lado=-1)
 
     # ── SEMIDIRECTA: TC como rama horizontal → bloque + medidor ───────────────
     if tipo == "semidirecta":
@@ -1693,24 +1722,56 @@ def draw_unifilar_generico(cfg, out_path):
         # Proteccion ANTES del medidor
         if prot_antes:
             draw_prot("Proteccion", prot_antes)
-        # Medidor en linea
+        # Medidor en linea -- simbolo normalizado: circulo con "kWh"
+        # (igual convencion que el resto del diagrama, sin cajas oscuras).
         y_mid = y - 5
-        med_w = 16; med_h = 10
-        mx = xc - med_w / 2
-        my = y_mid - med_h / 2
-        vline(y, y_mid + med_h / 2)
-        ax.add_patch(FancyBboxPatch((mx, my), med_w, med_h,
-                     boxstyle="round,pad=0.4,rounding_size=1.5",
-                     fill=True, fc="#0D1117", ec="#0D1117", lw=1.8, zorder=3))
-        ax.text(xc, y_mid + 2.5, "MEDIDOR",
-                ha="center", va="center", fontsize=8, fontweight="bold", color="white")
-        ax.add_patch(Rectangle((mx + 2.5, my + 1.5), med_w - 5, 4,
-                     fc="#0B3D2E", ec="#09A854", lw=0.9, zorder=4))
-        ax.text(xc, my + 3.5, "kWh",
-                ha="center", va="center", fontsize=7, color="#36df8f",
-                family="monospace", zorder=5)
-        vline(y_mid - med_h / 2, y - 12)
-        y -= 12
+        r = 6.5
+        if not respaldo:
+            vline(y, y_mid + r)
+            ax.add_patch(Circle((xc, y_mid), r, fill=True, fc="white", ec=INK, lw=1.7, zorder=3))
+            ax.text(xc, y_mid + 1.4, "kWh", ha="center", va="center",
+                    fontsize=8, fontweight="bold", color=INK, family="monospace")
+            ax.text(xc, y_mid - r - 2, "MEDIDOR", ha="center", va="top",
+                    fontsize=6.3, color="#555", fontweight="bold")
+            if es_compartido:
+                ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid), xytext=(xc + r + 8, y_mid),
+                            ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
+                            arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
+            vline(y_mid - r, y - 12)
+            y -= 12
+        else:
+            # PRINCIPAL + RESPALDO (chequeo): dos medidores EN PARALELO desde
+            # el mismo nodo de derivacion -- ambos miden la misma acometida,
+            # NUNCA en serie (uno no depende del otro para dejar pasar la
+            # corriente). Antes esto se dibujaba como UN solo medidor pese a
+            # que el subtitulo ya decia "Principal + Respaldo": discrepancia
+            # real entre el texto y el dibujo.
+            r = 5.5
+            jy = y_mid + r + 2.5
+            dxs = (-(r + 9), (r + 9))
+            vline(y, jy)
+            ax.plot([xc + dxs[0], xc + dxs[1]], [jy, jy], color=INK, lw=1.8, zorder=3)
+            out_y = y_mid - r - 2.5
+            for dx, etq in [(dxs[0], "PRINCIPAL"), (dxs[1], "RESPALDO")]:
+                cx = xc + dx
+                ax.plot([cx, cx], [jy, y_mid + r], color=INK, lw=1.5, zorder=3)
+                ax.add_patch(Circle((cx, y_mid), r, fill=True, fc="white", ec=INK, lw=1.6, zorder=3))
+                ax.text(cx, y_mid + 1.2, "kWh", ha="center", va="center",
+                        fontsize=7, fontweight="bold", color=INK, family="monospace")
+                ax.text(cx, y_mid - r - 1.8, etq, ha="center", va="top",
+                        fontsize=6, color="#555", fontweight="bold")
+                ax.plot([cx, cx], [y_mid - r, out_y], color=INK, lw=1.5, zorder=3)
+            if es_compartido:
+                # Apunta al PUNTO (principal+respaldo juntos), no a un
+                # medidor especifico -- ambos son "este" punto de medida.
+                # Se señala desde la derecha (space libre) para no invadir
+                # el area del trafo/barraje/gabinete que queda arriba.
+                ax.annotate("ESTE MEDIDOR", xy=(xc + dxs[1] + r, y_mid),
+                            xytext=(xc + dxs[1] + r + 8, y_mid),
+                            ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
+                            arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
+            ax.plot([xc + dxs[0], xc + dxs[1]], [out_y, out_y], color=INK, lw=1.8, zorder=3)
+            vline(out_y, out_y - 8); y = out_y - 8
 
     # ── Proteccion DESPUES del medidor ────────────────────────────────────────
     if prot_despues:
@@ -1729,8 +1790,12 @@ def draw_unifilar_generico(cfg, out_path):
     # ── CARGA ─────────────────────────────────────────────────────────────────
     ax.add_patch(Polygon([[xc-5, y], [xc+5, y], [xc, y-9]],
                  closed=True, fill=False, ec=INK, lw=2.4))
-    ax.text(xc - 6.5, y - 3, calibre or "cal. ?", ha="right", va="center",
-            fontsize=7.5, color="#444", style="italic")
+    # Si es indirecta+trafo, el conductor trafo->carga ya se etiqueto al
+    # final del bloque TRAFO (aqui no hay nada mas en medio que lo separe);
+    # repetirlo seria la misma etiqueta dos veces sobre el mismo tramo.
+    if not (tipo == "indirecta" and instalacion == "trafo"):
+        ax.text(xc - 6.5, y - 3, calibre or "cal. ?", ha="right", va="center",
+                fontsize=7.5, color="#444", style="italic")
     ax.text(xc, y - 11, "CARGA",
             ha="center", va="top", fontsize=11, fontweight="bold", color=INK)
 
