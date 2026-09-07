@@ -51,6 +51,18 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   (gestornormativo.creg.gov.co) antes de darlo por bueno — un dato citado por
   otra IA sin verificar es exactamente el tipo de error que este proyecto ya
   sufrió (ver el resto de este documento).
+- `_consulta_retie(update, ctx, texto)` mantiene hilo de conversación en
+  `ctx.user_data["historial_retie"]` (mismo patrón que `historial_diagrama` /
+  `_dialogo_diagrama`): cada pregunta se agrega con `{"role": "user"/"model",
+  "text": ...}`, se recorta a `RETIE_HISTORIAL_MAX` entradas (ventana
+  deslizante, ~4 intercambios) y se envía como conversación completa a
+  Gemini vía `system_instruction=PROMPT_SISTEMA_RETIE` + `contents=conv`. El
+  hilo se corta explícitamente (se pone `[] `) al entrar a otro flujo que no
+  es una continuación de la consulta — `/menu` (ya limpia todo user_data),
+  `/diagrama <texto>`, `cmd_clasificar`, y al activar `modo_diagrama_ia` —
+  además de `/cancelar` (limpia todo). Si agregas un nuevo flujo que no es
+  una consulta normativa, resetea `historial_retie` ahí también, o el bot
+  arrastrará contexto de una consulta anterior sin relación.
 
 ## Modelo de configuración (cfg)
 ```
