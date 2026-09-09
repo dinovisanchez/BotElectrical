@@ -38,11 +38,38 @@ lenta podía quedar colgada sin que `except Exception` la atrapara a tiempo
 — el usuario se quedaba sin ninguna respuesta ("se traba"). Si agregas un
 nuevo punto de llamada a Gemini, envuélvelo igual: NUNCA dejes una llamada
 sin timeout, sin importar que "debería responder rápido". `GenerateContentConfig`
-también lleva `max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS` (900) en las tres —
+también lleva `max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS` (1400) en las tres —
 respuestas más cortas = generación más rápida, además de ser lo que pidió
 el usuario ("más rápido y conciso"). `RETIE_HISTORIAL_MAX` se bajó de 8 a 4
 (de ~4 a ~2 intercambios) por el mismo motivo: el prompt del sistema ya es
 grande, un historial largo lo hace más lento sin ganar mucha precisión.
+
+**Bug real que motivó subir el limite a 1400 y agregar `GEMINI_THINKING_CONFIG`:**
+`gemini-2.5-flash` tiene "thinking" (razonamiento interno, invisible para el
+usuario) activado por defecto, y ese razonamiento se descuenta del MISMO
+presupuesto de `max_output_tokens` que la respuesta visible. Con el limite
+en 900 y una pregunta de seguimiento (mas contexto en el historial = mas
+"pensamiento"), el modelo a veces agotaba el presupuesto completo pensando
+y terminaba con `finish_reason=MAX_TOKENS` y `response.text` vacio — el bot
+respondia "El modelo no pudo generar una respuesta para esta consulta",
+sin haber generado nunca una respuesta real. El retry que ya existia solo
+cubria `finish_reason` con `"RECITATION"`, no `MAX_TOKENS`, asi que caia
+directo al mensaje de error. Arreglo (dos partes, no una sola):
+1. `GEMINI_THINKING_CONFIG = types.ThinkingConfig(thinking_budget=0)`
+   aplicado en las 3 llamadas — desactiva el thinking extendido. Para
+   preguntas/respuestas normativas directas no hace falta esa cadena de
+   razonamiento; desactivarla es MAS RAPIDO (alineado con "mas rapido") y
+   deja todo el presupuesto de tokens para la respuesta visible.
+2. Subir `GEMINI_MAX_OUTPUT_TOKENS` de 900 a 1400 como margen adicional,
+   y en `_consulta_retie` agregar un segundo camino de retry (junto al de
+   RECITATION) que detecta `finish_reason` con `"MAX_TOKENS"` y reintenta
+   una vez con el doble de presupuesto — defensa adicional por si alguna
+   respuesta larga por si misma (no por thinking) vuelve a agotar el limite.
+Si agregas un nuevo punto de llamada a Gemini para Q&A/dialogo (no para
+generación de contenido largo), aplícale `thinking_config=GEMINI_THINKING_CONFIG`
+también — si necesitas thinking extendido para algo especifico (ej. un
+razonamiento multi-paso complejo), usa un `thinking_budget` explicito mayor
+que 0 en vez de omitir el parametro, para no volver a caer en el mismo bug.
 
 ## Precisión en `PROMPT_SISTEMA_RETIE` (consultas normativas por IA)
 - Regla de comportamiento: el bot debe responder EXACTAMENTE lo preguntado; si
