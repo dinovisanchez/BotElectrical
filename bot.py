@@ -18,7 +18,23 @@ GEMINI_KEY   = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_TIMEOUT_S = 25   # limite duro por intento: mejor responder rapido con
                         # un error claro que dejar al usuario sin respuesta
-GEMINI_MAX_OUTPUT_TOKENS = 900  # respuestas mas cortas = mas rapidas
+GEMINI_MAX_OUTPUT_TOKENS = 1400  # respuestas cortas = mas rapidas, pero con
+                                  # margen: gemini-2.5-flash gasta "thinking
+                                  # tokens" (razonamiento interno, invisible)
+                                  # del MISMO presupuesto de max_output_tokens.
+                                  # Con 900 y una consulta con historial (mas
+                                  # contexto para "pensar"), el modelo podia
+                                  # agotar el presupuesto pensando y devolver
+                                  # texto vacio (finish_reason=MAX_TOKENS) --
+                                  # el bot respondia "no pude generar una
+                                  # respuesta" sin haber generado nada de
+                                  # verdad. Ver thinking_config mas abajo.
+# Gemini 2.5 Flash tiene "thinking" activado por defecto (razonamiento interno
+# que NO se ve, pero cuenta contra max_output_tokens). Para una consulta de
+# preguntas/respuestas normativas no hace falta ese razonamiento extendido:
+# desactivarlo hace las respuestas MAS RAPIDAS y evita que se coma el
+# presupuesto de tokens sin dejar nada para la respuesta visible.
+GEMINI_THINKING_CONFIG = types.ThinkingConfig(thinking_budget=0)
 
 RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
 
@@ -1083,7 +1099,8 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
                     prompt,
                 ],
                 config=types.GenerateContentConfig(
-                    temperature=0.2, max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS
+                    temperature=0.2, max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                    thinking_config=GEMINI_THINKING_CONFIG,
                 ),
             ),
             timeout=GEMINI_TIMEOUT_S,
@@ -1173,6 +1190,7 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
             system_instruction=PROMPT_SISTEMA_RETIE,
             temperature=0.25,
             max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            thinking_config=GEMINI_THINKING_CONFIG,
         )
         if tools:
             cfg_kwargs["tools"] = tools
@@ -1241,6 +1259,28 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
                     respuesta = (response.text or "").strip()
                 except Exception as e:
                     log.error(f"Error en reintento por RECITATION: {e}")
+
+            elif str(finish_reason) and "MAX_TOKENS" in str(finish_reason):
+                # Defensa adicional: con thinking_config(thinking_budget=0) esto
+                # no deberia pasar, pero si el modelo aun asi agota el
+                # presupuesto (p.ej. una respuesta muy larga por si misma),
+                # reintenta una vez con mas margen en vez de dejar al usuario
+                # sin nada.
+                log.warning("Respuesta vacia por MAX_TOKENS, reintentando con mas presupuesto.")
+                retry_kwargs = dict(cfg_kwargs)
+                retry_kwargs["max_output_tokens"] = GEMINI_MAX_OUTPUT_TOKENS * 2
+                try:
+                    response = await asyncio.wait_for(
+                        _genai_client.aio.models.generate_content(
+                            model=GEMINI_MODEL,
+                            contents=conv,
+                            config=types.GenerateContentConfig(**retry_kwargs),
+                        ),
+                        timeout=GEMINI_TIMEOUT_S,
+                    )
+                    respuesta = (response.text or "").strip()
+                except Exception as e:
+                    log.error(f"Error en reintento por MAX_TOKENS: {e}")
 
         if not respuesta:
             log.warning(f"Respuesta vacia. response={response!r}")
@@ -1319,6 +1359,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     dialogo_config = types.GenerateContentConfig(
         system_instruction=PROMPT_DIAGRAMA, temperature=0.2,
         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+        thinking_config=GEMINI_THINKING_CONFIG,
     )
 
     await update.message.reply_chat_action("typing")
