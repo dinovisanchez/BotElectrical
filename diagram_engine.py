@@ -1347,6 +1347,14 @@ def draw_unifilar_generico(cfg, out_path):
     kva         = cfg.get("trafo_kva", "")
     trafo_tipo  = cfg.get("trafo_tipo", "trifasico")
     n_trafos    = int(cfg.get("n_trafos", 1))
+    # Subestacion con VARIAS celdas de transformacion INDEPENDIENTES (cada una
+    # con su propia proteccion y su propia carga aguas abajo), colgando de una
+    # barra de distribucion comun despues del punto de medida MT. Distinto del
+    # "banco" de transformadores monofasicos en paralelo (que sigue existiendo
+    # para semidirecta/directa: 3 unidades formando UN solo trafo trifasico
+    # para UNA sola carga) -- aqui cada TRi es un trafo separado con su propia
+    # salida. Solo aplica a indirecta (medida en MT de una subestacion).
+    es_multi_celda = (tipo == "indirecta" and instalacion == "trafo" and n_trafos >= 2)
     # Proteccion: antes del medidor, despues, o ninguna
     prot_antes   = cfg.get("proteccion_antes", "")
     prot_despues = cfg.get("proteccion_despues", "")
@@ -1375,6 +1383,8 @@ def draw_unifilar_generico(cfg, out_path):
     if rel_tc:  sub_parts.append(f"RTC {rel_tc}")
     if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
     if respaldo: sub_parts.append("Principal + Respaldo")
+    if es_multi_celda:
+        sub_parts.append(f"Subestación · {n_trafos} celdas de transformación")
     if instalacion == "trafo" and trafo_uso == "compartido":
         sub_parts.append("Trafo COMPARTIDO (varios usuarios)")
     elif instalacion == "trafo" and trafo_uso == "exclusivo":
@@ -1613,8 +1623,50 @@ def draw_unifilar_generico(cfg, out_path):
         draw_medida_lateral(tc_y, tp_y=tp_y)
         y = tc_y - 3
 
+    # ── SUBESTACION MULTI-CELDA: N transformadores INDEPENDIENTES, cada uno ───
+    # con su propia proteccion y su propia carga, colgando de una barra de
+    # distribucion comun despues del punto de medida MT. Reemplaza el banco de
+    # monofasicos en paralelo cuando hay 2+ trafos en indirecta.
+    if es_multi_celda:
+        kva_list = cfg.get("trafo_kva_list", [])
+        # Ancho total del abanico acotado: con muchas celdas, una barra muy
+        # ancha llega a rozar la etiqueta "MEDIDOR" (que vive a la derecha,
+        # ~x=75, casi al mismo nivel vertical que esta barra).
+        cell_w = max(5.0, min(11.0, 35.0 / max(1, n_trafos - 1)))
+        xs = [xc + i * cell_w for i in range(n_trafos)]
+        bus_y = y - 4
+        vline(y, bus_y)  # el feed de medida baja por el eje hasta la barra
+        ax.plot([xc - 3, xs[-1] + 3], [bus_y, bus_y], color=INK, lw=4.5, zorder=2)
+        ax.text(xc - 5, bus_y + 2.2, "BARRA DE\nDISTRIBUCIÓN", ha="right", va="bottom",
+                fontsize=6.8, fontweight="bold", color=INK)
+
+        for i, cx in enumerate(xs):
+            kva_i = kva_list[i] if i < len(kva_list) else kva
+            lbl = f"TR{i+1}\n{kva_i} kVA" if kva_i else f"TR{i+1}"
+            # Etiqueta CENTRADA arriba del fusible (no a un lado): a un lado
+            # se solapaba con la celda vecina cuando hay varias muy juntas.
+            ax.text(cx, bus_y - 1, lbl, ha="center", va="top",
+                    fontsize=6.2, fontweight="bold", color=INK)
+            fy = bus_y - 6.5
+            ax.plot([cx, cx], [bus_y, fy + 2.2], color=INK, lw=1.6, zorder=3)
+            _u_fuse(ax, cx, fy, INK, 0.62)
+            ty = fy - 2.2 - 5.5
+            ax.plot([cx, cx], [fy - 2.2, ty + 2.5], color=INK, lw=1.6, zorder=3)
+            _u_xfmr(ax, cx, ty, INK, 0.9, ground=False)
+            # tierra en ramal lateral, igual criterio que el trafo principal:
+            # no se dibuja sobre el eje del cable para que no quede tapada.
+            gnd_y = ty - 1.5 * 0.9
+            ax.plot([cx, cx + 2.3], [gnd_y, gnd_y], color=COL["G"], lw=1.0, zorder=3)
+            _ground(ax, cx + 2.3, gnd_y, 0.35)
+            ly0 = ty - 2.5 - 3.5
+            ax.plot([cx, cx], [ty - 2.5, ly0], color=INK, lw=1.6, zorder=3)
+            ax.add_patch(Polygon([[cx - 2.2, ly0], [cx + 2.2, ly0], [cx, ly0 - 4]],
+                         closed=True, fill=False, ec=INK, lw=1.6, zorder=3))
+            ax.text(cx, ly0 - 5.3, "CARGA", ha="center", va="top",
+                    fontsize=6, fontweight="bold", color=INK)
+
     # ── TRAFO (instalacion=trafo) ──────────────────────────────────────────────
-    if instalacion == "trafo":
+    if instalacion == "trafo" and not es_multi_celda:
         # Proteccion MT del trafo (RETIE): en indirecta el punto de medida ya
         # se protegio arriba (CC fusibles del TC/TP); en directa/semidirecta
         # el trafo cuelga directo de "RED (M.T.)" y esta es su PRIMERA
@@ -1801,11 +1853,13 @@ def draw_unifilar_generico(cfg, out_path):
             vline(out_y, out_y - 8); y = out_y - 8
 
     # ── Proteccion DESPUES del medidor ────────────────────────────────────────
-    if prot_despues:
+    if prot_despues and not es_multi_celda:
         draw_prot("Proteccion", prot_despues)
 
     # ── Seccionador DESPUES de la medida (si aplica) ──────────────────────────
-    if seccionador_pos == "despues" and tipo != "indirecta":
+    if es_multi_celda:
+        pass  # cada celda ya tiene su propia proteccion + carga (ver arriba)
+    elif seccionador_pos == "despues" and tipo != "indirecta":
         vline(y, y - 3)
         _u_disc(ax, xc, y - 3, INK, 1.0)
         ax.text(xc - 5, y - 3, "Seccionador", ha="right", va="center",
@@ -1815,16 +1869,18 @@ def draw_unifilar_generico(cfg, out_path):
         vline(y, y - 4); y -= 4
 
     # ── CARGA ─────────────────────────────────────────────────────────────────
-    ax.add_patch(Polygon([[xc-5, y], [xc+5, y], [xc, y-9]],
-                 closed=True, fill=False, ec=INK, lw=2.4))
-    # Si es indirecta+trafo, el conductor trafo->carga ya se etiqueto al
-    # final del bloque TRAFO (aqui no hay nada mas en medio que lo separe);
-    # repetirlo seria la misma etiqueta dos veces sobre el mismo tramo.
-    if not (tipo == "indirecta" and instalacion == "trafo"):
-        ax.text(xc - 6.5, y - 3, calibre or "cal. ?", ha="right", va="center",
-                fontsize=7.5, color="#444", style="italic")
-    ax.text(xc, y - 11, "CARGA",
-            ha="center", va="top", fontsize=11, fontweight="bold", color=INK)
+    # (omitida en multi-celda: cada TRi ya dibujo su propia carga arriba)
+    if not es_multi_celda:
+        ax.add_patch(Polygon([[xc-5, y], [xc+5, y], [xc, y-9]],
+                     closed=True, fill=False, ec=INK, lw=2.4))
+        # Si es indirecta+trafo, el conductor trafo->carga ya se etiqueto al
+        # final del bloque TRAFO (aqui no hay nada mas en medio que lo separe);
+        # repetirlo seria la misma etiqueta dos veces sobre el mismo tramo.
+        if not (tipo == "indirecta" and instalacion == "trafo"):
+            ax.text(xc - 6.5, y - 3, calibre or "cal. ?", ha="right", va="center",
+                    fontsize=7.5, color="#444", style="italic")
+        ax.text(xc, y - 11, "CARGA",
+                ha="center", va="top", fontsize=11, fontweight="bold", color=INK)
 
     # ── PLANO DE SIMBOLOGIA (panel derecho) ───────────────────────────────────
     px0, px1 = 88, 152

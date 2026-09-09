@@ -16,6 +16,9 @@ log = logging.getLogger("medidor-bot")
 
 GEMINI_KEY   = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_TIMEOUT_S = 25   # limite duro por intento: mejor responder rapido con
+                        # un error claro que dejar al usuario sin respuesta
+GEMINI_MAX_OUTPUT_TOKENS = 900  # respuestas mas cortas = mas rapidas
 
 RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
 
@@ -438,19 +441,23 @@ PROMPT_SISTEMA_RETIE = (
     "   Para CREG: 'CREG 038/2014, Tabla N' o 'CREG 038/2014, Art. Z'\n"
     "\n"
     "=== PATRON DE RESPUESTA — OBLIGATORIO EN TODAS LAS RESPUESTAS ===\n"
+    "PRIORIDAD: velocidad y precision sobre exhaustividad. Responde solo lo\n"
+    "preguntado. Omite cualquier bloque que no aporte informacion nueva a\n"
+    "esta pregunta especifica -- 'siempre presente' significa 'cuando aplica\n"
+    "a lo preguntado', no 'rellenar aunque no haya nada que poner'.\n"
     "\n"
-    "BLOQUE 1 — siempre presente:\n"
+    "BLOQUE 1 — normalmente presente:\n"
     "💬 LO QUE NECESITAS SABER\n"
-    "- [max 4 vignetas, lenguaje simple, sin tecnicismos, responde exactamente lo "
+    "- [max 3 vignetas, lenguaje simple, sin tecnicismos, responde exactamente lo "
     "que preguntaron]\n"
     "\n"
-    "BLOQUE 2 — siempre presente:\n"
+    "BLOQUE 2 — SOLO si hay valores/especificaciones concretas que aportar:\n"
     "⚙️ ESPECIFICACIONES\n"
-    "- [lista o tabla corta: valores, clases de exactitud, distancias, tensiones, etc.]\n"
+    "- [max 4 vignetas: valores, clases de exactitud, distancias, tensiones, etc.]\n"
     "\n"
-    "BLOQUE 3 — siempre presente:\n"
+    "BLOQUE 3 — SOLO si citas una norma especifica (si no citas ninguna, omite):\n"
     "🏛️ NORMATIVA APLICABLE\n"
-    "- [articulos exactos en formato 'RETIE 2024, Libro X, Art. Y, pag. N']\n"
+    "- [max 3 articulos exactos en formato 'RETIE 2024, Libro X, Art. Y, pag. N']\n"
     "\n"
     "BLOQUE 4 — SOLO si el usuario pide recomendacion, consejo o alternativas:\n"
     "✅ TE RECOMENDAMOS\n"
@@ -1068,17 +1075,25 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
         return "⚠️ Servicio de análisis de imágenes no disponible."
     prompt = PROMPT_VALIDACION_CX.format(tipo=tipo, norma=norma)
     try:
-        response = await _genai_client.aio.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(temperature=0.2),
+        response = await asyncio.wait_for(
+            _genai_client.aio.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.2, max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS
+                ),
+            ),
+            timeout=GEMINI_TIMEOUT_S,
         )
         texto = (response.text or "").strip()
         texto = texto.replace("**", "").replace("__", "").replace("`", "")
         return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
+    except asyncio.TimeoutError:
+        log.warning(f"Timeout analizando foto ({GEMINI_TIMEOUT_S}s)")
+        return "⏳ Tardó demasiado analizando la imagen. Intenta de nuevo."
     except Exception as e:
         log.error(f"Error Gemini Vision: {e}")
         return "⚠️ No pude analizar la imagen. Asegúrate de que la foto sea clara y bien iluminada."
@@ -1113,7 +1128,9 @@ async def _enviar_largo(update: Update, texto: str):
         await update.message.reply_text(prefijo + parte)
 
 
-RETIE_HISTORIAL_MAX = 8  # ventana deslizante: ~4 intercambios usuario/modelo
+RETIE_HISTORIAL_MAX = 4  # ventana deslizante: ~2 intercambios usuario/modelo
+                         # (el prompt del sistema ya es grande; un historial
+                         # largo lo hace mas lento sin ganar mucha precision)
 
 async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto: str):
     if not GEMINI_KEY:
@@ -1152,7 +1169,11 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
             else:
                 log.warning("types.FileSearch no disponible en esta versión de google-genai; continuando sin RAG indexado.")
 
-        cfg_kwargs = dict(system_instruction=PROMPT_SISTEMA_RETIE, temperature=0.25)
+        cfg_kwargs = dict(
+            system_instruction=PROMPT_SISTEMA_RETIE,
+            temperature=0.25,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+        )
         if tools:
             cfg_kwargs["tools"] = tools
         gen_config = types.GenerateContentConfig(**cfg_kwargs)
@@ -1161,11 +1182,20 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
         last_err = None
         for intento in range(3):
             try:
-                response = await _genai_client.aio.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=conv,
-                    config=gen_config,
+                response = await asyncio.wait_for(
+                    _genai_client.aio.models.generate_content(
+                        model=GEMINI_MODEL,
+                        contents=conv,
+                        config=gen_config,
+                    ),
+                    timeout=GEMINI_TIMEOUT_S,
                 )
+                break
+            except asyncio.TimeoutError:
+                # No reintentar: la misma consulta grande probablemente
+                # vuelva a tardar. Mejor fallar rapido con un mensaje claro
+                # que dejar al usuario sin ninguna respuesta ("se traba").
+                last_err = TimeoutError(f"Gemini no respondio en {GEMINI_TIMEOUT_S}s")
                 break
             except Exception as e:
                 last_err = e
@@ -1200,10 +1230,13 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
                     "referencias de articulo/numeral/pagina."
                 )
                 try:
-                    response = await _genai_client.aio.models.generate_content(
-                        model=GEMINI_MODEL,
-                        contents=prompt_retry,
-                        config=gen_config,
+                    response = await asyncio.wait_for(
+                        _genai_client.aio.models.generate_content(
+                            model=GEMINI_MODEL,
+                            contents=prompt_retry,
+                            config=gen_config,
+                        ),
+                        timeout=GEMINI_TIMEOUT_S,
                     )
                     respuesta = (response.text or "").strip()
                 except Exception as e:
@@ -1236,7 +1269,12 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
     except Exception as e:
         log.error(f"Error Gemini [{type(e).__name__}]: {e}")
         msg = str(e)
-        if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+        if isinstance(e, TimeoutError) or "no respondio" in msg.lower():
+            await update.message.reply_text(
+                "⏳ La consulta tardó demasiado y la corté para no dejarte sin "
+                "respuesta.\n\nIntenta con una pregunta más corta y específica."
+            )
+        elif "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
             await update.message.reply_text(
                 "⏳ El servicio normativo está saturado. Intenta de nuevo en unos segundos."
             )
@@ -1279,7 +1317,8 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         conv += f"\n{lbl}: {m['text']}"
 
     dialogo_config = types.GenerateContentConfig(
-        system_instruction=PROMPT_DIAGRAMA, temperature=0.2
+        system_instruction=PROMPT_DIAGRAMA, temperature=0.2,
+        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
     )
 
     await update.message.reply_chat_action("typing")
@@ -1287,11 +1326,17 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     last_err = None
     for intento in range(3):
         try:
-            response = await _genai_client.aio.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=conv,
-                config=dialogo_config,
+            response = await asyncio.wait_for(
+                _genai_client.aio.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=conv,
+                    config=dialogo_config,
+                ),
+                timeout=GEMINI_TIMEOUT_S,
             )
+            break
+        except asyncio.TimeoutError:
+            last_err = TimeoutError(f"Gemini no respondio en {GEMINI_TIMEOUT_S}s")
             break
         except Exception as e:
             last_err = e
@@ -1308,7 +1353,9 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     if response is None:
         log.error(f"Error dialogo_diagrama [{type(last_err).__name__}]: {last_err}")
         msg = str(last_err)
-        if "401" in msg or "api key" in msg.lower() or "API_KEY" in msg:
+        if isinstance(last_err, TimeoutError) or "no respondio" in msg.lower():
+            txt = "⏳ Tardó demasiado en responder. Intenta de nuevo o usa /menu para el flujo guiado sin IA."
+        elif "401" in msg or "api key" in msg.lower() or "API_KEY" in msg:
             txt = "⚠️ Clave API de Gemini inválida. Verifica GEMINI_API_KEY en Render."
         elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
             txt = "⏳ Cuota de Gemini agotada. Intenta en unos minutos."

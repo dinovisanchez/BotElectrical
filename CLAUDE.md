@@ -28,6 +28,22 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   sin Telegram, contra las funciones reales de producción (no las legacy).
 - `requirements.txt`, `README.md`.
 
+## Velocidad y timeouts en las llamadas a Gemini
+Las 3 funciones que llaman a Gemini (`_consulta_retie`, `_dialogo_diagrama`,
+`_analizar_foto_cx`) envuelven CADA `generate_content` en
+`asyncio.wait_for(..., timeout=GEMINI_TIMEOUT_S)` (25s). Motivo real: el
+prompt del sistema creció mucho (varios bloques de "datos memorizados" +
+reglas de precisión) y sumado al historial de conversación, una llamada
+lenta podía quedar colgada sin que `except Exception` la atrapara a tiempo
+— el usuario se quedaba sin ninguna respuesta ("se traba"). Si agregas un
+nuevo punto de llamada a Gemini, envuélvelo igual: NUNCA dejes una llamada
+sin timeout, sin importar que "debería responder rápido". `GenerateContentConfig`
+también lleva `max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS` (900) en las tres —
+respuestas más cortas = generación más rápida, además de ser lo que pidió
+el usuario ("más rápido y conciso"). `RETIE_HISTORIAL_MAX` se bajó de 8 a 4
+(de ~4 a ~2 intercambios) por el mismo motivo: el prompt del sistema ya es
+grande, un historial largo lo hace más lento sin ganar mucha precisión.
+
 ## Precisión en `PROMPT_SISTEMA_RETIE` (consultas normativas por IA)
 - Regla de comportamiento: el bot debe responder EXACTAMENTE lo preguntado; si
   la pregunta es ambigua o la respuesta depende de una condición no
@@ -81,6 +97,33 @@ trafo_gabinete: bool|None  # True=gabinete/cuarto cerrado, False=red abierta, No
 trafo_kva, trafo_tipo, trafo_kva_list, n_trafos, n_cc, n_tc, interruptor, v_mt, v_bt
 # opcionales unifilar: dps (bool), rele (bool), rele_funcs (str ANSI)
 ```
+
+### Subestación multi-celda (`tipo='indirecta'` + `n_trafos >= 2`)
+Cuando la medida es indirecta y hay 2+ transformadores, `draw_unifilar_generico`
+dibuja N **celdas de transformación INDEPENDIENTES** (`es_multi_celda`), no un
+banco de monofásicos en paralelo: después del punto de medida MT (TC/TP +
+bloque + medidor, sin cambios) se dibuja una **BARRA DE DISTRIBUCIÓN**
+horizontal, y de ella cuelgan N ramas — cada una con su propio fusible/
+seccionador, su propio transformador (`trafo_kva_list[i]`, tierra en ramal
+lateral) y su propia carga (`TR1`, `TR2`, ... cada uno con su triángulo de
+CARGA independiente). Esto reemplaza cómo se dibujaba antes `n_trafos>=2` en
+indirecta (círculos monofásicos formando un solo trafo trifásico para una
+sola carga) — decisión explícita del usuario tras preguntarle, porque son
+topologías reales distintas (una subestación con celdas independientes vs.
+un banco monofásico). El **banco monofásico en paralelo sigue existiendo sin
+cambios para `semidirecta`/`directa`** (`n_trafos>=2` ahí sigue siendo 3
+unidades formando UN trafo trifásico para UNA sola carga — no toques eso).
+- `cell_w` acota el ancho total del abanico (`max(5, min(11, 35/(n-1)))`):
+  con muchas celdas la barra puede llegar a rozar la etiqueta "MEDIDOR" del
+  punto de medida (quedan casi al mismo nivel vertical) — si cambias esta
+  geometría, vuelve a verificar ese caso con 5+ celdas.
+- Todos los bloques posteriores que asumen UNA sola carga (protección
+  después, seccionador después, sección CARGA final) se saltan con
+  `and not es_multi_celda` / `if not es_multi_celda:` — si agregas algo
+  nuevo ahí, agrégale el mismo guard o se dibujará encima del abanico.
+- El flujo de menú (`kva_trafo_idx`/`kva_trafo_list` en `bot.py`) ya pregunta
+  la capacidad de cada transformador por separado y llena `trafo_kva_list`
+  — no necesitó cambios para soportar esto.
 
 ### Regla: trafo `exclusivo` vs `compartido`
 Un trafo **compartido** (edificios, conjuntos residenciales) alimenta un
