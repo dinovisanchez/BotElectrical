@@ -23,6 +23,6 @@ for text in tests:
     print(f"\n📄 Input: \"{text}\"")
     print(f"   tipo: {cfg['tipo']}")
     print(f"   conexion: {cfg['conexion']}")
-    print(f"   trafo_presente: {cfg['trafo_presente']}")
-    print(f"   interruptor_pos: {cfg['interruptor_pos']}")
+    print(f"   instalacion: {cfg.get('instalacion', '')!r}")
+    print(f"   interruptor: {cfg.get('interruptor', '')!r}")
     print(f"   ✓ Understood: {', '.join(entendido) if entendido else 'basics only'}")

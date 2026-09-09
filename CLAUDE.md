@@ -14,10 +14,10 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
     `_draw_semi_indirecta_retie` según `cfg['tipo']`.
   - `draw_unifilar_generico(cfg, out)` → diagrama unifilar (todos los tipos:
     directa/semidirecta/indirecta, con o sin trafo, con o sin respaldo).
-  - `draw`, `draw_unifilar`, `draw_unifilar_trafo` siguen existiendo en el
-    archivo pero son **legacy/no se usan en producción** — no asumas que
-    reflejan el comportamiento real del bot; si vas a tocar el motor de
-    unifilares, edita `draw_unifilar_generico`.
+    (Las funciones legacy `draw`, `draw_unifilar`, `draw_unifilar_trafo` que
+    existían aquí se eliminaron en la limpieza de QA — ver "QA de sept/2026"
+    más abajo. Si vas a tocar el motor de unifilares, edita
+    `draw_unifilar_generico`, la única función real.)
   - Símbolos IEC: `_u_breaker, _u_disc, _u_fuse, _u_arrester, _u_ct, _u_vt, _u_xfmr, _u_relay, _ground`.
 - `parser.py` — `parse_spec(text)` → `(cfg, entendido, faltante)`. Sin dependencias.
 - `bot.py` — handlers de Telegram (start/help/menu/diagrama + texto libre + botones).
@@ -71,6 +71,20 @@ también — si necesitas thinking extendido para algo especifico (ej. un
 razonamiento multi-paso complejo), usa un `thinking_budget` explicito mayor
 que 0 en vez de omitir el parametro, para no volver a caer en el mismo bug.
 
+**Timeout: reintentar en vez de rendirse a la primera.** `_consulta_retie` y
+`_dialogo_diagrama` antes trataban un `asyncio.TimeoutError` como definitivo
+(`break` inmediato, sin reintentar) — la logica era "una consulta grande
+volvera a tardar igual", pero en la practica esto le daba al usuario un
+mensaje que le echaba la culpa a SU pregunta ("intenta con una pregunta mas
+corta y especifica") cuando el problema real era una lentitud puntual del
+servicio, no la consulta. Con `thinking_budget=0` un timeout ya deberia ser
+la excepcion, no la regla, asi que ahora ambas funciones reintentan el
+timeout igual que reintentan un 503/sobrecarga (hasta 3 intentos totales)
+antes de mostrar el mensaje de error — y el mensaje final ya no sugiere que
+la pregunta del usuario fue el problema. Si agregas un nuevo punto de
+llamada con reintentos, aplica el mismo criterio: un timeout no es motivo
+automatico para rendirse en el primer intento.
+
 ## Precisión en `PROMPT_SISTEMA_RETIE` (consultas normativas por IA)
 - Regla de comportamiento: el bot debe responder EXACTAMENTE lo preguntado; si
   la pregunta es ambigua o la respuesta depende de una condición no
@@ -94,6 +108,36 @@ que 0 en vez de omitir el parametro, para no volver a caer en el mismo bug.
   (gestornormativo.creg.gov.co) antes de darlo por bueno — un dato citado por
   otra IA sin verificar es exactamente el tipo de error que este proyecto ya
   sufrió (ver el resto de este documento).
+- **Datos agregados sept/2026** (verificados contra gestornormativo.creg.gov.co
+  y fuentes que lo citan directamente, no una IA sin verificar):
+  - **Resolución 40284 de 2026 (MinMinas) modifica el RETIE** — vigente desde
+    el 1 jul/2026. NO reemplaza la 40117/2024, la ajusta. Cambios que sí le
+    importan a este bot: técnicos electricistas ahora pueden hacer esquemas
+    de hasta 4 cuentas de energía (antes 1) en vivienda uni/bifamiliar o
+    pequeño comercio ≤15 kVA/240V; autogeneración a pequeña escala (AGPE)
+    <10 kVA conectada a red queda exenta de certificación plena (pero no de
+    cumplir el RETIE). Si el usuario pregunta por RETIE vigente, la respuesta
+    ya no es solo "Resolución 40117/2024" — hay que mencionar esta
+    modificación cuando sea relevante a la pregunta.
+  - **CREG 015/2018 también regula el descuento cuando los activos NT1
+    (transformador/red BT) son de la copropiedad**, no solo la clasificación
+    de NT1: 50% de descuento en el cargo por uso si el usuario/copropiedad es
+    dueño de UNO de los dos activos, 100% si es dueño de ambos — información
+    directamente relevante para las preguntas sobre trafo `compartido` en
+    edificios/conjuntos que ya maneja el bot (ver regla `trafo_uso` más
+    abajo). También: 2 días hábiles para que el propietario avise si repone
+    un activo NT1 en falla, si no el operador de red lo repone en 72 horas.
+  - **"Frontera en falla" (CREG 038/2014, Art. 10 y Art. 35)**: si la
+    calibración muestra que un medidor/TC/TP perdió su clase de exactitud, la
+    frontera se declara en falla y aplica reliquidación — es la respuesta a
+    "¿qué pasa si el medidor está mal calibrado o dañado?".
+  - **Propiedad/mantenimiento del medidor (CREG 038/2014, Art. 5 y Art. 28)**:
+    libertad para comprar el medidor en el mercado (no obligatorio comprarlo
+    al operador de red) si cumple especificaciones técnicas; costos de
+    mantenimiento a cargo del representante de la frontera y el usuario.
+  - **FP capacitivo varía por nivel de tensión** (antes el prompt solo tenía
+    el umbral genérico "también se penaliza"): ≥0,90 en niveles I/II, ≥0,95
+    en nivel III, ≥0,98 en nivel IV.
 - `_consulta_retie(update, ctx, texto)` mantiene hilo de conversación en
   `ctx.user_data["historial_retie"]` (mismo patrón que `historial_diagrama` /
   `_dialogo_diagrama`): cada pregunta se agrega con `{"role": "user"/"model",
@@ -203,6 +247,67 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
   conservador si ningún flujo de entrada capturó `trafo_uso` (y `red abierta`
   si no se especificó `trafo_gabinete`), y avisa al usuario en el caption de
   la imagen que se hizo esa suposición.
+
+## QA de sept/2026: bugs encontrados por revision de codigo (no reportados por el usuario)
+- **Seccionador "despues de la medida" no se dibujaba para `tipo='indirecta'`**:
+  `diagram_engine.py` tenia `elif seccionador_pos == "despues" and tipo !=
+  "indirecta":` — pero el menu de botones SOLO ofrece la pregunta "antes/despues"
+  cuando `tipo=='indirecta'` (para semidirecta va directo a la pregunta de TC,
+  para directa no se pregunta). Resultado: la opcion "Despues de la medida" en
+  el UNICO tipo donde se ofrece, no dibujaba nada — la pantalla de confirmacion
+  seguia diciendo "Seccionador despues de la medida" pero el PNG no tenia el
+  simbolo. Se quito la exclusion `and tipo != "indirecta"`; verificado con
+  render (indirecta + trafo exclusivo + seccionador=despues ya muestra el
+  simbolo entre el trafo y la carga).
+- **`trafo_uso='compartido'` + subestacion multi-celda (`n_trafos>=2` en
+  indirecta) es una combinacion sin sentido que igual era alcanzable via el
+  menu de botones** (el menu pregunta `trafo_uso` sin importar `tipo`, a
+  diferencia de `parser.py`/el dialogo IA que si fuerzan `tipo='directa'`
+  cuando se menciona compartido). El renderer ya ignoraba el bloque de
+  barraje/gabinete compartido en este caso (`es_multi_celda` salta ese
+  bloque), pero dejaba la anotacion "ESTE MEDIDOR" en el punto de medida MT de
+  la subestacion sin motivo (esa anotacion existe para distinguir el medidor
+  propio entre varios en un punto compartido real). `_verificar_coherencia()`
+  ahora fuerza `trafo_uso='exclusivo'` cuando detecta esta combinacion, con
+  aviso al usuario en el caption — igual que ya hacia con el default de
+  `trafo_uso` sin especificar.
+- **Los 6 hallazgos restantes ya se corrigieron tambien** (QA de continuacion,
+  mismo dia):
+  - `proteccion_pos` (antes_tc/despues_tc/ambos_tc/despues_medidor, usado
+    antes solo para el texto resumen del menu) ahora se traduce a
+    `proteccion_antes`/`proteccion_despues` dentro de `_verificar_coherencia()`
+    -- antes, "Antes del TC" y "Ambos lados" se dibujaban igual que "Despues
+    del TC" porque `diagram_engine.py` nunca leia `proteccion_pos`. Verificado
+    con render: semidirecta + "antes del TC" ahora si dibuja la proteccion
+    antes del TC.
+  - `instalacion=""` (documentado como "red sin trafo") ya NO se coacciona a
+    `"barraje"`. Tiene su propio render minimo: solo "RED (B.T.)" sin simbolo
+    de barra, para la acometida mas simple (sin trafo, sin barraje explicito).
+    Esto afectaba a CUALQUIER especificacion de texto libre sin mencion de
+    transformador (el caso mas comun de todos, p.ej. "monofasica directa")
+    -- antes salia rotulada "BARRAJE B.T." sin que el usuario dijera nada de
+    un barraje. Verificado con render.
+  - `seccionador='antes'`/`'despues'` en el JSON de la IA: `PROMPT_DIAGRAMA`
+    ahora aclara que SOLO tiene efecto si `instalacion='trafo'` (es el
+    seccionador de MT junto al transformador) y corrige la descripcion que
+    tenia antes ("antes/despues del bloque de pruebas" no es lo que dibuja
+    el codigo -- es antes/despues del trafo, lado red vs. lado carga).
+  - `dps`/`rele`/`rele_funcs`: se quito su deteccion en `parser.py` (texto
+    libre) porque no tenian ningun efecto real -- solo los leia `draw()`
+    (legacy, ya eliminada). `draw_unifilar_generico()` dibuja pararrayos ZnO +
+    cortacircuitos SIEMPRE que hay trafo, sin flag opcional (ver "[x] DPS" en
+    Estado/pendientes abajo), asi que la deteccion de texto libre solo podia
+    confundir (un usuario escribiendo "sin pararrayos" los veia igual).
+  - Se eliminaron `draw()`, `draw_unifilar()`, `draw_unifilar_trafo()` y
+    `_u_meter()` de `diagram_engine.py` (~450 lineas muertas, marcadas
+    "OBSOLETO" en el propio codigo) y `test_bot_local.py` (test ya roto que
+    las usaba, ademas llamaba `_procesar_texto()` con la firma vieja de 2
+    argumentos).
+  - Campos vestigiales `trafo_presente`, `interruptor_pos`,
+    `interruptor_antes_kva`, `interruptor_despues_kva` eliminados de
+    `parser.DEFAULT` (nunca se leian en ningun lado); `test_parser_fields.py`
+    actualizado para imprimir `instalacion`/`interruptor` (los campos reales)
+    en vez de esos.
 
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
