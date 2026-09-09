@@ -5,12 +5,9 @@ import re
 DEFAULT = dict(sistema="tri4h", tipo="indirecta", respaldo=False,
                norma="RA8", rel_tc="", rel_tp="", proyecto="", salida="conexiones", tension="",
                conexion="simetrica",
-               trafo_presente=False,
                trafo_uso="",           # "exclusivo" | "compartido" | "" (sin especificar)
                trafo_n_usuarios="",    # cantidad de otros usuarios (solo si compartido)
-               trafo_gabinete=None,    # True=gabinete/cuarto cerrado, False=red abierta, None=sin especificar
-               interruptor_pos=None,   # G5: era "antes", forzaba elemento falso en diagramas
-               interruptor_antes_kva="", interruptor_despues_kva="")
+               trafo_gabinete=None)    # True=gabinete/cuarto cerrado, False=red abierta, None=sin especificar
 
 def _norm(s):
     """Normaliza: lowercase + sin acentos."""
@@ -142,13 +139,13 @@ def parse_spec(text):
         cfg["calibre_conductor"] = mc_s0.group(1) + "/0"
         entendido.append(f"Calibre {mc_s0.group(1)}/0")
 
-    # --- PROTECCIONES ---
-    if "rele" in t or "ansi" in t:
-        cfg["rele"] = True
-    if "sin pararrayos" in t or "sin dps" in t:
-        cfg["dps"] = False
-    elif "pararrayos" in t or "dps" in t:
-        cfg["dps"] = True
+    # NOTA: antes aqui se detectaban "rele"/"dps"/"pararrayos" en el texto y
+    # se guardaban en cfg['rele']/cfg['dps'], pero esos campos solo los leia
+    # el draw_unifilar() legado (ya eliminado) -- draw_unifilar_generico()
+    # dibuja pararrayos ZnO + cortacircuitos SIEMPRE que hay trafo (ver
+    # CLAUDE.md, "[x] DPS/pararrayos..."), sin leer ningun flag opcional. Se
+    # quito la deteccion porque no tenia ningun efecto real: un usuario que
+    # escribia "sin pararrayos" via texto libre igual los veia en el dibujo.
 
     # --- INTERRUPTOR / PROTECCION (deteccion global) ---
     ma_int = re.search(

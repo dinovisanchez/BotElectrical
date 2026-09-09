@@ -220,7 +220,8 @@ PROMPT_SISTEMA_RETIE = (
     "=== JERARQUIA TECNICA ===\n"
     "Prioriza en este orden:\n"
     "1. Seguridad electrica (siempre primero).\n"
-    "2. RETIE vigente (Resolucion 40117 de 2024).\n"
+    "2. RETIE vigente (Resolucion 40117 de 2024, modificada por la "
+    "Resolucion 40284 de 2026 -- ver DATOS CLAVE MEMORIZADOS mas abajo).\n"
     "3. Resoluciones CREG vigentes.\n"
     "4. Codigo de Medida.\n"
     "5. Normas tecnicas NTC / IEC.\n"
@@ -371,6 +372,39 @@ PROMPT_SISTEMA_RETIE = (
     "existente (ver PRECISION EN LA RESPUESTA arriba) y aclara la diferencia "
     "NT1/NT2 vs. tipo de medida.\n"
     "\n"
+    "ACTIVOS NT1 DE PROPIEDAD DEL USUARIO/COPROPIEDAD (CREG 015/2018, mismo "
+    "articulado de NT1 -- verificado sept/2026, prensajuridica.com citando "
+    "gestornormativo.creg.gov.co):\n"
+    "  Cuando el transformador y/o la red secundaria (activos NT1) que "
+    "alimentan el punto son propiedad del usuario o de la copropiedad/conjunto "
+    "residencial (no del operador de red), el comercializador aplica un "
+    "descuento en el cargo por uso: 50% si es dueno de UNO de los dos activos "
+    "(transformador O red secundaria), 100% si es dueno de AMBOS. El "
+    "descuento aplica desde el mes siguiente a que el operador de red reciba "
+    "la informacion de propiedad del activo.\n"
+    "  Reposicion en falla de activos NT1: el propietario (usuario/"
+    "copropiedad) tiene maximo 2 dias habiles desde la falla para informar al "
+    "operador de red si el mismo repondra el activo; si no lo hace o decide "
+    "no reponerlo, el operador de red lo repone dentro de 72 horas.\n"
+    "  Esto es informacion util para trafos COMPARTIDOS de edificios/conjuntos "
+    "(ver regla de negocio trafo_uso mas abajo) cuando el usuario pregunta "
+    "quien paga o mantiene el transformador de su copropiedad.\n"
+    "\n"
+    "FALLA EN EL SISTEMA DE MEDICION -- \"FRONTERA EN FALLA\" (CREG 038/2014, "
+    "Art. 10 y Art. 35 -- verificado sept/2026 contra gestornormativo.creg.gov.co):\n"
+    "  Si una calibracion o verificacion demuestra que el medidor, TC o TP ya "
+    "no mantiene su clase de exactitud/indice de clase declarado, la frontera "
+    "comercial se considera EN FALLA (Art. 10) y se aplica el procedimiento de "
+    "reliquidacion del Art. 35 (estimacion del consumo/ajuste retroactivo, en "
+    "vez de usar el dato del equipo defectuoso). Es la respuesta correcta a "
+    "'¿que pasa si el medidor esta mal calibrado o se dana?'.\n"
+    "  Propiedad y mantenimiento del equipo de medida (CREG 038/2014, Art. 5 "
+    "y Art. 28): hay libertad para adquirir el medidor en el mercado (no "
+    "necesariamente al operador de red), siempre que cumpla las "
+    "caracteristicas tecnicas exigidas; los costos de mantenimiento los "
+    "asume el representante de la frontera y el usuario (excepto fronteras de "
+    "comercializacion, que se rigen por el contrato entre las partes).\n"
+    "\n"
     "EXACTITUD DE EQUIPOS (CREG 038/2014, Tabla 2):\n"
     "  Tipo 1:    medidor 0,2S | TC 0,2S | TP 0,2\n"
     "  Tipo 2-3:  medidor 0,5S | TC 0,5S | TP 0,5\n"
@@ -505,6 +539,28 @@ PROMPT_SISTEMA_RETIE = (
     "\n"
     "=== DATOS ADICIONALES MEMORIZADOS ===\n"
     "\n"
+    "RESOLUCION 40284 DE 2026 (MinMinas) — MODIFICA EL RETIE (verificado "
+    "sept/2026, gestornormativo.creg.gov.co): vigente desde su publicacion en "
+    "el Diario Oficial No. 53539, 1 de julio de 2026. No reemplaza la "
+    "Resolucion 40117/2024 -- la MODIFICA (RETIE sigue siendo la 40117/2024, "
+    "con estos ajustes). Cambios relevantes para este bot:\n"
+    "  - TECNICOS ELECTRICISTAS: se amplia su alcance para elaborar esquemas "
+    "constructivos de instalaciones basicas de HASTA 4 CUENTAS de energia "
+    "(antes 1 sola) -- aplica a vivienda uni/bifamiliar o pequeno comercio, "
+    "maximo 15 kVA y 240 V, EXCLUYE edificios multifamiliares (esos siguen "
+    "requiriendo diseno de ingeniero electricista).\n"
+    "  - AUTOGENERACION A PEQUENA ESCALA (AGPE) < 10 kVA conectada a red: "
+    "queda EXENTA de certificacion plena RETIE, pero sigue debiendo cumplir "
+    "los requisitos tecnicos del reglamento y la responsabilidad de quien la "
+    "construye no cambia -- 'exento de certificacion' no es 'exento de "
+    "cumplir la norma'.\n"
+    "  - Ajustes de redaccion/definiciones en Libros 1-4 y en los procesos de "
+    "evaluacion de conformidad (ensayos, clasificaciones); los Organismos "
+    "Evaluadores de Conformidad (OEC) tienen 12 meses para actualizar su "
+    "alcance de acreditacion ante ONAC.\n"
+    "  - Transitorio: instalaciones cuyo proceso ya habia iniciado antes de "
+    "esta resolucion pueden certificarse bajo la version anterior del RETIE.\n"
+    "\n"
     "RESOLUCION 4272/2021 — TRABAJO EN ALTURAS (Ministerio de Trabajo):\n"
     "  Reemplaza la Res. 1409/2012. Aplica a todo trabajo >= 1,5 m sobre el piso.\n"
     "  CARRO CANASTA (PEMP — Plataforma Elevadora Movil de Personal):\n"
@@ -564,7 +620,11 @@ PROMPT_SISTEMA_RETIE = (
     "  Calculo banco condensadores:\n"
     "    kVAR = P_kW x (tan(phi1) - tan(phi2))\n"
     "    Ejemplo: 100 kW, FP 0,75 a FP 0,95: kVAR = 100 x (0,882 - 0,329) = 55,3 kVAR\n"
-    "  FP capacitivo (exceso de condensadores): puede causar sobretension, tambien penalizado.\n"
+    "  FP capacitivo (exceso de condensadores) -- limite varia por nivel de "
+    "tension (verificado sept/2026, gestion del flujo de potencia reactiva): "
+    "cos(phi) capacitivo >= 0,90 en Niveles I y II, >= 0,95 en Nivel III, "
+    ">= 0,98 en Nivel IV. Superarlo (exceso de generacion de reactivos hacia "
+    "la red) tambien se penaliza, ademas del riesgo de sobretension.\n"
     "\n"
     "ARMONICOS Y CALIDAD DE ONDA:\n"
     "  THD maximo de tension (IEEE 519 / IEC 61000-3-6):\n"
@@ -649,7 +709,9 @@ PROMPT_DIAGRAMA = (
     "- PROTECCION (pregunta siempre): ¿Tiene interruptor/proteccion en la acometida?\n"
     "  Si/No. ¿De cuantos amperios? ¿Va ANTES del medidor, DESPUES, o en AMBOS lados?\n"
     "  Referencia: directa -> tipicamente ANTES. Semi/indirecta -> tipicamente DESPUES.\n"
-    "- Seccionador de medida: antes o despues del bloque de pruebas.\n"
+    "- Seccionador (SOLO si instalacion=trafo, es el de MT junto al "
+    "transformador -- no preguntes esto si no hay trafo): antes (lado de "
+    "red/MT) o despues (lado de carga/BT, tras el trafo y la medida).\n"
     "- Conductor: calibre acometida (ej. 1/0, 2/0, AWG 4). Si no sabe, omitir.\n"
     "- Medidor de respaldo: si/no.\n"
     "\n"
@@ -687,7 +749,7 @@ PROMPT_DIAGRAMA = (
     '  "n_trafos": 1,\n'
     '  "trafo_kva": "225",\n'
     '  "trafo_tipo": "trifasico",\n'
-    '  "interruptor": "400 A",\n'
+    '  "proteccion_despues": "400 A",\n'
     '  "seccionador": "despues",\n'
     '  "rel_tc": "200/5",\n'
     '  "calibre_conductor": "AWG 2/0",\n'
@@ -709,10 +771,12 @@ PROMPT_DIAGRAMA = (
     "trafo_kva: string ej '225'\n"
     "trafo_kva_list: lista ej ['225','112'] si hay varios trafos\n"
     'trafo_tipo: "monofasico" | "bifasico" | "trifasico"\n'
-    "interruptor: string ej '400 A' (campo legacy — usar proteccion_antes/despues)\n"
-    "proteccion_antes: string ej '200 A' o \"\" (proteccion ANTES del medidor)\n"
+    "proteccion_antes: string ej '200 A' o \"\" (proteccion ANTES del medidor; "
+    "NUNCA uses el campo 'interruptor' -- es legacy y queda ambiguo)\n"
     "proteccion_despues: string ej '100 A' o \"\" (proteccion DESPUES del medidor)\n"
-    'seccionador: "antes" | "despues" | ""\n'
+    'seccionador: "antes" | "despues" | "" (SOLO tiene efecto si '
+    'instalacion="trafo" -- es el seccionador de MT junto al transformador; '
+    "si instalacion es \"barraje\" o \"\", no preguntes esto, se ignora)\n"
     "rel_tc: string ej '200/5'\n"
     "rel_tp: string ej '13200/120'\n"
     "calibre_conductor: string ej 'AWG 2/0'\n"
@@ -857,6 +921,21 @@ def _verificar_coherencia(cfg):
                 "No especificaste si el transformador es EXCLUSIVO o COMPARTIDO "
                 "con otros usuarios: el diagrama asume EXCLUSIVO."
             )
+        elif cfg.get("trafo_uso") == "compartido" and tipo == "indirecta" and int(cfg.get("n_trafos", 1)) >= 2:
+            # Subestacion multi-celda (N transformadores independientes, cada
+            # uno con su propia carga) es por definicion un punto EXCLUSIVO de
+            # este usuario -- no tiene sentido combinarlo con "compartido"
+            # (barraje BT derivando a otros usuarios con sus propios medidores
+            # directos). Sin este ajuste, el dibujo salta el bloque de
+            # barraje/gabinete compartido pero deja la anotacion "ESTE MEDIDOR"
+            # (pensada para distinguir el medidor propio entre varios)
+            # apuntando al punto de medida MT de la subestacion, donde no hay
+            # ambiguedad que aclarar.
+            cfg["trafo_uso"] = "exclusivo"
+            notas_usuario.append(
+                "Con varios transformadores independientes (subestacion), el "
+                "punto se trata como EXCLUSIVO aunque hayas indicado compartido."
+            )
         elif cfg.get("trafo_uso") == "compartido":
             if tipo == "indirecta":
                 log.warning("[coherencia] trafo compartido + tipo indirecta (combinacion inusual)")
@@ -866,6 +945,28 @@ def _verificar_coherencia(cfg):
                     "No especificaste si el punto compartido está en gabinete "
                     "cerrado o red abierta: el diagrama asume RED ABIERTA (sin encerrar)."
                 )
+
+    # El menu de botones guarda la posicion de la proteccion en
+    # "proteccion_pos" (antes_tc/despues_tc/ambos_tc/despues_medidor) solo
+    # para el texto resumen -- diagram_engine.py nunca lee ese campo, solo
+    # "proteccion_antes"/"proteccion_despues" (los que si usa el dialogo IA).
+    # Sin esta traduccion, "Antes del TC" y "Ambos lados" quedaban dibujados
+    # igual que "Despues del TC" (unico caso realmente honrado por el
+    # fallback de compatibilidad con el campo legado "interruptor" en
+    # diagram_engine.py) -- un usuario que elegia explicitamente "antes"
+    # terminaba viendo la proteccion despues del medidor de todas formas.
+    pos = cfg.get("proteccion_pos", "")
+    if pos and not cfg.get("proteccion_antes") and not cfg.get("proteccion_despues"):
+        amp = cfg.get("interruptor") or (
+            f"{cfg['proteccion_amp']} A" if cfg.get("proteccion_amp") else "")
+        if amp:
+            if pos == "antes_tc":
+                cfg["proteccion_antes"] = amp
+            elif pos == "ambos_tc":
+                cfg["proteccion_antes"] = amp
+                cfg["proteccion_despues"] = amp
+            else:  # despues_tc, despues_medidor
+                cfg["proteccion_despues"] = amp
 
     return cfg, notas_usuario
 
@@ -1210,10 +1311,17 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
                 )
                 break
             except asyncio.TimeoutError:
-                # No reintentar: la misma consulta grande probablemente
-                # vuelva a tardar. Mejor fallar rapido con un mensaje claro
-                # que dejar al usuario sin ninguna respuesta ("se traba").
+                # Antes esto fallaba rapido a la primera (sin reintentar) con
+                # un mensaje que le echaba la culpa a la pregunta del usuario
+                # ("intenta con una pregunta mas corta"). Con thinking
+                # desactivado (GEMINI_THINKING_CONFIG) un timeout ya es mas
+                # raro y normalmente es una lentitud puntual del servicio, no
+                # la consulta en si -- vale la pena reintentar antes de
+                # rendirse. Igual que el reintento por 503/sobrecarga de abajo.
                 last_err = TimeoutError(f"Gemini no respondio en {GEMINI_TIMEOUT_S}s")
+                if intento < 2:
+                    log.warning(f"Timeout en consulta (intento {intento+1}/3), reintentando...")
+                    continue
                 break
             except Exception as e:
                 last_err = e
@@ -1311,8 +1419,8 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
         msg = str(e)
         if isinstance(e, TimeoutError) or "no respondio" in msg.lower():
             await update.message.reply_text(
-                "⏳ La consulta tardó demasiado y la corté para no dejarte sin "
-                "respuesta.\n\nIntenta con una pregunta más corta y específica."
+                "⏳ El servicio normativo tardó más de lo esperado, incluso tras "
+                "reintentar. Intenta de nuevo en un momento."
             )
         elif "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
             await update.message.reply_text(
@@ -1377,7 +1485,13 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
             )
             break
         except asyncio.TimeoutError:
+            # Igual que en _consulta_retie: con thinking desactivado un
+            # timeout ya es la excepcion, no la regla -- reintentar en vez de
+            # rendirse a la primera evita dejar al usuario con un mensaje de
+            # error por una lentitud puntual del servicio.
             last_err = TimeoutError(f"Gemini no respondio en {GEMINI_TIMEOUT_S}s")
+            if intento < 2:
+                continue
             break
         except Exception as e:
             last_err = e
@@ -1535,15 +1649,14 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # Activo (o sin_sheets en modo degradado)
+    ctx.user_data.clear()
+    ctx.user_data["cfg"] = dict(DEFAULT)
+    ctx.user_data["paso_n"] = 1
     await update.message.reply_text(
-        f"⚡ Bienvenido, {nombre}!\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "¿En qué te ayudo hoy?\n\n"
-        "  📐 /menu       Configurar un diagrama\n"
-        "  💬 Escríbeme  Consulta normativa\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"⚡ Bienvenido, {nombre}!",
         reply_markup=REPLY_KEYBOARD
     )
+    await update.message.reply_text(_MENU_TXT, reply_markup=_MENU_KB)
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(AYUDA, reply_markup=REPLY_KEYBOARD)
