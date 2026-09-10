@@ -355,6 +355,54 @@ python test_e2e.py
 python diagram_engine.py
 ```
 
+## RAG (File Search) sobre el texto real de RETIE/CREG
+`bot.py` ya tiene el código para usarlo (`RETIE_STORE_NAME`, `types.FileSearch`
+en `_consulta_retie`), pero si esa variable de entorno no está configurada el
+bot responde SOLO con los "datos memorizados" del prompt (aproximaciones que
+hay que mantener a mano — ver el resto de este documento, es la fuente de
+varios de los bugs que se han corregido).
+
+**Importante — esto YA se habia hecho en una sesion anterior** (commits
+`9834dab`/`420014c`/`8528f2a`, mensaje "RAG con CREG y RETIE indexados,
+deploy Render 24/7"), antes del historial que se resume en este documento.
+El store `fileSearchStores/retie2024-r0u1h57kkhhz` (display name
+`retie-2024`) ya existe y ya tenia 11 documentos indexados (RETIE 2024
+Libros 1-4 completos + varias resoluciones CREG, algunas con el display
+name mal escrito -- ej. "Creg015-2014" y "Creg038-2018" que en realidad
+parecen ser 015/2018 y 038/2014 intercambiados, revisar si se retoca este
+tema) -- y `RETIE_STORE_NAME` con ese valor ya estaba exportado en
+`~/.zshrc` de la maquina de desarrollo. Es MUY probable que Render ya tenga
+esa misma variable configurada desde ese despliegue anterior. Antes de decirle
+al usuario "vamos a activar el RAG desde cero", verifica primero si ya esta
+activo (probar una consulta especifica en el bot real y ver si cita
+pagina/articulo con precision, o listar los documentos del store con
+`client.file_search_stores.documents.list(parent=store_name)`).
+
+El script viejo que existia en `setup_retie_store.py` (antes de esta sesion)
+creaba un **Context Cache** (`client.caches.create`, variable
+`RETIE_CACHE_NAME`) -- un mecanismo DISTINTO y ya no usado: `bot.py` nunca
+lee `RETIE_CACHE_NAME` en ningun lado, asi que ese script estaba
+completamente desconectado del bot real (probablemente un intento anterior
+al que finalmente se uso: File Search Store). Se reemplazo por una version
+que usa `client.file_search_stores` (consistente con lo que `bot.py` si lee),
+y que reutiliza el store existente si `RETIE_STORE_NAME` ya esta en el
+entorno en vez de crear uno nuevo:
+```
+export GEMINI_API_KEY="..."
+python3 setup_retie_store.py normativa/*.pdf
+# imprime RETIE_STORE_NAME=fileSearchStores/xxxxx -- eso va en Render
+```
+El script mismo documenta (en su docstring) los links oficiales de descarga
+de RETIE 2024 compilado (con la modificación de 2026 ya incorporada) y CREG
+038/2014 y 015/2018 -- pero antes de subir estos de nuevo, revisa primero
+qué ya hay en el store (ver arriba) para no duplicar contenido que ya estaba
+indexado. Para agregar un documento nuevo (ej. una resolución CREG que salga
+más adelante), exporta `RETIE_STORE_NAME` con el valor ya existente y vuelve
+a correr el script solo con el archivo nuevo — no borra lo que ya había
+indexado. Almacenamiento es gratis en la API de Gemini; solo se cobra la
+indexación (embeddings, una vez por documento) y los tokens de contexto
+recuperados en cada consulta (como tokens normales de entrada).
+
 ## Reglas de trabajo para el agente
 - **"Energiza" cada diagrama antes de darlo por bueno — SIEMPRE, no solo la
   primera vez.** No basta con que `draw_conexiones_retie` /
