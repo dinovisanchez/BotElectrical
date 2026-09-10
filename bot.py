@@ -134,6 +134,72 @@ def _gs_get_all_users():
         log.error(f"Error _gs_get_all_users: {e}")
         return []
 
+# ── Plantillas guardadas (/guardar, /plantillas, /cargar) ────────────────────
+# Se guardan en una hoja SEPARADA ("Plantillas") del mismo spreadsheet de
+# usuarios -- no en ctx.user_data, porque eso se pierde en cada reinicio del
+# bot (Render reinicia seguido en el plan free). Se crea sola la primera vez
+# que se use /guardar, no hay que crearla a mano.
+_PLANTILLAS_SHEET = "Plantillas"
+
+def _gs_get_plantillas_sheet(client):
+    spreadsheet = client.open_by_key(SHEET_ID)
+    try:
+        return spreadsheet.worksheet(_PLANTILLAS_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = spreadsheet.add_worksheet(title=_PLANTILLAS_SHEET, rows=1000, cols=4)
+        sheet.append_row(["Telegram_ID", "Nombre", "Cfg_JSON", "Fecha"])
+        return sheet
+
+def _gs_guardar_plantilla(uid: str, nombre: str, cfg: dict) -> bool:
+    """Sync: guarda (o sobrescribe si ya existe una con el mismo nombre para
+    este usuario) una plantilla. Devuelve True si se guardo."""
+    client = _gs_get_client()
+    if client is None:
+        return False
+    try:
+        sheet = _gs_get_plantillas_sheet(client)
+        rows = sheet.get_all_values()  # incluye la fila de encabezado
+        cfg_json = json.dumps(cfg, ensure_ascii=False)
+        fecha = time.strftime("%Y-%m-%d %H:%M")
+        for i, row in enumerate(rows[1:], start=2):  # 1-based; fila 1 = encabezado
+            if len(row) >= 2 and row[0] == str(uid) and row[1] == nombre:
+                sheet.update_cell(i, 3, cfg_json)
+                sheet.update_cell(i, 4, fecha)
+                return True
+        sheet.append_row([str(uid), nombre, cfg_json, fecha])
+        return True
+    except Exception as e:
+        log.error(f"Error _gs_guardar_plantilla: {e}")
+        return False
+
+def _gs_listar_plantillas(uid: str) -> list:
+    """Sync: nombres de las plantillas guardadas por este usuario."""
+    client = _gs_get_client()
+    if client is None:
+        return []
+    try:
+        sheet = _gs_get_plantillas_sheet(client)
+        rows = sheet.get_all_values()
+        return [row[1] for row in rows[1:] if len(row) >= 2 and row[0] == str(uid)]
+    except Exception as e:
+        log.error(f"Error _gs_listar_plantillas: {e}")
+        return []
+
+def _gs_cargar_plantilla(uid: str, nombre: str):
+    """Sync: devuelve el cfg (dict) de una plantilla, o None si no existe."""
+    client = _gs_get_client()
+    if client is None:
+        return None
+    try:
+        sheet = _gs_get_plantillas_sheet(client)
+        rows = sheet.get_all_values()
+        for row in rows[1:]:
+            if len(row) >= 3 and row[0] == str(uid) and row[1] == nombre:
+                return json.loads(row[2])
+    except Exception as e:
+        log.error(f"Error _gs_cargar_plantilla: {e}")
+    return None
+
 async def _check_user(user, force: bool = False) -> tuple:
     """Async wrapper con caché. Devuelve (estado, nombre, es_nuevo)."""
     uid = str(user.id)
@@ -994,7 +1060,7 @@ def _generar(cfg):
         out.append(("Diagrama Unifilar", t.name))
     return out, notas, cfg
 
-async def _enviar_foto(mensaje, cfg):
+async def _enviar_foto(mensaje, cfg, ctx=None):
     await mensaje.reply_chat_action("upload_photo")
     imgs, notas, cfg = _generar(cfg)
     extra = ("\n\n⚠️ " + " ".join(notas)) if notas else ""
@@ -1003,6 +1069,10 @@ async def _enviar_foto(mensaje, cfg):
             await mensaje.reply_photo(photo=f, caption=_caption(tipo_diagrama, cfg) + extra)
         try: os.remove(path)
         except OSError: pass
+    # Guarda el cfg (ya corregido por _verificar_coherencia) para /ultimo y
+    # /guardar -- solo si se paso ctx (algunos call sites viejos no lo tenian).
+    if ctx is not None:
+        ctx.user_data["ultimo_cfg"] = dict(cfg)
 
 # ── Prompt validación de conexiones (Gemini Vision) ──────────────────────────
 PROMPT_VALIDACION_CX = (
@@ -1219,11 +1289,12 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
 # ── Modulo experto RETIE ─────────────────────────────────────────────────────
 TELEGRAM_MAX_LEN = 4000
 
-async def _enviar_largo(update: Update, texto: str):
-    """Envía texto en varios mensajes si excede el límite de Telegram."""
+async def _enviar_largo(update: Update, texto: str, reply_markup=None):
+    """Envía texto en varios mensajes si excede el límite de Telegram.
+    reply_markup (si se pasa) va SOLO en el último mensaje enviado."""
     texto = texto.strip()
     if len(texto) <= TELEGRAM_MAX_LEN:
-        await update.message.reply_text(texto)
+        await update.message.reply_text(texto, reply_markup=reply_markup)
         return
 
     partes = []
@@ -1243,7 +1314,11 @@ async def _enviar_largo(update: Update, texto: str):
 
     for i, parte in enumerate(partes, 1):
         prefijo = f"({i}/{len(partes)})\n" if len(partes) > 1 else ""
-        await update.message.reply_text(prefijo + parte)
+        es_ultima = (i == len(partes))
+        await update.message.reply_text(
+            prefijo + parte,
+            reply_markup=reply_markup if es_ultima else None
+        )
 
 
 RETIE_HISTORIAL_MAX = 4  # ventana deslizante: ~2 intercambios usuario/modelo
@@ -1412,7 +1487,11 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
                 "\n\n⚠️ [Respuesta basada en conocimiento memorizados — verificar con norma oficial.]"
             )
 
-        await _enviar_largo(update, respuesta)
+        kb_seguir = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔁 Seguir esta consulta", callback_data="consulta:seguir"),
+            InlineKeyboardButton("🆕 Nueva consulta",       callback_data="consulta:nueva"),
+        ]])
+        await _enviar_largo(update, respuesta, reply_markup=kb_seguir)
 
     except Exception as e:
         log.error(f"Error Gemini [{type(e).__name__}]: {e}")
@@ -1549,7 +1628,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 # _verificar_coherencia() (dentro de _enviar_foto) asume
                 # trafo_uso="exclusivo" y lo avisa si la IA no lo pregunto.
                 try:
-                    await _enviar_foto(update.message, cfg)
+                    await _enviar_foto(update.message, cfg, ctx)
                 except Exception as e:
                     log.error(f"Error diagrama (dialogo IA): {e}")
                     await update.message.reply_text(
@@ -1597,7 +1676,7 @@ async def _procesar_texto(update, ctx, texto):
                 + "\n".join(f"  - {f}" for f in faltante)
             )
         try:
-            await _enviar_foto(update.effective_message, cfg)
+            await _enviar_foto(update.effective_message, cfg, ctx)
         except Exception as e:
             log.error(f"Error diagrama: {e}")
             await update.effective_message.reply_text(
@@ -1670,6 +1749,95 @@ async def cmd_cancelar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "✓ Listo, reiniciado.\n\nUsa /menu cuando quieras empezar.",
         reply_markup=REPLY_KEYBOARD
     )
+
+async def cmd_ultimo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Recupera el ultimo diagrama generado en esta sesion (cfg ya corregido
+    por _verificar_coherencia) y lo deja en la pantalla de confirmacion --
+    se puede volver a generar tal cual, o tocar "Editar" para cambiar un
+    solo dato (ej. "el mismo pero con 300 kVA") sin repetir todo el flujo."""
+    if not await _access_ok(update, ctx): return
+    cfg = ctx.user_data.get("ultimo_cfg")
+    if not cfg:
+        await update.message.reply_text(
+            "⚠️ No tengo un diagrama generado en esta sesión.\n\nUsa /menu para crear uno nuevo."
+        )
+        return
+    ctx.user_data["cfg"] = dict(cfg)
+    ctx.user_data["paso_n"] = 1
+    await _paso_confirmar(update.message, ctx.user_data["cfg"], edit=False)
+
+# ── Plantillas guardadas (persisten entre reinicios via Google Sheets) ──────
+async def cmd_guardar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
+    nombre = " ".join(ctx.args).strip() if ctx.args else ""
+    if not nombre:
+        await update.message.reply_text(
+            "📌 Uso: /guardar nombre_de_la_plantilla\n\n"
+            "Guarda el ÚLTIMO diagrama generado con ese nombre, para "
+            "reutilizarlo después con /plantillas o /cargar."
+        )
+        return
+    cfg = ctx.user_data.get("ultimo_cfg")
+    if not cfg:
+        await update.message.reply_text(
+            "⚠️ No tengo un diagrama generado en esta sesión para guardar.\n\n"
+            "Genera uno primero con /menu o texto libre."
+        )
+        return
+    uid = str(update.effective_user.id)
+    loop = asyncio.get_event_loop()
+    ok = await loop.run_in_executor(None, lambda: _gs_guardar_plantilla(uid, nombre, cfg))
+    if ok:
+        await update.message.reply_text(
+            f"💾 Guardado como \"{nombre}\".\n\nRecupéralo después con /cargar {nombre}"
+        )
+    else:
+        await update.message.reply_text(
+            "⚠️ No pude guardar la plantilla (Google Sheets no está "
+            "configurado, o hubo un error de conexión)."
+        )
+
+async def cmd_plantillas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
+    uid = str(update.effective_user.id)
+    loop = asyncio.get_event_loop()
+    nombres = await loop.run_in_executor(None, lambda: _gs_listar_plantillas(uid))
+    if not nombres:
+        await update.message.reply_text(
+            "📌 No tienes plantillas guardadas todavía.\n\n"
+            "Genera un diagrama y usa /guardar nombre para guardarlo."
+        )
+        return
+    kb = [[InlineKeyboardButton(f"📄 {n}", callback_data=f"plantilla:{n}")] for n in nombres]
+    await update.message.reply_text(
+        "📌 Tus plantillas guardadas:",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def _cargar_plantilla_y_confirmar(target, ctx, uid, nombre, edit=False):
+    loop = asyncio.get_event_loop()
+    cfg = await loop.run_in_executor(None, lambda: _gs_cargar_plantilla(uid, nombre))
+    if not cfg:
+        texto = f"⚠️ No encontré la plantilla \"{nombre}\"."
+        if edit:
+            await target.edit_message_text(texto)
+        else:
+            await target.reply_text(texto)
+        return
+    ctx.user_data["cfg"] = cfg
+    ctx.user_data["paso_n"] = 1
+    await _paso_confirmar(target, cfg, edit=edit)
+
+async def cmd_cargar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _access_ok(update, ctx): return
+    nombre = " ".join(ctx.args).strip() if ctx.args else ""
+    if not nombre:
+        await update.message.reply_text(
+            "📌 Uso: /cargar nombre_de_la_plantilla\n\nVer tus plantillas con /plantillas"
+        )
+        return
+    uid = str(update.effective_user.id)
+    await _cargar_plantilla_y_confirmar(update.message, ctx, uid, nombre, edit=False)
 
 async def cmd_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _access_ok(update, ctx): return
@@ -2369,21 +2537,161 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if val == "si":
             await q.edit_message_text("⏳ Generando diagrama…")
             try:
-                await _enviar_foto(q.message, cfg)
+                await _enviar_foto(q.message, cfg, ctx)
             except Exception as e:
                 log.error(f"Error diagrama: {e}")
                 await q.message.reply_text(
                     "⚠️ Error al generar el diagrama.\n"
                     "Usa /menu para volver a intentarlo."
                 )
+        elif val == "editar":
+            await _mostrar_menu_editar(q, cfg)
         else:
             ctx.user_data.clear()
             ctx.user_data["cfg"] = dict(DEFAULT)
             ctx.user_data["paso_n"] = 1
             await q.edit_message_text(_MENU_TXT, reply_markup=_MENU_KB)
 
+    # ── Edición puntual de un campo desde la pantalla de confirmación ────────
+    elif campo == "editcampo":
+        if val == "_volver":
+            await _paso_confirmar(q, cfg)
+            return
+        c = _campo_editable_por_key(cfg, val)
+        if c is None:
+            await _paso_confirmar(q, cfg)
+            return
+        if c["kind"] == "choice":
+            kb = _kb(c["options"], f"editval:{val}")
+            await q.edit_message_text(
+                f"✏️ {c['label']}:",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        else:  # "text"
+            ctx.user_data["editando_texto"] = val
+            await q.edit_message_text(c["prompt"])
+
+    elif campo == "editval":
+        # val llega como "campo_real:valor_elegido" (q.data.split(":",1) solo
+        # separo el primer ":", el de "editval:").
+        key, real_val = val.split(":", 1)
+        await _aplicar_valor_editado(q, ctx, cfg, key, real_val, edit=True)
+
+    # ── Botones "Seguir esta consulta" / "Nueva consulta" (RETIE/CREG) ───────
+    elif campo == "consulta":
+        # Quita los botones del mensaje ya respondido para que no se puedan
+        # volver a tocar (evita reiniciar el hilo dos veces por accidente).
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        if val == "nueva":
+            ctx.user_data["historial_retie"] = []
+            await q.message.reply_text(
+                "🆕 Listo, hilo anterior cerrado. Escribe tu nueva pregunta."
+            )
+        else:  # "seguir" -- el hilo ya sigue abierto, es solo una confirmacion
+            await q.message.reply_text(
+                "👍 Sigo con el mismo tema. Escribe tu siguiente pregunta."
+            )
+
+    # ── Cargar una plantilla guardada (botón de /plantillas) ─────────────────
+    elif campo == "plantilla":
+        uid = str(update.effective_user.id) if update.effective_user else ""
+        await _cargar_plantilla_y_confirmar(q, ctx, uid, val, edit=True)
+
+# ── Edición de un campo puntual desde la pantalla de confirmación ────────────
+def _campos_editables(cfg):
+    """Lista de campos que se pueden editar desde la pantalla de confirmación,
+    en el mismo orden y con las mismas condiciones de "cuando aplica" que
+    _paso_confirmar — solo se ofrece editar lo que el usuario realmente ve
+    ahí. Cada entrada: key (campo de cfg), label (texto del botón),
+    kind ("choice" con "options", o "text" con "prompt" + "validador")."""
+    inst = cfg.get("instalacion", "")
+    campos = [
+        dict(key="tipo", label="Tipo de medida", kind="choice", options=[
+            ("Directa", "directa"), ("Semidirecta", "semidirecta"), ("Indirecta", "indirecta")]),
+        dict(key="sistema", label="Sistema", kind="choice", options=[
+            ("Monofásica", "mono"), ("Bifásica", "bifasico"),
+            ("Aron (3H)", "tri3h"), ("3 Elementos (4H)", "tri4h")]),
+        dict(key="salida", label="Diagrama a generar", kind="choice", options=[
+            ("Conexiones", "conexiones"), ("Unifilar", "unifilar"), ("Ambos", "ambos")]),
+        dict(key="norma", label="Norma", kind="choice", options=[
+            ("CENS", "CENS"), ("RA8", "RA8")]),
+    ]
+    if cfg.get("conexion"):
+        campos.append(dict(key="conexion", label="Conexión (bornera)", kind="choice", options=[
+            ("Simétrica", "simetrica"), ("Asimétrica", "asimetrica")]))
+    if inst == "trafo":
+        campos.append(dict(key="trafo_kva", label="kVA del transformador", kind="text",
+                            prompt="¿Nueva capacidad del transformador? (kVA)\n\n  Escribe solo el número  ej: 150",
+                            validador="numero"))
+        campos.append(dict(key="trafo_uso", label="Uso del transformador", kind="choice", options=[
+            ("Exclusivo", "exclusivo"), ("Compartido", "compartido")]))
+    elif inst == "barraje":
+        campos.append(dict(key="tension_bt", label="Tensión del barraje", kind="text",
+                            prompt="¿Nueva tensión del barraje? (V)\n\n  Escribe solo el número  ej: 220",
+                            validador="numero"))
+    if cfg.get("tiene_proteccion"):
+        campos.append(dict(key="proteccion_amp", label="Amperios de protección", kind="text",
+                            prompt="¿Nuevos amperios de la protección?\n\n  Escribe solo el número  ej: 100",
+                            validador="numero"))
+        campos.append(dict(key="proteccion_pos", label="Posición de la protección", kind="choice", options=[
+            ("Antes del TC", "antes_tc"), ("Después del TC", "despues_tc"), ("Ambos lados", "ambos_tc")]))
+    if cfg.get("seccionador"):
+        campos.append(dict(key="seccionador", label="Seccionador", kind="choice", options=[
+            ("Antes", "antes"), ("Después", "despues")]))
+    if cfg.get("rel_tc"):
+        campos.append(dict(key="rel_tc", label="Relación TC", kind="text",
+                            prompt="¿Nueva relación de TC?\n\n  Formato primario/secundario  ej: 200/5",
+                            validador="relacion"))
+    if cfg.get("rel_tp"):
+        campos.append(dict(key="rel_tp", label="Relación TP", kind="text",
+                            prompt="¿Nueva relación de TP?\n\n  Formato primario/secundario  ej: 13200/120",
+                            validador="relacion"))
+    if cfg.get("calibre_conductor"):
+        campos.append(dict(key="calibre_conductor", label="Calibre del conductor", kind="text",
+                            prompt="¿Nuevo calibre?\n\n  ej: AWG 12  o  4 mm²",
+                            validador="calibre"))
+    campos.append(dict(key="respaldo", label="Respaldo", kind="choice", options=[
+        ("Solo principal", "no"), ("Principal + Respaldo", "si")]))
+    return campos
+
+
+def _campo_editable_por_key(cfg, key):
+    for c in _campos_editables(cfg):
+        if c["key"] == key:
+            return c
+    return None
+
+
+async def _mostrar_menu_editar(q, cfg):
+    campos = _campos_editables(cfg)
+    kb = [[InlineKeyboardButton(f"✏️ {c['label']}", callback_data=f"editcampo:{c['key']}")]
+          for c in campos]
+    kb.append([InlineKeyboardButton("↩ Volver", callback_data="editcampo:_volver")])
+    await q.edit_message_text(
+        "¿Qué campo quieres corregir?",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+
+async def _aplicar_valor_editado(target, ctx, cfg, key, val, edit=True):
+    """Aplica el nuevo valor de un campo y regresa a la pantalla de
+    confirmación (sin tocar paso_n ni el resto del flujo lineal)."""
+    if key == "respaldo":
+        cfg["respaldo"] = (val == "si")
+    elif key == "proteccion_amp":
+        cfg["proteccion_amp"] = val
+        cfg["interruptor"] = f"{val} A"
+    else:
+        cfg[key] = val
+    ctx.user_data["cfg"] = cfg
+    await _paso_confirmar(target, cfg, edit=edit)
+
+
 # ── Pantalla de confirmación ──────────────────────────────────────────────────
-async def _paso_confirmar(q, cfg):
+async def _paso_confirmar(q, cfg, edit=True):
     sis   = _SIS_SHORT.get(cfg.get("sistema","tri4h"), "Trifásica")
     tipo  = cfg.get("tipo","indirecta").capitalize()
     norma = cfg.get("norma","RA8")
@@ -2439,11 +2747,17 @@ async def _paso_confirmar(q, cfg):
     lines.append(f"  Configuración  {cfg_final}")
     lines += ["", "━━━━━━━━━━━━━━━━━━━━━━━━"]
 
-    kb = [[
-        InlineKeyboardButton("🚀  Generar",  callback_data="generar:si"),
-        InlineKeyboardButton("↩  Reiniciar", callback_data="generar:no"),
-    ]]
-    await q.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(kb))
+    kb = [
+        [InlineKeyboardButton("🚀  Generar",  callback_data="generar:si"),
+         InlineKeyboardButton("✏️  Editar",   callback_data="generar:editar")],
+        [InlineKeyboardButton("↩  Reiniciar", callback_data="generar:no")],
+    ]
+    texto = "\n".join(lines)
+    markup = InlineKeyboardMarkup(kb)
+    if edit:
+        await q.edit_message_text(texto, reply_markup=markup)
+    else:
+        await q.reply_text(texto, reply_markup=markup)
 
 # ── on_text: entradas de texto durante el flujo guiado ───────────────────────
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2451,6 +2765,27 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cfg = ctx.user_data.get("cfg", dict(DEFAULT))
     txt = update.message.text.strip()
     n   = ctx.user_data.get("paso_n", 1)
+
+    # ── Edición puntual de un campo de texto (desde confirmación) ─────────────
+    campo_editando = ctx.user_data.get("editando_texto")
+    if campo_editando:
+        c = _campo_editable_por_key(cfg, campo_editando)
+        if c is None:
+            ctx.user_data["editando_texto"] = None
+        else:
+            if c["validador"] == "numero":
+                val_str, err = _validar_numero(txt, c["label"])
+            elif c["validador"] == "relacion":
+                val_str, err = _validar_relacion(txt, c["label"])
+            else:  # "calibre" -- texto libre corto, sin formato estricto
+                val_str, err = (txt, None) if txt and len(txt) <= 30 else (
+                    None, "Escribe el calibre  ej: AWG 12  o  4 mm²")
+            if err:
+                await update.message.reply_text(f"⚠️ {err}")
+                return
+            ctx.user_data["editando_texto"] = None
+            await _aplicar_valor_editado(update.message, ctx, cfg, campo_editando, val_str, edit=False)
+            return
 
     # ── Modo diagrama IA ──────────────────────────────────────────────────────
     if ctx.user_data.get("modo_diagrama_ia"):
@@ -2856,6 +3191,10 @@ def main():
     app.add_handler(CommandHandler("diagrama",   cmd_diagrama))
     app.add_handler(CommandHandler("clasificar", cmd_clasificar))
     app.add_handler(CommandHandler("cancelar",   cmd_cancelar))
+    app.add_handler(CommandHandler("ultimo",     cmd_ultimo))
+    app.add_handler(CommandHandler("guardar",    cmd_guardar))
+    app.add_handler(CommandHandler("plantillas", cmd_plantillas))
+    app.add_handler(CommandHandler("cargar",     cmd_cargar))
     app.add_handler(CommandHandler("admin",      cmd_admin))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
