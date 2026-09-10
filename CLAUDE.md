@@ -403,6 +403,101 @@ indexado. Almacenamiento es gratis en la API de Gemini; solo se cobra la
 indexación (embeddings, una vez por documento) y los tokens de contexto
 recuperados en cada consulta (como tokens normales de entrada).
 
+## `/ultimo` y plantillas guardadas (`/guardar`, `/plantillas`, `/cargar`)
+`_enviar_foto(mensaje, cfg, ctx=None)` ahora guarda el cfg YA CORREGIDO por
+`_verificar_coherencia` en `ctx.user_data["ultimo_cfg"]` cada vez que se
+genera un diagrama exitosamente (los 3 call sites -- dialogo IA, texto libre,
+menu de botones -- ya pasan `ctx`). `/ultimo` carga ese cfg en la pantalla de
+confirmacion (reusa `_paso_confirmar(target, cfg, edit=False)`, el mismo
+mecanismo dual edit/reply que ya se agrego para "Editar") -- se puede
+regenerar tal cual o tocar "Editar" para cambiar un dato antes ("el mismo
+pero con 300 kVA") sin repetir todo el flujo del menu.
+
+Las plantillas (`/guardar nombre`, `/plantillas`, `/cargar nombre`) son
+DISTINTAS de `ultimo_cfg`: se guardan en una hoja nueva ("Plantillas") del
+MISMO Google Sheet que ya se usa para gestion de usuarios (`SHEET_ID`), NO en
+`ctx.user_data` -- esto es deliberado: `ctx.user_data` se pierde en cada
+reinicio del bot (Render reinicia seguido en el plan free), asi que guardar
+plantillas solo en memoria las haria inutiles en la practica. La hoja
+"Plantillas" (columnas `Telegram_ID, Nombre, Cfg_JSON, Fecha`) se crea sola
+la primera vez que alguien usa `/guardar` (`_gs_get_plantillas_sheet` hace
+`worksheet()` y si no existe la crea con `add_worksheet()` + fila de
+encabezado) -- no hay que crearla a mano. `_gs_guardar_plantilla` sobrescribe
+si ya existe una plantilla con el mismo nombre PARA ESE usuario (busca por
+`Telegram_ID` + `Nombre` antes de decidir `update_cell` vs `append_row`), en
+vez de duplicar filas. El cfg se guarda serializado como JSON en una sola
+celda (columna C) -- si agregas un campo nuevo al cfg, no hace falta tocar
+el esquema de esta hoja, json.dumps/loads ya lo cubre automaticamente.
+
+Todas estas funciones (`_gs_guardar_plantilla`, `_gs_listar_plantillas`,
+`_gs_cargar_plantilla`) siguen el MISMO patron de degradacion que
+`_gs_sync`/`_gs_set_estado`: si `_gs_get_client()` devuelve `None` (Sheets no
+configurado), devuelven `False`/`[]`/`None` en vez de lanzar excepcion, y los
+comandos (`cmd_guardar`/`cmd_plantillas`/`cmd_cargar`) le avisan al usuario
+que la funcionalidad no esta disponible en vez de fallar en silencio. Son
+funciones SINCRONAS (igual que el resto de las `_gs_*`) -- llamarlas siempre
+via `loop.run_in_executor(None, lambda: ...)` desde el handler async, nunca
+directo con `await`.
+
+Verificado con un cliente de gspread simulado (sin credenciales reales):
+guardar -> listar -> cargar (bajo nivel), sobrescribir con el mismo nombre
+sin duplicar fila, aislamiento entre usuarios distintos, y los 4 comandos
+mas el boton de `/plantillas` de punta a punta.
+
+**Pendiente si el usuario lo pide**: comando para borrar una plantilla
+guardada (`/borrar nombre` o similar) -- no se implemento en esta pasada
+porque no se pidio explicitamente y `_gs_guardar_plantilla` ya permite
+"reemplazar" guardando de nuevo con el mismo nombre, que cubre el caso mas
+comun (actualizar una plantilla vieja).
+
+## Botones "Seguir esta consulta" / "Nueva consulta"
+Antes, si el usuario preguntaba algo nuevo sin usar palabras clave de
+diagrama, `_procesar_texto` asumía automáticamente que era continuación de
+la misma consulta normativa y arrastraba `historial_retie` completo —
+funciona bien para seguimientos reales, pero si el usuario cambiaba de tema
+sin querer (ej. de distancias de seguridad a EPP en alturas) el hilo viejo
+se colaba como contexto. `_consulta_retie` ahora agrega, al final de CADA
+respuesta (incluida la última parte si `_enviar_largo` la partió en varios
+mensajes por el límite de Telegram — por eso `_enviar_largo` ahora acepta
+`reply_markup` y solo lo pone en el ÚLTIMO mensaje), dos botones: "🔁 Seguir
+esta consulta" (no cambia nada, es solo confirmación explícita) y "🆕 Nueva
+consulta" (limpia `historial_retie`). El comportamiento POR DEFECTO no
+cambió — si el usuario ignora los botones y sigue escribiendo, el hilo
+continúa igual que antes (clasificación automática por palabras clave de
+diagrama); los botones son una salida explícita para cuando el usuario
+quiere cortar el hilo sin usar `/cancelar` (que también borra todo lo demás)
+ni depender de que el texto nuevo tenga o no palabras de diagrama. Al tocar
+cualquiera de los dos botones se le quitan del mensaje (via
+`edit_message_reply_markup(reply_markup=None)`) para que no se puedan volver
+a pulsar por accidente y reabrir/cerrar el hilo dos veces.
+
+## Edición puntual de un campo (pantalla de confirmación del menú)
+Antes, la pantalla de confirmación (`_paso_confirmar`) solo tenía "Generar" y
+"Reiniciar" — si un solo dato estaba mal, había que rehacer todo el flujo
+desde `/menu`. Ahora tiene un tercer botón "✏️ Editar" que lleva a un
+submenú con los campos actualmente visibles en el resumen (`_campos_editables(cfg)`
+define esa lista y las condiciones de "cuando aplica", en el MISMO orden y
+con las MISMAS condiciones que `_paso_confirmar` — si agregas una línea nueva
+al resumen, agrega también su entrada aquí o quedará invisible para editar).
+Cada campo es "choice" (usa el mismo teclado de opciones que la pregunta
+original, callback `editval:<campo>:<valor>`) o "text" (pide el valor por
+texto, usando los mismos validadores `_validar_numero`/`_validar_relacion`
+que el resto del flujo). Al aplicar el valor (`_aplicar_valor_editado`) NO
+se toca `paso_n` ni ningún flag del flujo lineal normal — es un sub-flujo
+aislado que siempre termina regresando a `_paso_confirmar`. Casos especiales
+manejados ahí: `respaldo` se convierte a bool (`val == "si"`), y
+`proteccion_amp` también actualiza el campo legado `interruptor` (para que
+seccionador/protección sigan coherentes con lo que lee `diagram_engine.py`,
+ver la sección de arriba sobre `proteccion_pos`). Si agregas un campo nuevo
+al cfg que tenga esta misma dualidad de "campo real vs. campo legado
+espejo", replica ese mismo patrón en `_aplicar_valor_editado`.
+Verificado con simulación directa de `on_button`/`on_text` (sin Telegram
+real): edición de campo tipo "choice" (tipo de medida), campo tipo "text"
+con validación (relación TC, incluyendo el caso de texto inválido que debe
+mantener el sub-flujo activo en vez de perderlo), botón "Volver" sin
+seleccionar nada, y los dos casos especiales (`proteccion_amp`↔`interruptor`,
+`respaldo` bool) — en todos los casos `paso_n` quedó intacto.
+
 ## Reglas de trabajo para el agente
 - **"Energiza" cada diagrama antes de darlo por bueno — SIEMPRE, no solo la
   primera vez.** No basta con que `draw_conexiones_retie` /
