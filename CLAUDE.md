@@ -248,6 +248,67 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
   si no se especificó `trafo_gabinete`), y avisa al usuario en el caption de
   la imagen que se hizo esa suposición.
 
+## Migracion hibrida Gemini/Claude (Anthropic)
+El usuario decidio migrar de Gemini a Claude, pero **solo parcialmente**:
+`_consulta_retie` (consultas normativas RETIE/CREG) **se quedo en Gemini** a
+proposito, porque el RAG (File Search Store, ver seccion "RAG" mas abajo) no
+tiene equivalente directo en la API de Claude -- Anthropic no ofrece un
+servicio de indexacion/busqueda gestionado como el de Gemini. Migrar tambien
+esa funcion habria significado perder de un plumazo la precision normativa
+que costo activar (RETIE completo + CREG indexados). Con el corpus actual
+(~70 MB en 14 documentos) tampoco es viable meterlo directo en el contexto
+de Claude de una sola vez.
+
+`_dialogo_diagrama` (dialogo guiado para armar un diagrama) y
+`_analizar_foto_cx` (analisis de fotos de conexiones) **si se migraron a
+Claude** -- ninguna de las dos depende del RAG, solo del prompt del sistema
+(+ vision en el caso de fotos), que Claude cubre igual de bien.
+
+Detalles tecnicos de la migracion:
+- Cliente: `_claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)`,
+  mismo patron que `_genai_client` (`None` si no hay `ANTHROPIC_API_KEY`,
+  cada funcion chequea esto primero y responde con un mensaje claro).
+- Modelo: `CLAUDE_MODEL = "claude-sonnet-5"`.
+- `system_instruction` de Gemini → parametro `system=` de
+  `client.messages.create()`. `contents=` → `messages=[{"role":"user",
+  "content": ...}]`.
+- Imagenes: en vez de `types.Part.from_bytes(...)`, un content block
+  `{"type":"image","source":{"type":"base64","media_type":"image/jpeg",
+  "data": base64_str}}` dentro del mismo mensaje que el texto del prompt.
+- Extraer el texto de la respuesta: Gemini tenia `response.text` directo;
+  Claude devuelve `response.content` como una LISTA de bloques (puede haber
+  mas de un bloque de texto) -- se concatenan con
+  `"".join(b.text for b in response.content if b.type == "text")`.
+- **No existe equivalente a `GEMINI_THINKING_CONFIG`**: a diferencia de
+  gemini-2.5-flash, Claude NO activa "thinking" por defecto (hay que pedirlo
+  explicitamente con el parametro `thinking`), asi que el bug que motivo ese
+  workaround del lado de Gemini (thinking consumiendo el presupuesto de
+  tokens sin dejar nada para la respuesta visible) no aplica aqui -- no se
+  necesita replicarlo.
+- Reintentos: el SDK de Anthropic tiene EXCEPCIONES TIPADAS
+  (`anthropic.OverloadedError`, `anthropic.RateLimitError`,
+  `anthropic.InternalServerError`, `anthropic.APITimeoutError`,
+  `anthropic.AuthenticationError`, `anthropic.NotFoundError`) -- a
+  diferencia de Gemini, donde había que parsear el string del mensaje de
+  error ("503" in msg, etc.) para saber si algo era reintentable. Si agregas
+  un nuevo punto de llamada a Claude, usa `except (anthropic.X, anthropic.Y):`
+  con las excepciones tipadas, NO vuelvas al patron de parsear texto.
+- Mismo criterio de timeouts que Gemini: TODA llamada envuelta en
+  `asyncio.wait_for(..., timeout=CLAUDE_TIMEOUT_S)` (= `GEMINI_TIMEOUT_S`,
+  25s), con reintento en vez de rendirse al primer timeout (mismo
+  razonamiento que la seccion de arriba sobre Gemini).
+- Verificado con un cliente de Anthropic simulado (sin key real): respuesta
+  exitosa con DIAGRAMA_LISTO, reintento tras un `OverloadedError` real (con
+  un `httpx.Response`/`httpx.Request` de verdad -- OJO, construir estas
+  excepciones a mano con `response=None` para un test truena con
+  `AttributeError` porque `APIStatusError.__init__` si accede a atributos
+  del response; hay que darle un `httpx.Response` real aunque sea de
+  prueba), agotamiento de reintentos por timeout, y error de autenticacion
+  en `_analizar_foto_cx`.
+- `requirements.txt` gano `anthropic>=1.0.0`; `render.yaml` gano la env var
+  `ANTHROPIC_API_KEY` (junto a la ya existente `GEMINI_API_KEY`, que sigue
+  siendo necesaria para `_consulta_retie` y el RAG).
+
 ## Rediseño visual: medidor "premium", bloque de prueba, plano de simbologia sincronizado
 Feedback directo del usuario tras ver los primeros renders del "Prompt
 Maestro": el medidor se veia poco cuidado, el bloque de pruebas en

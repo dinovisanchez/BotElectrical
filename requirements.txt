@@ -2,5 +2,6 @@ python-telegram-bot[webhooks]==22.8
 matplotlib
 numpy
 google-genai>=1.0.0
+anthropic>=1.0.0
 httpx
 gspread>=6.0.0
