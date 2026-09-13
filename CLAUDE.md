@@ -248,6 +248,121 @@ DIRECTO — no hay un solo medidor semidirecta/indirecta para todos. Por eso:
   si no se especificó `trafo_gabinete`), y avisa al usuario en el caption de
   la imagen que se hizo esa suposición.
 
+## Rediseño visual: medidor "premium", bloque de prueba, plano de simbologia sincronizado
+Feedback directo del usuario tras ver los primeros renders del "Prompt
+Maestro": el medidor se veia poco cuidado, el bloque de pruebas en
+semidirecta quedaba casi del mismo tamano que el medidor (se veian como
+"gemelos"), y el plano de simbologia (panel derecho) tenia iconos
+DESACTUALIZADOS que ya no coincidian con lo que realmente se dibuja en el
+cuerpo del diagrama -- una caja azul redondeada para "Bloque de prueba" y
+una caja oscura solida para "Medidor de energia", ambos de una version
+anterior al rediseño IEC de este mismo proyecto (circulo+kWh, rectangulo
+blanco). Cambios:
+- **`_u_meter(ax, x, y, r=8.0, fontsize=8, lw=1.8, label_below=None,
+  label_fontsize=6.3)`** y **`_u_bloque_prueba(ax, x0, y0, w, h, linea1="",
+  linea2="")`** (nuevas, junto a los demas `_u_*` cerca del inicio del
+  archivo): son las UNICAS funciones que dibujan estos dos simbolos, tanto
+  en el cuerpo del diagrama (`draw_medida_lateral`, el bloque DIRECTA
+  inline) como en el plano de simbologia (`sym_items` dentro de
+  `draw_unifilar_generico`). **Regla dura**: si tocas la forma de estos dos
+  simbolos, hazlo SOLO editando estas dos funciones -- nunca dupliques el
+  dibujo inline en otro lugar, o el plano de simbologia se vuelve a
+  desincronizar del cuerpo (que es exactamente el bug que se acaba de
+  corregir).
+- Medidor: circulo doble (anillo exterior + interior mas fino) en vez de un
+  circulo simple -- sigue siendo flat/vector, sin degradados ni sombras
+  (Convenciones fijas se mantienen), pero se ve mas "cuidado"/premium sin
+  dejar de leerse como simbolo de instrumento de precision real.
+- Radio del medidor ahora es FIJO (r=8 medidor unico, r=6 en par
+  PRINCIPAL+RESPALDO), YA NO se deriva de `bq_h` (altura del bloque de
+  pruebas) -- antes, en semidirecta (`bq_h=12`, sin TP), la formula
+  `r=min(9,max(6,bq_h/2))` daba r=6, exactamente la mitad de la altura del
+  bloque, por lo que ambos quedaban con la misma altura visual. `bq_h` para
+  el caso sin TP tambien se redujo (12→9, 22→18): el bloque de pruebas real
+  es mas chico/discreto que el medidor, que es el elemento protagonico.
+- TP ahora se dibuja con `ground=True` (antes `False`): el transformador de
+  tension "cierra su circuito" a tierra en vez de quedar como un instrumento
+  flotante sin referencia -- aplica en `draw_medida_lateral` y en el plano
+  de simbologia.
+- Seccionador del unifilar para `tipo='indirecta'`: la posicion "antes" (que
+  ya existia en el codigo, antes del transformador de potencia -- no
+  confundir con "transformador de potencial/TP") es la recomendada quando
+  el objetivo es poder aislar el transformador para mantenimiento; "despues"
+  sigue existiendo para el caso de aislar la CARGA sin desenergizar el
+  transformador. Ninguna de las dos se elimino, pero al armar ejemplos/demos
+  usa "antes" como el caso tipico salvo que el usuario pida lo contrario.
+- Recordatorio reforzado (ya estaba en Convenciones fijas, el usuario lo
+  repitio explicitamente): NUNCA agregues un seccionador junto a un
+  cortacircuito "porque se ve mas completo" -- el cortacircuito YA sirve
+  para seccionar en vacio. Solo se dibuja seccionador cuando el cfg lo trae
+  explicitamente (`seccionador='antes'|'despues'`), nunca por defecto.
+
+## Campos del "Prompt Maestro" (circuito, v_mt general, DPS banco, tendido, interruptor detalle)
+El usuario paso un documento de especificacion ("Prompt Maestro para Diagramas
+Unifilares") con un cuestionario y reglas de estetica adicionales. Comparado
+contra lo ya implementado: tipo de medida, seccionador antes/despues (solo
+indirecta... en realidad solo cuando instalacion=trafo, ver seccion de
+arriba), trafo compartido con N usuarios y gabinete/red abierta, subestacion
+multi-celda -- todo eso YA estaba. Lo que se agrego nuevo:
+- **`circuito`** (string libre, ej. "Magdalena"): rotulo informativo, se
+  muestra como "Circuito: X" justo debajo del titulo del unifilar. Parser.py
+  lo detecta con `circuito|cto` + un solo token (ver por que un solo token:
+  evitar que capture de mas en una frase larga). No afecta nada del dibujo,
+  es solo identificacion del plano.
+- **`v_mt` ya no es exclusivo de indirecta**: ahora tambien aplica a
+  directa/semidirecta con `instalacion='trafo'` (hay un tramo MT real ahi,
+  de RED al trafo, aunque el tipo de medida sea BT) -- el label "RED (M.T.)"
+  usa `cfg.get('v_mt')` si esta presente. `_verificar_coherencia()` cambio su
+  guard: antes descartaba v_mt para CUALQUIER directa/semidirecta; ahora solo
+  lo descarta si ADEMAS `instalacion != 'trafo'` (sin trafo no hay tramo MT
+  que rotular).
+- **`dps_cantidad`** (entero, default 1): pararrayos ZnO dibujados en banco
+  de N en vez de uno solo. Implementado en los DOS lugares donde se dibuja
+  pararrayos (entrada indirecta, y proteccion MT del trafo en directa/
+  semidirecta) -- **pero con una diferencia importante entre ambos**: en el
+  bloque TRAFO (directa/semidirecta) SI se dibujan los N iconos en fila,
+  porque ahi hay espacio; en la entrada de INDIRECTA NO se dibujan N iconos
+  -- el espacio entre el eje y el bloque TC/TP (`bq_x0 = xc+20` en
+  `draw_medida_lateral`) es demasiado angosto (un solo pararrayos en
+  `arrx=xc+18` ya esta al limite) y con 2+ iconos se encima con el TP/bloque.
+  Ahi se dibuja SIEMPRE un solo icono y se anota "(banco de N)" solo en el
+  texto. Si vas a tocar esta geometria, vuelve a probar con dps_cantidad>=2
+  en indirecta específicamente, es el caso que se rompe primero.
+- **`tendido`** ('aereo' default | 'subterraneo'): el primer tramo de
+  conductor (RED -> primer elemento de proteccion) se dibuja punteado
+  cuando es subterraneo, con etiqueta "subterráneo" al lado (`cable_lbl`).
+  Importante: el patron de rayas tiene que ser FINO (`(0, (1.5, 1.2))`), no
+  el mismo que se usa para el neutro en otros lados (`(0,(6,3))` o similar,
+  mas grueso) -- ese tramo mide solo ~5 unidades de dibujo, y con un patron
+  de rayas grande (probado con `(0,(4,2))`) se ve visualmente SOLIDO porque
+  no alcanza ni un ciclo completo de raya+espacio. Verificado con un test
+  aislado de matplotlib variando el patron antes de aplicarlo — si cambias
+  este patron, vuelve a probarlo aislado con un segmento corto (~5 unidades)
+  antes de asumir que "cualquier tupla de dash se ve punteada".
+- **Seccionador con cuchilla de puesta a tierra integrada**: `_u_disc()` gano
+  un parametro `tierra=False` que dibuja un ramal lateral verde a tierra
+  junto al seccionador. Los DOS puntos donde se dibuja el seccionador del
+  unifilar (antes/despues de la medida, en `instalacion=trafo`) ahora
+  siempre pasan `tierra=True` -- es una caracteristica fija del "seccionador
+  unico" de la jerarquia, no algo que el usuario configura. (El seccionador
+  pequeño de la bornera en el diagrama de CONEXIONES, `_draw_semi_indirecta_retie`,
+  NO se toco -- ahi son 3 iconos por fase a escala chica, ponerles tierra
+  individual se veria mal.)
+- **`interruptor_polos`/`interruptor_tipo`**: se agregan al mismo texto de
+  "Proteccion" (`draw_prot()` gano parametros `polos`/`tipo`), ej.
+  "200 A  3P  termomagnetico" en una sola etiqueta. No son campos nuevos
+  independientes en el dibujo, solo enriquecen el texto que ya existia.
+- Todos estos campos se agregaron a `PROMPT_DIAGRAMA` (dialogo IA) con la
+  regla explicita de "pregunta SOLO si el usuario ya lo menciono" para
+  `dps_cantidad`/`tendido`/`circuito`/`interruptor_polos`/`interruptor_tipo`
+  -- son datos opcionales de refinamiento, no queremos que el dialogo se
+  alargue preguntando cosas que el 90% de los usuarios no necesita. Tambien
+  se agregaron a `parser.py` (texto libre, regex simples) para los que se
+  prestan a eso (`circuito`, `dps_cantidad`, `tendido`, `v_mt` como "N kv").
+  NO se agregaron preguntas nuevas al menu de botones (`on_button`) -- si se
+  quiere eso despues, es un cambio de alcance mayor (tocar el state machine
+  lineal), se dejo fuera deliberadamente de esta pasada.
+
 ## QA de sept/2026: bugs encontrados por revision de codigo (no reportados por el usuario)
 - **Seccionador "despues de la medida" no se dibujaba para `tipo='indirecta'`**:
   `diagram_engine.py` tenia `elif seccionador_pos == "despues" and tipo !=
