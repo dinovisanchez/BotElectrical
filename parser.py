@@ -139,13 +139,34 @@ def parse_spec(text):
         cfg["calibre_conductor"] = mc_s0.group(1) + "/0"
         entendido.append(f"Calibre {mc_s0.group(1)}/0")
 
-    # NOTA: antes aqui se detectaban "rele"/"dps"/"pararrayos" en el texto y
-    # se guardaban en cfg['rele']/cfg['dps'], pero esos campos solo los leia
-    # el draw_unifilar() legado (ya eliminado) -- draw_unifilar_generico()
-    # dibuja pararrayos ZnO + cortacircuitos SIEMPRE que hay trafo (ver
-    # CLAUDE.md, "[x] DPS/pararrayos..."), sin leer ningun flag opcional. Se
-    # quito la deteccion porque no tenia ningun efecto real: un usuario que
-    # escribia "sin pararrayos" via texto libre igual los veia en el dibujo.
+    # --- DPS / PARARRAYOS: cantidad (banco de N) ---
+    # draw_unifilar_generico() YA dibuja pararrayos siempre que hay trafo o
+    # es indirecta (RETIE), sin necesidad de pedirlo -- esto solo captura
+    # CUANTOS, si el usuario lo menciona explicitamente. Si no lo menciona,
+    # dps_cantidad no se fija y el default (1) aplica sin preguntar nada.
+    m_dps = re.search(r"banco\s+de\s+(\d+)\s*(?:dps|pararrayos)|(\d+)\s*(?:dps|pararrayos)", t)
+    if m_dps:
+        n_dps = m_dps.group(1) or m_dps.group(2)
+        cfg["dps_cantidad"] = int(n_dps)
+        entendido.append(f"DPS: banco de {n_dps}")
+
+    # --- TENDIDO DEL CONDUCTOR: aereo (default, no se anota) / subterraneo ---
+    if re.search(r"\b(subterraneo|subterranea|enterrad[oa]|ductos?)\b", t):
+        cfg["tendido"] = "subterraneo"
+        entendido.append("Tendido: subterraneo")
+
+    # --- NIVEL DE TENSION MT (ej. 13.2 kV) ---
+    m_vmt = re.search(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*kv\b", t)
+    if m_vmt:
+        valor_mt = m_vmt.group(1).replace(",", ".")
+        cfg["v_mt"] = f"{valor_mt} kV"
+        entendido.append(f"Tension MT {valor_mt} kV")
+
+    # --- IDENTIFICACION DEL CIRCUITO (ej. "circuito Magdalena", "cto: 5") ---
+    m_cto = re.search(r"\b(?:circuito|cto)\s*:?\s*([A-Za-zÀ-ÿ0-9]+)\b", text, re.IGNORECASE)
+    if m_cto:
+        cfg["circuito"] = m_cto.group(1)
+        entendido.append(f"Circuito: {m_cto.group(1)}")
 
     # --- INTERRUPTOR / PROTECCION (deteccion global) ---
     ma_int = re.search(

@@ -780,6 +780,24 @@ PROMPT_DIAGRAMA = (
     "red/MT) o despues (lado de carga/BT, tras el trafo y la medida).\n"
     "- Conductor: calibre acometida (ej. 1/0, 2/0, AWG 4). Si no sabe, omitir.\n"
     "- Medidor de respaldo: si/no.\n"
+    "- Identificacion del circuito (opcional, solo si el usuario la menciona "
+    "espontaneamente, ej. 'circuito Magdalena' o 'cto: 5' -- NO preguntes esto "
+    "si no la menciona, es solo un rotulo informativo del plano).\n"
+    "- Nivel de tension MT (ej. 13.2 kV, 34.5 kV): pregunta SOLO si "
+    "instalacion=trafo o tipo=indirecta (donde si hay MT real que anotar); "
+    "si no lo sabe, omite y el plano queda con el rotulo generico 'M.T.'.\n"
+    "- Interruptor/proteccion, detalle adicional (SOLO si ya confirmo que "
+    "tiene proteccion): numero de polos (1/2/3) y tipo (ej. termomagnetico, "
+    "caja moldeada) -- pregunta esto en la MISMA pregunta de amperios, no "
+    "como pregunta aparte, para no alargar el cuestionario.\n"
+    "- Proteccion contra sobretensiones (DPS/pararrayos): pregunta la "
+    "cantidad SOLO si el usuario menciona explicitamente un banco o numero "
+    "de DPS (ej. 'banco de 3 DPS'); si no lo menciona, NO preguntes esto -- "
+    "el unifilar ya dibuja pararrayos por defecto siempre que hay trafo o "
+    "es indirecta, sin necesidad de que el usuario lo pida.\n"
+    "- Tendido del conductor de acometida (aereo/subterraneo): pregunta SOLO "
+    "si el usuario ya menciono que es subterraneo/enterrado/ductos (ej. "
+    "'XLP subterraneo'); el default es aereo y no hace falta preguntarlo.\n"
     "\n"
     "=== CONOCIMIENTO TECNICO CLAVE ===\n"
     "- Trafo COMPARTIDO (edificios, conjuntos residenciales): cada usuario tiene su "
@@ -847,8 +865,18 @@ PROMPT_DIAGRAMA = (
     "rel_tp: string ej '13200/120'\n"
     "calibre_conductor: string ej 'AWG 2/0'\n"
     "respaldo: true | false\n"
-    "v_mt: string ej '13.2 kV' (tension MT, solo indirecta)\n"
+    "v_mt: string ej '13.2 kV' (tension MT -- indirecta, o directa/semidirecta "
+    "con instalacion=trafo; en los demas casos se ignora)\n"
     "tension_bt: string ej '220' (solo si instalacion=barraje)\n"
+    "circuito: string ej 'Magdalena' o '5' (identificacion del circuito, "
+    "solo si el usuario la menciono; \"\" si no aplica)\n"
+    "interruptor_polos: string ej '3' (solo si ya hay proteccion_antes/despues)\n"
+    "interruptor_tipo: string ej 'termomagnetico' (solo si ya hay proteccion_antes/despues)\n"
+    "dps_cantidad: entero >= 1 (SOLO si el usuario menciono un banco/numero "
+    "de DPS explicitamente; si no lo menciono, omite este campo por completo "
+    "-- el default es 1 y ya se dibuja sin preguntarlo)\n"
+    'tendido: "aereo" | "subterraneo" (SOLO si el usuario menciono que es '
+    "subterraneo/enterrado; el default es aereo, omite el campo si no aplica)\n"
 )
 
 SIS_TXT = {
@@ -967,9 +995,13 @@ def _verificar_coherencia(cfg):
     tipo = cfg.get("tipo", "directa")
     inst = cfg.get("instalacion", "")
 
-    if tipo in ("directa", "semidirecta") and cfg.get("v_mt"):
+    if tipo in ("directa", "semidirecta") and inst != "trafo" and cfg.get("v_mt"):
+        # Sin trafo no hay ningun tramo de M.T. en el dibujo -- v_mt no
+        # tiene donde mostrarse. Con instalacion=trafo SI hay un tramo MT
+        # real (RED -> trafo), ahi v_mt es valido aunque tipo sea directa o
+        # semidirecta (ver diagram_engine.py, seccion FUENTE/ENTRADA).
         cfg.pop("v_mt", None)
-        log.warning(f"[coherencia] v_mt ignorado: tipo={tipo} es siempre en B.T.")
+        log.warning(f"[coherencia] v_mt ignorado: tipo={tipo} sin trafo es siempre en B.T.")
 
     if tipo == "indirecta" and not cfg.get("rel_tc"):
         log.warning("[coherencia] indirecta sin relacion de TC")

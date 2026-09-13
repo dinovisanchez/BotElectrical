@@ -142,11 +142,17 @@ def _u_breaker(ax,x,y,c=INK,s=1.0):
     """Interruptor automatico: cuadrado sobre la linea."""
     ax.add_patch(Rectangle((x-1.7*s,y-1.9*s),3.4*s,3.8*s,fill=False,ec=c,lw=2.2,zorder=4))
 
-def _u_disc(ax,x,y,c=INK,s=1.0):
-    """Seccionador: cuchilla abierta con pivote."""
+def _u_disc(ax,x,y,c=INK,s=1.0,tierra=False):
+    """Seccionador: cuchilla abierta con pivote. Si tierra=True, agrega una
+    cuchilla de puesta a tierra integrada (ramal lateral verde) -- el
+    seccionador unico de la jerarquia del unifilar la lleva siempre."""
     ax.add_patch(Circle((x,y-2.0*s),0.4,fc=c,ec=c,zorder=5))
     ax.add_patch(Circle((x,y+2.0*s),0.4,fc=c,ec=c,zorder=5))
     ax.plot([x,x+2.3*s],[y-2.0*s,y+1.6*s],color=c,lw=2.2,zorder=4)
+    if tierra:
+        gx = x + 2.6*s
+        ax.plot([x,gx],[y,y],color=COL["G"],lw=1.1,zorder=3)
+        _ground(ax, gx, y, 0.4*s)
 
 def _u_fuse(ax,x,y,c=INK,s=1.0):
     """Cortacircuitos fusible: rectangulo con barra."""
@@ -181,6 +187,36 @@ def _u_relay(ax,x,y,c="#6A1B9A",funcs="50/51",s=1.0):
     """Rele de proteccion: circulo con funciones ANSI."""
     ax.add_patch(Circle((x,y),2.6*s,fill=False,ec=c,lw=2,zorder=4))
     ax.text(x,y,funcs,ha="center",va="center",fontsize=6.8,color=c,fontweight="bold",zorder=5)
+
+def _u_meter(ax, x, y, r=8.0, fontsize=8, lw=1.8, label_below=None, label_fontsize=6.3):
+    """Medidor de energia (kWh): circulo doble -- convencion IEC 60617 para
+    instrumento INTEGRADOR (distinta de un instrumento simple, que se
+    representa con un solo circulo). Es la unica funcion que dibuja este
+    simbolo -- la usan tanto el cuerpo del diagrama como el plano de
+    simbologia, para que nunca queden desincronizados entre si (antes el
+    plano de simbologia tenia un icono viejo -- caja oscura -- que ya no
+    coincidia con el medidor real dibujado en el unifilar). Sigue siendo
+    flat/vector, sin degradados ni sombras (Convenciones fijas)."""
+    ax.add_patch(Circle((x, y), r, fill=True, fc="white", ec=INK, lw=lw, zorder=3))
+    ax.add_patch(Circle((x, y), r * 0.74, fill=False, ec=INK, lw=max(0.6, lw * 0.5), zorder=4))
+    ax.text(x, y, "kWh", ha="center", va="center",
+            fontsize=fontsize, fontweight="bold", color=INK, family="monospace", zorder=5)
+    if label_below:
+        ax.text(x, y - r - 2.2, label_below, ha="center", va="top",
+                fontsize=label_fontsize, color="#555", fontweight="bold")
+
+def _u_bloque_prueba(ax, x0, y0, w, h, linea1="", linea2=""):
+    """Bloque de pruebas: rectangulo blanco de borde fino, sin degradados
+    azules ni esquinas redondeadas (Convenciones fijas). Unica funcion que
+    lo dibuja -- igual que _u_meter, la usan el cuerpo del diagrama y el
+    plano de simbologia para no desincronizarse."""
+    ax.add_patch(Rectangle((x0, y0), w, h, fill=True, fc="white", ec=INK, lw=1.3, zorder=3))
+    if linea1:
+        ax.text(x0 + w / 2, y0 + h - 3, linea1, ha="center", va="center",
+                fontsize=6.6, fontweight="bold", color=INK)
+    if linea2:
+        ax.text(x0 + w / 2, y0 + 3, linea2, ha="center", va="center",
+                fontsize=7.5, fontweight="bold", color=INK)
 
 # ============================================================
 #  DIAGRAMA DE CONEXIONES (version RETIE)
@@ -994,6 +1030,10 @@ def draw_unifilar_generico(cfg, out_path):
     # ── Título ────────────────────────────────────────────────────────────────
     ax.text(W/2, H-2, "DIAGRAMA UNIFILAR DE MEDIDA",
             ha="center", fontsize=13, fontweight="bold", color=INK)
+    circuito = str(cfg.get("circuito", "")).strip()
+    if circuito:
+        ax.text(W/2, H-3.6, f"Circuito: {circuito}",
+                ha="center", fontsize=9.5, fontweight="bold", color="#444")
     tipo_txt = {"directa":"Directa","semidirecta":"Semidirecta","indirecta":"Indirecta"}[tipo]
     sis_short = SIS_TXT[sistema].split(" (")[0].title()
     sub_parts = [f"Medida {tipo_txt}", sis_short, f"Norma {norma}"]
@@ -1015,8 +1055,8 @@ def draw_unifilar_generico(cfg, out_path):
     y  = H - 11
 
     # ── Helpers ───────────────────────────────────────────────────────────────
-    def vline(ya, yb, lw=2.6):
-        ax.plot([xc, xc], [ya, yb], color=INK, lw=lw, zorder=2)
+    def vline(ya, yb, lw=2.6, ls="-"):
+        ax.plot([xc, xc], [ya, yb], color=INK, lw=lw, zorder=2, ls=ls)
 
     def cable_lbl(ya, yb, lbl, lado=-1):
         ym = (ya + yb) / 2
@@ -1034,12 +1074,14 @@ def draw_unifilar_generico(cfg, out_path):
         ax.text(xc-16, yy, label, ha="right", va="center",
                 fontsize=9.5, fontweight="bold", color=INK)
 
-    def draw_prot(label, amp):
+    def draw_prot(label, amp, polos=None, tipo=None):
         """Dibuja interruptor de proteccion en la posicion actual de y."""
         nonlocal y
         vline(y, y - 2)
         _u_breaker(ax, xc, y - 2, INK, 0.9)
-        lbl = f"{label}\n{amp}" if amp else label
+        detalle_partes = [p for p in (amp, f"{polos}P" if polos else None, tipo) if p]
+        detalle = "  ".join(detalle_partes)
+        lbl = f"{label}\n{detalle}" if detalle else label
         ax.text(xc - 5, y - 2, lbl, ha="right", va="center",
                 fontsize=8, color=INK, fontweight="bold")
         vline(y - 2, y - 5); y -= 5
@@ -1069,7 +1111,11 @@ def draw_unifilar_generico(cfg, out_path):
             bq_h  = abs(tp_y - tc_y) + (8 if not respaldo else 16)
         else:
             bq_cy = tc_y
-            bq_h  = 12 if not respaldo else 22
+            # Mas compacto que antes (era 12/22): con TC solo (semidirecta),
+            # un bloque tan alto como el medidor los hacia ver como "gemelos"
+            # del mismo tamano -- el bloque de pruebas real es mas chico y
+            # discreto que el medidor, que es el elemento protagonico.
+            bq_h  = 9 if not respaldo else 18
 
         # ── TC: EN SERIE con la linea (lleva la corriente hacia la medida) ───
         # Linea mas gruesa = tramo de corriente. Del TC sale el hilo que
@@ -1092,7 +1138,9 @@ def draw_unifilar_generico(cfg, out_path):
         if tp_y is not None:
             node_dot(tp_y)
             ax.plot([xc, sym_x - 1.8], [tp_y, tp_y], color=COL["S"], lw=1.1, zorder=3)
-            _u_vt(ax, sym_x, tp_y, COL["S"], 0.9, ground=False)
+            # ground=True: el TP cierra su circuito de referencia a tierra
+            # (antes quedaba sin cerrar, como un instrumento "flotando").
+            _u_vt(ax, sym_x, tp_y, COL["S"], 0.9, ground=True)
             ax.text(sym_x, tp_y + 3.3, f"(paralelo)\nTP {rel_tp or '---'}",
                     ha="center", va="bottom", fontsize=7, color=COL["S"], fontweight="bold")
             entry_tp_y = bq_cy - bq_h/2 + 3
@@ -1110,37 +1158,24 @@ def draw_unifilar_generico(cfg, out_path):
             ax.plot([fx + 0.7, bq_x0], [tc_y, tc_y], color=INK, lw=1.6, zorder=4)
 
         # ── BLOQUE DE PRUEBA ──────────────────────────────────────────────────
-        # Simbología limpia: rectángulo de línea fina, sin degradados ni
-        # sombras -- así se ven los unifilares profesionales reales
-        # (IEC 60617 / ANSI), no como una tarjeta de interfaz.
-        ax.add_patch(Rectangle(
-            (bq_x0, bq_cy - bq_h/2), bq_w, bq_h,
-            fill=True, fc="white", ec=INK, lw=1.3, zorder=3))
-        ax.text(bq_x0 + bq_w/2, bq_cy + bq_h/2 - 3, "BLOQUE DE PRUEBA",
-                ha="center", va="center", fontsize=6.6, fontweight="bold", color=INK)
-        ax.text(bq_x0 + bq_w/2, bq_cy - bq_h/2 + 3, norma,
-                ha="center", va="center", fontsize=7.5, fontweight="bold", color=INK)
+        _u_bloque_prueba(ax, bq_x0, bq_cy - bq_h/2, bq_w, bq_h, "BLOQUE DE PRUEBA", norma)
 
         # ── Hilo bloque → medidor ────────────────────────────────────────────
         ax.plot([bq_x1, med_x0], [bq_cy, bq_cy], color=INK, lw=1.8, zorder=3)
 
         # ── MEDIDOR(ES) ───────────────────────────────────────────────────────
-        # Simbolo normalizado de medidor de energia: circulo con "kWh"
-        # (equivalente al circulo con "A"/"V" de amperimetro/voltimetro en
-        # IEC 60617 / ANSI). Nada de cajas oscuras con pantalla LCD.
+        # Radio FIJO (no derivado de bq_h) -- el medidor es el elemento
+        # protagonico del diagrama, su tamano no deberia depender de cuanto
+        # mida el bloque de pruebas (antes ambos quedaban casi identicos).
         if not respaldo:
-            r = min(9, max(6, bq_h/2))
+            r = 8.0
             mcx = med_x0 + r + 1
-            ax.add_patch(Circle((mcx, bq_cy), r, fill=True, fc="white", ec=INK, lw=1.6, zorder=3))
-            ax.text(mcx, bq_cy + 1.6, "kWh", ha="center", va="center",
-                    fontsize=8, fontweight="bold", color=INK, family="monospace")
-            ax.text(mcx, bq_cy - r - 2.2, "MEDIDOR", ha="center", va="top",
-                    fontsize=6.3, color="#555", fontweight="bold")
+            _u_meter(ax, mcx, bq_cy, r=r, label_below="MEDIDOR")
             med_span = (bq_cy - r, bq_cy + r)
         else:
             # PRINCIPAL + RESPALDO: dos medidores EN PARALELO desde el mismo
             # nodo (ambos miden la misma acometida, no en serie).
-            r = min(7, max(5, bq_h/4))
+            r = 6.0
             mcx = med_x0 + r + 1
             sep = r * 2 + 3
             y_p, y_r = bq_cy + sep/2, bq_cy - sep/2
@@ -1149,11 +1184,7 @@ def draw_unifilar_generico(cfg, out_path):
             ax.plot([jx, jx], [y_p, y_r], color=INK, lw=1.5, zorder=3)
             for etq, my in [("PRINCIPAL", y_p), ("RESPALDO", y_r)]:
                 ax.plot([jx, mcx - r], [my, my], color=INK, lw=1.4, zorder=3)
-                ax.add_patch(Circle((mcx, my), r, fill=True, fc="white", ec=INK, lw=1.5, zorder=3))
-                ax.text(mcx, my + 1.2, "kWh", ha="center", va="center",
-                        fontsize=6.8, fontweight="bold", color=INK, family="monospace")
-                ax.text(mcx, my - r - 1.8, etq, ha="center", va="top",
-                        fontsize=6, color="#555", fontweight="bold")
+                _u_meter(ax, mcx, my, r=r, fontsize=6.8, lw=1.5, label_below=etq, label_fontsize=6)
             med_span = (y_r - r, y_p + r)
 
         # Si el trafo es compartido, señalar EXPLICITAMENTE el medidor (no el
@@ -1184,12 +1215,22 @@ def draw_unifilar_generico(cfg, out_path):
         v_mt = cfg.get("v_mt", "M.T.")
         ax.text(xc, y+1, f"RED ({v_mt})", ha="center", va="bottom",
                 fontsize=9.5, fontweight="bold", color=INK)
-        vline(y+1, y)
-        # Pararrayos ZnO lateral (RETIE 2024)
+        ls_acometida = (0, (1.5, 1.2)) if cfg.get("tendido") == "subterraneo" else "-"
+        vline(y+1, y, ls=ls_acometida)
+        if cfg.get("tendido") == "subterraneo":
+            cable_lbl(y+1, y, "subterráneo", lado=-1)
+        # Pararrayos ZnO lateral (RETIE 2024). NOTA: aqui el espacio entre el
+        # eje y el bloque TC/TP (bq_x0 = xc+20, ver draw_medida_lateral) es
+        # muy angosto -- a diferencia del bloque TRAFO de directa/semidirecta,
+        # NO hay espacio para dibujar un banco de N iconos sin encimarse con
+        # el TC/TP/bloque. Se dibuja siempre UN solo icono y se anota la
+        # cantidad en el texto si el usuario especifico mas de uno.
+        dps_n = max(1, int(cfg.get("dps_cantidad", 1)))
         arrx = xc + 18
         ax.plot([xc, arrx], [y, y], color=COL["G"], lw=1.5, zorder=3)
         _u_arrester(ax, arrx, y - 3, COL["G"], 0.82)
-        ax.text(arrx + 3, y - 1.5, "Pararrayos ZnO",
+        dps_lbl = "Pararrayos ZnO" if dps_n == 1 else f"Pararrayos ZnO (banco de {dps_n})"
+        ax.text(arrx + 3, y - 1.5, dps_lbl,
                 ha="left", va="center", fontsize=7.5, color=COL["G"], fontweight="bold")
         vline(y, y - 3); y -= 3
         # NOTA: no se dibuja un "seccionador MT" aparte aqui -- los CC
@@ -1208,9 +1249,13 @@ def draw_unifilar_generico(cfg, out_path):
         # diferenciarla.
         mt_y = y + 1
         ax.plot([xc - 9, xc + 9], [mt_y, mt_y], color=INK, lw=2.2, zorder=2)
-        ax.text(xc, mt_y + 1.3, "RED (M.T.)", ha="center", va="bottom",
+        v_mt_lbl = cfg.get("v_mt", "") or "M.T."
+        ax.text(xc, mt_y + 1.3, f"RED ({v_mt_lbl})", ha="center", va="bottom",
                 fontsize=9.5, fontweight="bold", color=INK)
-        vline(mt_y, y - 4); y -= 4
+        ls_acometida = (0, (1.5, 1.2)) if cfg.get("tendido") == "subterraneo" else "-"
+        vline(mt_y, y - 4, ls=ls_acometida); y -= 4
+        if cfg.get("tendido") == "subterraneo":
+            cable_lbl(mt_y, y, "subterráneo", lado=-1)
     else:
         # Sin trafo ni barraje explicito: acometida directa desde la red BT
         # (caso mas simple, ej. residencial). Solo el rotulo, sin simbolo de
@@ -1297,10 +1342,14 @@ def draw_unifilar_generico(cfg, out_path):
         # el trafo cuelga directo de "RED (M.T.)" y esta es su PRIMERA
         # proteccion, por eso se dibuja siempre (pararrayos + cortacircuitos).
         if tipo != "indirecta":
+            dps_n = max(1, int(cfg.get("dps_cantidad", 1)))
             arrx = xc + 12
             ax.plot([xc, arrx], [y, y], color=COL["G"], lw=1.3, zorder=3)
-            _u_arrester(ax, arrx, y - 3, COL["G"], 0.72)
-            ax.text(arrx + 2.5, y - 1.5, "Pararrayos ZnO",
+            xs_dps = [arrx + (i - (dps_n-1)/2) * 2.4 for i in range(dps_n)]
+            for ax_x in xs_dps:
+                _u_arrester(ax, ax_x, y - 3, COL["G"], 0.72 if dps_n == 1 else 0.55)
+            dps_lbl = "Pararrayos ZnO" if dps_n == 1 else f"Pararrayos ZnO (banco de {dps_n})"
+            ax.text(max(xs_dps) + 2.5, y - 1.5, dps_lbl,
                     ha="left", va="center", fontsize=6.8, color=COL["G"], fontweight="bold")
             vline(y, y - 3); y -= 3
             _u_fuse(ax, xc, y - 2, INK, 0.78)
@@ -1310,9 +1359,9 @@ def draw_unifilar_generico(cfg, out_path):
 
         if seccionador_pos == "antes":
             vline(y, y - 3)
-            _u_disc(ax, xc, y - 3, INK, 1.0)
-            ax.text(xc - 5, y - 3, "Seccionador", ha="right", va="center",
-                    fontsize=8, color=INK, fontweight="bold")
+            _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
+            ax.text(xc - 5, y - 3, "Seccionador\n(c/cuchilla a tierra)", ha="right", va="center",
+                    fontsize=7.2, color=INK, fontweight="bold")
             vline(y - 3, y - 5); y -= 5
 
         trafo_y = y - 5
@@ -1399,7 +1448,7 @@ def draw_unifilar_generico(cfg, out_path):
         vline(tc_y, tc_y - 5); y = tc_y - 5
         # Proteccion ANTES del medidor (si aplica)
         if prot_antes:
-            draw_prot("Proteccion", prot_antes)
+            draw_prot("Proteccion", prot_antes, polos=cfg.get("interruptor_polos"), tipo=cfg.get("interruptor_tipo"))
 
     # ── DIRECTA: medidor en linea, sin bloque de prueba ───────────────────────
     if tipo == "directa":
@@ -1409,18 +1458,14 @@ def draw_unifilar_generico(cfg, out_path):
             cable_lbl(y + 3, y - 1, calibre or "cal. ?", lado=-1)
         # Proteccion ANTES del medidor
         if prot_antes:
-            draw_prot("Proteccion", prot_antes)
+            draw_prot("Proteccion", prot_antes, polos=cfg.get("interruptor_polos"), tipo=cfg.get("interruptor_tipo"))
         # Medidor en linea -- simbolo normalizado: circulo con "kWh"
         # (igual convencion que el resto del diagrama, sin cajas oscuras).
         y_mid = y - 5
         r = 6.5
         if not respaldo:
             vline(y, y_mid + r)
-            ax.add_patch(Circle((xc, y_mid), r, fill=True, fc="white", ec=INK, lw=1.7, zorder=3))
-            ax.text(xc, y_mid + 1.4, "kWh", ha="center", va="center",
-                    fontsize=8, fontweight="bold", color=INK, family="monospace")
-            ax.text(xc, y_mid - r - 2, "MEDIDOR", ha="center", va="top",
-                    fontsize=6.3, color="#555", fontweight="bold")
+            _u_meter(ax, xc, y_mid, r=r, lw=1.7, label_below="MEDIDOR")
             if es_compartido:
                 ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid), xytext=(xc + r + 8, y_mid),
                             ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
@@ -1453,11 +1498,7 @@ def draw_unifilar_generico(cfg, out_path):
             for dx, etq in [(dxs[0], "PRINCIPAL"), (dxs[1], "RESPALDO")]:
                 cx = xc + dx
                 ax.plot([cx, cx], [jy, y_mid + r], color=INK, lw=1.5, zorder=3)
-                ax.add_patch(Circle((cx, y_mid), r, fill=True, fc="white", ec=INK, lw=1.6, zorder=3))
-                ax.text(cx, y_mid + 1.2, "kWh", ha="center", va="center",
-                        fontsize=7, fontweight="bold", color=INK, family="monospace")
-                ax.text(cx, y_mid - r - 1.8, etq, ha="center", va="top",
-                        fontsize=6, color="#555", fontweight="bold")
+                _u_meter(ax, cx, y_mid, r=r, fontsize=7, lw=1.6, label_below=etq, label_fontsize=6)
                 ax.plot([cx, cx], [y_mid - r, out_y], color=INK, lw=1.5, zorder=3)
             if es_compartido:
                 # Apunta al PUNTO (principal+respaldo juntos), no a un
@@ -1482,16 +1523,16 @@ def draw_unifilar_generico(cfg, out_path):
 
     # ── Proteccion DESPUES del medidor ────────────────────────────────────────
     if prot_despues and not es_multi_celda:
-        draw_prot("Proteccion", prot_despues)
+        draw_prot("Proteccion", prot_despues, polos=cfg.get("interruptor_polos"), tipo=cfg.get("interruptor_tipo"))
 
     # ── Seccionador DESPUES de la medida (si aplica) ──────────────────────────
     if es_multi_celda:
         pass  # cada celda ya tiene su propia proteccion + carga (ver arriba)
     elif seccionador_pos == "despues":
         vline(y, y - 3)
-        _u_disc(ax, xc, y - 3, INK, 1.0)
-        ax.text(xc - 5, y - 3, "Seccionador", ha="right", va="center",
-                fontsize=8, color=INK, fontweight="bold")
+        _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
+        ax.text(xc - 5, y - 3, "Seccionador\n(c/cuchilla a tierra)", ha="right", va="center",
+                fontsize=7.2, color=INK, fontweight="bold")
         vline(y - 3, y - 5); y -= 5
     else:
         vline(y, y - 4); y -= 4
@@ -1524,17 +1565,19 @@ def draw_unifilar_generico(cfg, out_path):
     sym_items = [
         ("Transformador de potencia (Dyn11)", lambda x,y: _u_xfmr(ax,x,y,INK,0.72)),
         ("Transformador de corriente (TC)",   lambda x,y: _u_ct(ax,x,y,COL["R"],0.82)),
-        ("Transformador de tension (TP)",     lambda x,y: _u_vt(ax,x,y,COL["S"],0.82,False)),
+        ("Transformador de tension (TP)",     lambda x,y: _u_vt(ax,x,y,COL["S"],0.82,True)),
         ("Cortacircuitos fusible MT",         lambda x,y: _u_fuse(ax,x,y,INK,0.82)),
         ("Interruptor automatico",            lambda x,y: _u_breaker(ax,x,y,INK,0.82)),
-        ("Seccionador",                       lambda x,y: _u_disc(ax,x,y,INK,0.82)),
+        ("Seccionador (c/cuchilla a tierra)", lambda x,y: _u_disc(ax,x,y,INK,0.82,tierra=True)),
         ("Pararrayos / DPS (ZnO)",            lambda x,y: _u_arrester(ax,x,y,COL["G"],0.72)),
-        ("Bloque de prueba",                  lambda x,y: ax.add_patch(
-            FancyBboxPatch((x-3,y-2),6,4,boxstyle="round,pad=0.2",
-                           fill=True,fc="#DDE8F5",ec="#2B4A7A",lw=1.0))),
-        ("Medidor de energia (kWh)",          lambda x,y: ax.add_patch(
-            FancyBboxPatch((x-3,y-2),6,4,boxstyle="round,pad=0.2",
-                           fill=True,fc="#0D1117",ec="#0D1117",lw=1.0))),
+        # Bloque de prueba y medidor: MISMAS funciones que dibujan el
+        # simbolo real en el cuerpo del diagrama (_u_bloque_prueba/_u_meter)
+        # -- antes este panel tenia iconos viejos (caja azul redondeada,
+        # caja oscura solida) que ya no coincidian con lo que se dibujaba
+        # arriba, exactamente el tipo de inconsistencia que hace que un
+        # plano se vea poco profesional.
+        ("Bloque de prueba",                  lambda x,y: _u_bloque_prueba(ax, x-3.5, y-2, 7, 4)),
+        ("Medidor de energia (kWh)",          lambda x,y: _u_meter(ax, x, y, r=2.3, fontsize=4.2, lw=1.1)),
         ("Barra / barraje",                   lambda x,y: ax.plot(
             [x-3.5,x+3.5],[y,y],color=INK,lw=3.5)),
         ("Carga (general)",                   lambda x,y: ax.add_patch(
