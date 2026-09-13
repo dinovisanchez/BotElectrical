@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re, asyncio, json, time
+import os, tempfile, logging, re, asyncio, json, time, base64
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
@@ -10,6 +10,7 @@ from parser import parse_spec, DEFAULT
 
 from google import genai
 from google.genai import types
+import anthropic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("medidor-bot")
@@ -39,6 +40,24 @@ GEMINI_THINKING_CONFIG = types.ThinkingConfig(thinking_budget=0)
 RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
 
 _genai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
+
+# ── Claude (Anthropic) — dialogo de diagramas y analisis de fotos ───────────
+# Migracion hibrida: _consulta_retie sigue en Gemini porque el RAG (File
+# Search Store, ver seccion RAG en CLAUDE.md) no tiene equivalente directo en
+# la API de Claude -- migrarlo tambien habria significado perder de un
+# plumazo la precision normativa que costo activar. _dialogo_diagrama y
+# _analizar_foto_cx si se migraron: no dependen del RAG, solo del prompt del
+# sistema + (en el caso de fotos) vision, que Claude cubre igual de bien.
+ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY")
+CLAUDE_MODEL   = "claude-sonnet-5"
+CLAUDE_TIMEOUT_S   = GEMINI_TIMEOUT_S      # mismo criterio: nunca sin timeout
+CLAUDE_MAX_TOKENS  = GEMINI_MAX_OUTPUT_TOKENS
+# A diferencia de gemini-2.5-flash, Claude NO activa "thinking" por defecto
+# (hay que pedirlo explicitamente con el parametro `thinking`) -- por eso no
+# existe aqui un equivalente a GEMINI_THINKING_CONFIG: simplemente no se pide
+# thinking y el modelo no lo hace, sin el bug de presupuesto compartido que
+# motivo ese workaround del lado de Gemini (ver mas arriba).
+_claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
 
 # ── Control de acceso — Google Sheets ─────────────────────────────────────────
 try:
@@ -1290,32 +1309,36 @@ def _calcular_burden(bd):
     return "\n".join(lines)
 
 async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
-    if not _genai_client:
+    if not _claude_client:
         return "⚠️ Servicio de análisis de imágenes no disponible."
     prompt = PROMPT_VALIDACION_CX.format(tipo=tipo, norma=norma)
+    img_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     try:
         response = await asyncio.wait_for(
-            _genai_client.aio.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                    prompt,
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.2, max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                    thinking_config=GEMINI_THINKING_CONFIG,
-                ),
+            _claude_client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=CLAUDE_MAX_TOKENS,
+                temperature=0.2,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {
+                            "type": "base64", "media_type": "image/jpeg", "data": img_b64,
+                        }},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
             ),
-            timeout=GEMINI_TIMEOUT_S,
+            timeout=CLAUDE_TIMEOUT_S,
         )
-        texto = (response.text or "").strip()
+        texto = "".join(b.text for b in response.content if b.type == "text").strip()
         texto = texto.replace("**", "").replace("__", "").replace("`", "")
         return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
     except asyncio.TimeoutError:
-        log.warning(f"Timeout analizando foto ({GEMINI_TIMEOUT_S}s)")
+        log.warning(f"Timeout analizando foto ({CLAUDE_TIMEOUT_S}s)")
         return "⏳ Tardó demasiado analizando la imagen. Intenta de nuevo."
     except Exception as e:
-        log.error(f"Error Gemini Vision: {e}")
+        log.error(f"Error Claude Vision: {e}")
         return "⚠️ No pude analizar la imagen. Asegúrate de que la foto sea clara y bien iluminada."
 
 # ── Modulo experto RETIE ─────────────────────────────────────────────────────
@@ -1558,10 +1581,10 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
 
 
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
-    """Conversacion guiada por Gemini. Historial = lista de {"role":"user"|"model","text":"..."}"""
-    if not _genai_client:
+    """Conversacion guiada por Claude. Historial = lista de {"role":"user"|"model","text":"..."}"""
+    if not _claude_client:
         await update.message.reply_text(
-            "⚠️ Servicio IA no configurado (GEMINI_API_KEY ausente).\n"
+            "⚠️ Servicio IA no configurado (ANTHROPIC_API_KEY ausente).\n"
             "Usa /menu para el flujo guiado sin IA."
         )
         return
@@ -1569,17 +1592,11 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
     historial.append({"role": "user", "text": texto_usuario})
 
-    # Construir conversacion (el prompt del sistema va aparte, en system_instruction)
+    # Construir conversacion (el prompt del sistema va aparte, en el parametro "system")
     conv = "--- CONVERSACION ---\n"
     for m in historial:
         lbl = "USUARIO" if m["role"] == "user" else "INGENIERO"
         conv += f"\n{lbl}: {m['text']}"
-
-    dialogo_config = types.GenerateContentConfig(
-        system_instruction=PROMPT_DIAGRAMA, temperature=0.2,
-        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-        thinking_config=GEMINI_THINKING_CONFIG,
-    )
 
     await update.message.reply_chat_action("typing")
     response = None
@@ -1587,47 +1604,48 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     for intento in range(3):
         try:
             response = await asyncio.wait_for(
-                _genai_client.aio.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=conv,
-                    config=dialogo_config,
+                _claude_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=CLAUDE_MAX_TOKENS,
+                    temperature=0.2,
+                    system=PROMPT_DIAGRAMA,
+                    messages=[{"role": "user", "content": conv}],
                 ),
-                timeout=GEMINI_TIMEOUT_S,
+                timeout=CLAUDE_TIMEOUT_S,
             )
             break
         except asyncio.TimeoutError:
-            # Igual que en _consulta_retie: con thinking desactivado un
-            # timeout ya es la excepcion, no la regla -- reintentar en vez de
-            # rendirse a la primera evita dejar al usuario con un mensaje de
-            # error por una lentitud puntual del servicio.
-            last_err = TimeoutError(f"Gemini no respondio en {GEMINI_TIMEOUT_S}s")
+            # Un timeout puntual no es motivo para rendirse al primer
+            # intento (mismo criterio que _consulta_retie con Gemini).
+            last_err = TimeoutError(f"Claude no respondio en {CLAUDE_TIMEOUT_S}s")
             if intento < 2:
+                continue
+            break
+        except (anthropic.APITimeoutError, anthropic.OverloadedError,
+                 anthropic.RateLimitError, anthropic.InternalServerError) as e:
+            # Excepciones tipadas del SDK de Anthropic -- a diferencia de
+            # Gemini, no hace falta parsear el mensaje de texto para saber
+            # si es reintentable.
+            last_err = e
+            if intento < 2:
+                await asyncio.sleep(4 * (intento + 1))
                 continue
             break
         except Exception as e:
             last_err = e
-            msg = str(e)
-            retryable = (
-                "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower()
-                or "429" in msg or "RESOURCE_EXHAUSTED" in msg
-            )
-            if retryable and intento < 2:
-                await asyncio.sleep(4 * (intento + 1))
-                continue
             break
 
     if response is None:
         log.error(f"Error dialogo_diagrama [{type(last_err).__name__}]: {last_err}")
-        msg = str(last_err)
-        if isinstance(last_err, TimeoutError) or "no respondio" in msg.lower():
+        if isinstance(last_err, TimeoutError):
             txt = "⏳ Tardó demasiado en responder. Intenta de nuevo o usa /menu para el flujo guiado sin IA."
-        elif "401" in msg or "api key" in msg.lower() or "API_KEY" in msg:
-            txt = "⚠️ Clave API de Gemini inválida. Verifica GEMINI_API_KEY en Render."
-        elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
-            txt = "⏳ Cuota de Gemini agotada. Intenta en unos minutos."
-        elif "404" in msg or "not found" in msg.lower():
-            txt = "⚠️ Modelo Gemini no disponible. Contacta al administrador."
-        elif "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+        elif isinstance(last_err, anthropic.AuthenticationError):
+            txt = "⚠️ Clave API de Claude inválida. Verifica ANTHROPIC_API_KEY en Render."
+        elif isinstance(last_err, anthropic.RateLimitError):
+            txt = "⏳ Cuota de Claude agotada. Intenta en unos minutos."
+        elif isinstance(last_err, anthropic.NotFoundError):
+            txt = "⚠️ Modelo Claude no disponible. Contacta al administrador."
+        elif isinstance(last_err, (anthropic.OverloadedError, anthropic.InternalServerError)):
             txt = "⏳ Servicio IA saturado. Intenta de nuevo en unos segundos."
         else:
             txt = f"⚠️ Error con el servicio IA ({type(last_err).__name__}).\nIntenta de nuevo o escribe los datos directamente."
@@ -1635,7 +1653,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         return
 
     try:
-        respuesta = (response.text or "").strip()
+        respuesta = "".join(b.text for b in response.content if b.type == "text").strip()
     except (ValueError, AttributeError) as e:
         log.error(f"Error leyendo response.text en dialogo_diagrama: {e}")
         await update.message.reply_text(
