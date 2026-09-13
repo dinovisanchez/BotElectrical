@@ -52,6 +52,15 @@ ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 CLAUDE_MODEL   = "claude-sonnet-5"
 CLAUDE_TIMEOUT_S   = GEMINI_TIMEOUT_S      # mismo criterio: nunca sin timeout
 CLAUDE_MAX_TOKENS  = GEMINI_MAX_OUTPUT_TOKENS
+# _dialogo_diagrama es solo captura de datos (una pregunta corta a la vez o
+# el JSON final de DIAGRAMA_LISTO) -- un limite mas chico que
+# CLAUDE_MAX_TOKENS refuerza la brevedad a nivel de API, no solo con
+# instrucciones en el prompt (que un modelo puede ir ignorando a medida que
+# crece el historial). 500 da margen de sobra para el bloque JSON final
+# (~150-200 tokens) sin dejar espacio para que la respuesta normal se
+# alargue. _analizar_foto_cx SI necesita el presupuesto completo (emite un
+# reporte con varias secciones), no le apliques este limite.
+CLAUDE_DIALOGO_MAX_TOKENS = 500
 # A diferencia de gemini-2.5-flash, Claude NO activa "thinking" por defecto
 # (hay que pedirlo explicitamente con el parametro `thinking`) -- por eso no
 # existe aqui un equivalente a GEMINI_THINKING_CONFIG: simplemente no se pide
@@ -764,6 +773,21 @@ PROMPT_DIAGRAMA = (
     "\n"
     "Tu tarea UNICA es recopilar la informacion necesaria y generar el diagrama. "
     "No das conceptos tecnicos extensos. Solo preguntas y confirmaciones tecnicas breves.\n"
+    "\n"
+    "=== BREVEDAD (OBLIGATORIO) ===\n"
+    "Este es un flujo de captura de datos, NO una consulta tecnica -- cada "
+    "respuesta tuya debe poder leerse en 2 segundos.\n"
+    "- MAXIMO 1-2 lineas de texto por respuesta (la pregunta + un ejemplo "
+    "breve entre parentesis si hace falta). Nunca mas de eso.\n"
+    "- Ve directo a la pregunta. Nada de 'Perfecto', 'Entendido', 'Gracias por "
+    "la informacion' ni frases de cortesia -- el usuario ya sabe que lo leiste.\n"
+    "- No repitas ni resumas lo que el usuario acaba de decir antes de "
+    "preguntar lo siguiente (excepcion: la UNICA pregunta de confirmacion "
+    "permitida por incongruencia tecnica, ver REGLAS ESTRICTAS).\n"
+    "- Nunca expliques por que preguntas algo, ni dupliques la pregunta con "
+    "distintas palabras. Una sola vez, directo.\n"
+    "- Sin encabezados, sin listas con vinetas, sin markdown -- texto plano "
+    "corrido, como un mensaje de chat real entre colegas.\n"
     "\n"
     "=== IDIOMA (OBLIGATORIO) ===\n"
     "- Responde SIEMPRE en espanol de Colombia, incluso si el usuario escribe en ingles, "
@@ -1606,7 +1630,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
             response = await asyncio.wait_for(
                 _claude_client.messages.create(
                     model=CLAUDE_MODEL,
-                    max_tokens=CLAUDE_MAX_TOKENS,
+                    max_tokens=CLAUDE_DIALOGO_MAX_TOKENS,
                     temperature=0.2,
                     system=PROMPT_DIAGRAMA,
                     messages=[{"role": "user", "content": conv}],

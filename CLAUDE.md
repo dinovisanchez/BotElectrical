@@ -309,6 +309,33 @@ Detalles tecnicos de la migracion:
   `ANTHROPIC_API_KEY` (junto a la ya existente `GEMINI_API_KEY`, que sigue
   siendo necesaria para `_consulta_retie` y el RAG).
 
+### Brevedad en `_dialogo_diagrama` (feedback tras la migracion a Claude)
+El usuario reporto que las respuestas del dialogo de diagramas quedaron
+largas tras pasar a Claude -- Claude (incluso Sonnet) tiende a ser mas
+verboso por defecto que `gemini-2.5-flash` (mas cortesias, mas contexto
+explicado, aunque el prompt ya decia "preguntas breves"). Dos cambios,
+NINGUNO por si solo era suficiente:
+1. Nueva seccion `=== BREVEDAD (OBLIGATORIO) ===` en `PROMPT_DIAGRAMA`,
+   ANTES de `IDIOMA` y `REGLAS ESTRICTAS`: maximo 1-2 lineas por respuesta,
+   nada de "Perfecto"/"Entendido", no repetir lo que el usuario ya dijo, sin
+   encabezados ni vinetas -- texto plano corrido como un chat real.
+2. `CLAUDE_DIALOGO_MAX_TOKENS = 500` (bastante menor que
+   `CLAUDE_MAX_TOKENS` = 1400): un limite de instrucciones en el prompt solo
+   no es un limite duro -- un modelo puede irlo ignorando a medida que
+   crece el historial de la conversacion. Un `max_tokens` mas chico SI es un
+   limite duro a nivel de API. Solo se aplica a `_dialogo_diagrama` -- NO a
+   `_analizar_foto_cx`, que necesita el presupuesto completo porque emite un
+   reporte con varias secciones fijas (`PROMPT_VALIDACION_CX` ya tiene un
+   formato de salida estructurado y acotado, no corria el mismo riesgo de
+   alargarse). 500 da margen de sobra para el caso mas largo real (el bloque
+   JSON de `DIAGRAMA_LISTO`, ~150-200 tokens) sin dejar espacio para que una
+   pregunta simple se convierta en un parrafo.
+Si notas que las respuestas se siguen alargando (o si el limite de tokens
+alguna vez corta a medias el JSON de `DIAGRAMA_LISTO`, seria una señal de
+que 500 quedo corto), ajusta primero el prompt y verifica con una
+conversacion real antes de subir el limite -- subir el limite sin tocar el
+prompt es la salida facil que reintroduce el problema original.
+
 ## Rediseño visual: medidor "premium", bloque de prueba, plano de simbologia sincronizado
 Feedback directo del usuario tras ver los primeros renders del "Prompt
 Maestro": el medidor se veia poco cuidado, el bloque de pruebas en
