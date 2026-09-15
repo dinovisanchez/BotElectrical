@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re, asyncio, json, time
+import os, tempfile, logging, re, asyncio, json, time, base64
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
@@ -8,18 +8,32 @@ from telegram.ext import (Application, CommandHandler, MessageHandler,
 import diagram_engine
 from parser import parse_spec, DEFAULT
 
-from google import genai
-from google.genai import types
+import anthropic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("medidor-bot")
 
-GEMINI_KEY   = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.5-flash"
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY")
+CLAUDE_MODEL  = "claude-opus-5"
 
-RETIE_STORE_NAME = os.environ.get("RETIE_STORE_NAME", "")
+_ai_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
 
-_genai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
+
+def _load_retie_docs() -> str:
+    """Carga retie_docs/*.txt para embeberlos como contexto en el prompt (cacheado)."""
+    docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retie_docs")
+    partes = []
+    if os.path.isdir(docs_dir):
+        for nombre in sorted(os.listdir(docs_dir)):
+            if nombre.lower().endswith(".txt"):
+                try:
+                    with open(os.path.join(docs_dir, nombre), encoding="utf-8") as f:
+                        partes.append(f"### {nombre}\n{f.read().strip()}")
+                except OSError as e:
+                    log.warning(f"No se pudo leer {nombre}: {e}")
+    return "\n\n".join(partes)
+
+RETIE_DOCS_TEXT = _load_retie_docs()
 
 # ── Control de acceso — Google Sheets ─────────────────────────────────────────
 try:
@@ -247,7 +261,7 @@ PROMPT_SISTEMA_RETIE = (
     "     tierra'), usa esa informacion como punto de partida y confirma si es la\n"
     "     unica no-conformidad o si hay mas segun la norma.\n"
     "\n"
-    "=== DOCUMENTOS DISPONIBLES PARA BUSQUEDA (RAG) ===\n"
+    "=== ESTRUCTURA DEL RETIE (referencia) ===\n"
     "- RETIE 2024, Libro 1: Disposiciones Generales — definiciones, "
     "abreviaturas, gestion de seguridad, analisis de riesgos.\n"
     "- RETIE 2024, Libro 2: Productos — cajas de medidor (Art. 2.3.4.2), "
@@ -379,14 +393,16 @@ PROMPT_SISTEMA_RETIE = (
     "  Afinia (Costa Atlantica, ex-Electricaribe): ET-AFINIA-GD-002.\n"
     "    En zonas rurales puede aplicar medicion monofasica en red trifasica.\n"
     "\n"
-    "=== INSTRUCCION PARA BUSQUEDA ===\n"
+    "=== COMO RESPALDAR TUS RESPUESTAS ===\n"
     "Cuando el usuario haga una pregunta:\n"
     "1. PRIMERO usa los datos memorizados arriba si la respuesta esta ahi.\n"
-    "2. LUEGO busca en los documentos indexados para encontrar articulos y paginas "
-    "exactas que respalden o complementen la respuesta.\n"
-    "3. Cita SIEMPRE con el formato: 'RETIE 2024, Libro X, Titulo Y / Art. Z.W, pag. N'\n"
-    "   Ejemplo: 'RETIE 2024, Libro 3, Titulo 9, pag. 25'\n"
-    "   Para CREG: 'CREG 038/2014, Tabla N' o 'CREG 038/2014, Art. Z'\n"
+    "2. LUEGO revisa los DOCUMENTOS DE REFERENCIA incluidos mas abajo en este mismo "
+    "mensaje para encontrar articulos, numerales o secciones que respalden o "
+    "complementen la respuesta.\n"
+    "3. Cita el articulo/numeral/titulo exacto cuando lo tengas, formato: "
+    "'RETIE 2024, Libro X, Titulo Y / Art. Z.W' o 'CREG 038/2014, Art. Z'.\n"
+    "   Incluye el numero de pagina SOLO si aparece explicitamente en los datos "
+    "memorizados o en el documento de referencia — NUNCA inventes un numero de pagina.\n"
     "\n"
     "=== PATRON DE RESPUESTA — OBLIGATORIO EN TODAS LAS RESPUESTAS ===\n"
     "\n"
@@ -401,7 +417,8 @@ PROMPT_SISTEMA_RETIE = (
     "\n"
     "BLOQUE 3 — siempre presente:\n"
     "🏛️ NORMATIVA APLICABLE\n"
-    "- [articulos exactos en formato 'RETIE 2024, Libro X, Art. Y, pag. N']\n"
+    "- [articulos exactos en formato 'RETIE 2024, Libro X, Art. Y' — agrega pag. N "
+    "solo si la conoces con certeza, nunca la inventes]\n"
     "\n"
     "BLOQUE 4 — SOLO si el usuario pide recomendacion, consejo o alternativas:\n"
     "✅ TE RECOMENDAMOS\n"
@@ -541,6 +558,15 @@ PROMPT_SISTEMA_RETIE = (
     "  Decreto 1073/2015: Decreto Unico del Sector Minas y Energia (compila toda la reglamentacion).\n"
 )
 
+_SISTEMA_CONSULTA_RETIE_TXT = PROMPT_SISTEMA_RETIE
+if RETIE_DOCS_TEXT:
+    _SISTEMA_CONSULTA_RETIE_TXT += (
+        "\n\n=== DOCUMENTOS DE REFERENCIA (texto completo — usalos para respaldar tus respuestas) ===\n\n"
+        + RETIE_DOCS_TEXT
+    )
+SYSTEM_CONSULTA_RETIE = [{"type": "text", "text": _SISTEMA_CONSULTA_RETIE_TXT,
+                          "cache_control": {"type": "ephemeral"}}]
+
 PROMPT_DIAGRAMA = (
     "Eres un Ingeniero Electricista Senior colombiano especialista en sistemas de "
     "medicion de energia electrica (RETIE 2024, CREG 038/2014).\n"
@@ -628,6 +654,9 @@ PROMPT_DIAGRAMA = (
     "v_mt: string ej '13.2 kV' (tension MT, solo indirecta)\n"
     "tension_bt: string ej '220' (solo si instalacion=barraje)\n"
 )
+
+SYSTEM_DIALOGO_DIAGRAMA = [{"type": "text", "text": PROMPT_DIAGRAMA,
+                            "cache_control": {"type": "ephemeral"}}]
 
 SIS_TXT = {
     "mono":    "Monofásica",
@@ -757,7 +786,7 @@ async def _enviar_foto(mensaje, cfg):
         try: os.remove(path)
         except OSError: pass
 
-# ── Prompt validación de conexiones (Gemini Vision) ──────────────────────────
+# ── Prompt validación de conexiones (Claude Vision) ──────────────────────────
 PROMPT_VALIDACION_CX = (
     "Eres un Ingeniero Electricista Senior con mas de 20 anos de experiencia en "
     "sistemas de medida de energia electrica, diseno de planos y revision tecnica "
@@ -940,22 +969,36 @@ def _calcular_burden(bd):
     return "\n".join(lines)
 
 async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
-    if not _genai_client:
+    if not _ai_client:
         return "⚠️ Servicio de análisis de imágenes no disponible."
     prompt = PROMPT_VALIDACION_CX.format(tipo=tipo, norma=norma)
     try:
-        response = await _genai_client.aio.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                prompt,
-            ],
+        response = await _ai_client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=2048,
+            output_config={"effort": "medium"},
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": base64.standard_b64encode(image_bytes).decode("utf-8"),
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }],
         )
-        texto = (response.text or "").strip()
+        if response.stop_reason == "refusal":
+            return "⚠️ No pude analizar esta imagen. Intenta con otra foto."
+        texto = "".join(b.text for b in response.content if b.type == "text").strip()
         texto = texto.replace("**", "").replace("__", "")
         return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
     except Exception as e:
-        log.error(f"Error Gemini Vision: {e}")
+        log.error(f"Error Claude Vision: {e}", exc_info=True)
         return "⚠️ No pude analizar la imagen. Asegúrate de que la foto sea clara y bien iluminada."
 
 # ── Modulo experto RETIE ─────────────────────────────────────────────────────
@@ -989,7 +1032,7 @@ async def _enviar_largo(update: Update, texto: str):
 
 
 async def _consulta_retie(update: Update, texto: str):
-    if not GEMINI_KEY:
+    if not _ai_client:
         await update.message.reply_text(
             "⚠️ Consultas normativas no disponibles en este momento.\n"
             "Para diagramas usa /menu."
@@ -997,75 +1040,46 @@ async def _consulta_retie(update: Update, texto: str):
         return
     await update.message.reply_chat_action("typing")
     try:
-        tools = []
-        if RETIE_STORE_NAME:
-            FileSearch = getattr(types, "FileSearch", None)
-            if FileSearch is not None:
-                try:
-                    tools.append(types.Tool(
-                        file_search=FileSearch(file_search_store_names=[RETIE_STORE_NAME])
-                    ))
-                except Exception as _te:
-                    log.warning(f"FileSearch tool error: {_te}")
-            else:
-                log.warning("types.FileSearch no disponible en esta versión de google-genai; continuando sin RAG indexado.")
-
-        prompt = f"{PROMPT_SISTEMA_RETIE}\n\nCONSULTA:\n{texto}"
-
         response = None
         last_err = None
         for intento in range(3):
             try:
-                response = await _genai_client.aio.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(tools=tools) if tools else None,
+                response = await _ai_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=4096,
+                    system=SYSTEM_CONSULTA_RETIE,
+                    output_config={"effort": "medium"},
+                    messages=[{"role": "user", "content": texto}],
                 )
                 break
-            except Exception as e:
+            except (anthropic.RateLimitError, anthropic.APIConnectionError) as e:
                 last_err = e
-                msg = str(e)
-                if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
-                    if intento < 2:
-                        log.warning(f"Modelo ocupado (intento {intento+1}/3), reintentando...")
-                        await asyncio.sleep(2 * (intento + 1))
-                        continue
+                if intento < 2:
+                    log.warning(f"Claude ocupado (intento {intento+1}/3), reintentando...")
+                    await asyncio.sleep(2 * (intento + 1))
+                    continue
+                raise
+            except anthropic.APIStatusError as e:
+                last_err = e
+                if e.status_code >= 500 and intento < 2:
+                    log.warning(f"Claude ocupado (intento {intento+1}/3), reintentando...")
+                    await asyncio.sleep(2 * (intento + 1))
+                    continue
                 raise
         if response is None:
             raise last_err
 
-        respuesta = (response.text or "").strip()
+        if response.stop_reason == "refusal":
+            log.warning(f"Consulta rechazada por Claude: {response.stop_details}")
+            await update.message.reply_text(
+                "⚠️ No pude responder esa consulta. Intenta reformularla."
+            )
+            return
+
+        respuesta = "".join(b.text for b in response.content if b.type == "text").strip()
 
         if not respuesta:
-            finish_reason = None
-            try:
-                finish_reason = response.candidates[0].finish_reason
-            except Exception:
-                pass
-
-            if str(finish_reason) and "RECITATION" in str(finish_reason):
-                log.warning("Respuesta bloqueada por RECITATION, reintentando con parafraseo forzado.")
-                prompt_retry = (
-                    f"{prompt}\n\n"
-                    "NOTA: tu intento anterior fue bloqueado por citar texto "
-                    "demasiado literal del documento. Responde de nuevo a la "
-                    "misma consulta, pero PARAFRASEANDO TODO con tus propias "
-                    "palabras (resumenes cortos, sin copiar frases largas "
-                    "tal cual del documento), manteniendo las cifras y "
-                    "referencias de articulo/numeral/pagina."
-                )
-                try:
-                    response = await _genai_client.aio.models.generate_content(
-                        model=GEMINI_MODEL,
-                        contents=prompt_retry,
-                        config=types.GenerateContentConfig(tools=tools) if tools else None,
-                    )
-                    respuesta = (response.text or "").strip()
-                except Exception as e:
-                    log.error(f"Error en reintento por RECITATION: {e}")
-
-        if not respuesta:
-            log.warning(f"Respuesta vacia. response={response!r}")
+            log.warning(f"Respuesta vacia. stop_reason={response.stop_reason}")
             await update.message.reply_text(
                 "⚠️ El modelo no pudo generar una respuesta para esta consulta.\n\n"
                 "Intenta dividir la pregunta en partes más específicas."
@@ -1075,45 +1089,49 @@ async def _consulta_retie(update: Update, texto: str):
         respuesta = respuesta.replace("**", "").replace("__", "")
         respuesta = re.sub(r"\[([^\[\]]+)\]\([^\(\)]*\)", r"\1", respuesta)
 
-        if not tools:
-            respuesta += (
-                "\n\n⚠️ [Respuesta basada en conocimiento memorizados — verificar con norma oficial.]"
-            )
-
         await _enviar_largo(update, respuesta)
 
-    except Exception as e:
-        log.error(f"Error Gemini [{type(e).__name__}]: {e}")
-        msg = str(e)
-        if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+    except anthropic.AuthenticationError:
+        await update.message.reply_text(
+            "⚠️ Clave API de Claude inválida o no configurada.\n"
+            "Verifica la variable ANTHROPIC_API_KEY en Render."
+        )
+    except anthropic.RateLimitError:
+        await update.message.reply_text(
+            "⏳ Cuota de Claude agotada. Intenta en unos minutos."
+        )
+    except anthropic.NotFoundError:
+        await update.message.reply_text(
+            "⚠️ Modelo de Claude no disponible. Revisa CLAUDE_MODEL en el código."
+        )
+    except anthropic.APIConnectionError:
+        await update.message.reply_text(
+            "⏳ No se pudo conectar con el servicio de IA. Intenta de nuevo."
+        )
+    except anthropic.APIStatusError as e:
+        if e.status_code >= 500:
             await update.message.reply_text(
                 "⏳ El servicio normativo está saturado. Intenta de nuevo en unos segundos."
             )
-        elif "401" in msg or "API_KEY" in msg.upper() or "invalid api key" in msg.lower() or "api key" in msg.lower():
-            await update.message.reply_text(
-                "⚠️ Clave API de Gemini inválida o no configurada.\n"
-                "Verifica la variable GEMINI_API_KEY en Render."
-            )
-        elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
-            await update.message.reply_text(
-                "⏳ Cuota de Gemini agotada. Intenta en unos minutos."
-            )
-        elif "404" in msg or "not found" in msg.lower():
-            await update.message.reply_text(
-                "⚠️ Modelo Gemini no disponible. Revisa GEMINI_MODEL en el código."
-            )
         else:
+            log.error(f"Error Claude [{e.status_code}]: {e}")
             await update.message.reply_text(
-                f"⚠️ Error al consultar normativa: {type(e).__name__}\n"
+                f"⚠️ Error al consultar normativa ({e.status_code}).\n"
                 "Para diagramas usa /menu."
             )
+    except Exception as e:
+        log.error(f"Error Claude [{type(e).__name__}]: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"⚠️ Error al consultar normativa: {type(e).__name__}\n"
+            "Para diagramas usa /menu."
+        )
 
 
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
-    """Conversacion guiada por Gemini. Historial = lista de {"role":"user"|"model","text":"..."}"""
-    if not _genai_client:
+    """Conversacion guiada por Claude. Historial = lista de {"role":"user"|"model","text":"..."}"""
+    if not _ai_client:
         await update.message.reply_text(
-            "⚠️ Servicio IA no configurado (GEMINI_API_KEY ausente).\n"
+            "⚠️ Servicio IA no configurado (ANTHROPIC_API_KEY ausente).\n"
             "Usa /menu para el flujo guiado sin IA."
         )
         return
@@ -1121,54 +1139,65 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
     historial.append({"role": "user", "text": texto_usuario})
 
-    # Construir prompt plano (mismo patron que _consulta_retie)
-    conv = PROMPT_DIAGRAMA + "\n\n--- CONVERSACION ---\n"
-    for m in historial:
-        lbl = "USUARIO" if m["role"] == "user" else "INGENIERO"
-        conv += f"\n{lbl}: {m['text']}"
+    messages = [
+        {"role": "user" if m["role"] == "user" else "assistant", "content": m["text"]}
+        for m in historial
+    ]
 
     await update.message.reply_chat_action("typing")
     response = None
     last_err = None
     for intento in range(3):
         try:
-            response = await _genai_client.aio.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=conv,
+            response = await _ai_client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=4096,
+                system=SYSTEM_DIALOGO_DIAGRAMA,
+                output_config={"effort": "medium"},
+                messages=messages,
             )
             break
-        except Exception as e:
+        except (anthropic.RateLimitError, anthropic.APIConnectionError) as e:
             last_err = e
-            msg = str(e)
-            retryable = (
-                "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower()
-                or "429" in msg or "RESOURCE_EXHAUSTED" in msg
-            )
-            if retryable and intento < 2:
+            if intento < 2:
                 await asyncio.sleep(4 * (intento + 1))
                 continue
             break
+        except anthropic.APIStatusError as e:
+            last_err = e
+            if e.status_code >= 500 and intento < 2:
+                await asyncio.sleep(4 * (intento + 1))
+                continue
+            break
+        except Exception as e:
+            last_err = e
+            break
 
     if response is None:
-        log.error(f"Error dialogo_diagrama [{type(last_err).__name__}]: {last_err}")
-        msg = str(last_err)
-        if "401" in msg or "api key" in msg.lower() or "API_KEY" in msg:
-            txt = "⚠️ Clave API de Gemini inválida. Verifica GEMINI_API_KEY en Render."
-        elif "429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
-            txt = "⏳ Cuota de Gemini agotada. Intenta en unos minutos."
-        elif "404" in msg or "not found" in msg.lower():
-            txt = "⚠️ Modelo Gemini no disponible. Contacta al administrador."
-        elif "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+        log.error(f"Error dialogo_diagrama [{type(last_err).__name__}]: {last_err}", exc_info=last_err)
+        if isinstance(last_err, anthropic.AuthenticationError):
+            txt = "⚠️ Clave API de Claude inválida. Verifica ANTHROPIC_API_KEY en Render."
+        elif isinstance(last_err, anthropic.RateLimitError):
+            txt = "⏳ Cuota de Claude agotada. Intenta en unos minutos."
+        elif isinstance(last_err, anthropic.NotFoundError):
+            txt = "⚠️ Modelo de Claude no disponible. Contacta al administrador."
+        elif isinstance(last_err, (anthropic.APIStatusError, anthropic.APIConnectionError)):
             txt = "⏳ Servicio IA saturado. Intenta de nuevo en unos segundos."
         else:
             txt = f"⚠️ Error con el servicio IA ({type(last_err).__name__}).\nIntenta de nuevo o escribe los datos directamente."
         await update.message.reply_text(txt)
         return
 
-    try:
-        respuesta = (response.text or "").strip()
-    except (ValueError, AttributeError) as e:
-        log.error(f"Error leyendo response.text en dialogo_diagrama: {e}")
+    if response.stop_reason == "refusal":
+        log.warning(f"Dialogo rechazado por Claude: {response.stop_details}")
+        await update.message.reply_text(
+            "⚠️ Respuesta bloqueada por el filtro de seguridad.\n"
+            "Intenta reformular tu descripcion."
+        )
+        return
+
+    respuesta = "".join(b.text for b in response.content if b.type == "text").strip()
+    if not respuesta:
         await update.message.reply_text(
             "⚠️ Respuesta bloqueada por el filtro de seguridad.\n"
             "Intenta reformular tu descripcion."
@@ -1193,7 +1222,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 await _enviar_foto(update.message, cfg)
                 return
             except (json.JSONDecodeError, KeyError) as e:
-                log.error(f"JSON malformado de Gemini diagrama: {e}\n{respuesta}")
+                log.error(f"JSON malformado de Claude diagrama: {e}\n{respuesta}")
         ctx.user_data["modo_diagrama_ia"] = False
         ctx.user_data["historial_diagrama"] = []
         await update.message.reply_text(
@@ -1530,7 +1559,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         else:
-            if _genai_client:
+            if _ai_client:
                 ctx.user_data["modo_diagrama_ia"] = True
                 ctx.user_data["historial_diagrama"] = []
                 await q.edit_message_text(

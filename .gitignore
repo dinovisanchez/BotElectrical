@@ -12,9 +12,6 @@ muestra_*.png
 .venv_setup/
 .venv/
 
-# Documentos RETIE (pesados, no necesarios en el repo)
-retie_docs/
-
 # Cache Python
 __pycache__/
 *.pyc
