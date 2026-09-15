@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Motor de diagramas para sistemas de medida de energia.
-  draw(cfg, out)          -> diagrama de CONEXIONES (Medidor <-> Bloque <-> TC/TP)
-  draw_unifilar(cfg, out) -> diagrama UNIFILAR tecnico de la medida
+  draw(cfg, out)                 -> diagrama de CONEXIONES (Medidor <-> Bloque <-> TC/TP)
+  draw_unifilar(cfg, out)        -> diagrama UNIFILAR tecnico de la medida
+  draw_unifilar_tablero(cfg, out)-> unifilar de TABLERO GENERAL BT (acometida/trafo
+                                     + interruptor ppal + barra + ramales de salida)
 
 cfg:
   sistema : 'mono'|'bifasico'|'tri3h'(2 elem)|'tri4h'(3 elem)
@@ -1716,6 +1718,161 @@ def draw_unifilar_generico(cfg, out_path):
     plt.close(fig)
     return out_path
 
+# ============================================================
+#  DIAGRAMA UNIFILAR — TABLERO GENERAL BT (acometida/trafo + ramales)
+# ============================================================
+def draw_unifilar_tablero(cfg, out_path):
+    """
+    Unifilar de un tablero general de baja tension: acometida con proteccion
+    primaria y transformador, interruptor principal, barra general y ramales
+    de salida (proteccion + medicion + conductor + carga), estilo tecnico con
+    cuadros de carga en slate (#0F172A) y tabla de convenciones.
+
+    cfg:
+      proyecto, circuito_entrada : str
+      proteccion_primaria : str (texto libre; si contiene "seccion" dibuja
+                            seccionador, de lo contrario fusible)
+      trafo_kva, trafo_serie : str
+      interruptor_principal : str (ej. '3x600 A')
+      bus_voltaje : str (ej. '220/127 V')
+      ramales: list[{
+        proteccion : str opcional (ej. '3x400 A')
+        medicion   : str opcional (ej. 'TC 400/5 A + CEM')
+        medidor    : str opcional (ej. 'kWh') — medicion directa sin TC
+        conductor  : str opcional (ej. '3 N.2/0')
+        carga      : str — nombre de la carga
+      }]
+    """
+    SLATE, SLATE_ED = "#0F172A", "#334155"
+
+    ramales = cfg.get("ramales") or [{"carga": "Carga 1"}]
+    n = len(ramales)
+    branch_w = 24
+    legend_w = 34
+    content_w = max(branch_w, n * branch_w)
+    W = legend_w + content_w + 12
+    H = 118
+    xm = legend_w + content_w / 2
+
+    fig, ax = plt.subplots(figsize=(W / 9.0, H / 9.0))
+    ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
+
+    # ---------- titulo ----------
+    y = H - 4
+    ax.text(xm, y, cfg.get("proyecto") or "DIAGRAMA UNIFILAR — TABLERO GENERAL",
+            ha="center", fontsize=13.5, fontweight="bold", color=INK)
+    y -= 5.5
+    circuito = cfg.get("circuito_entrada")
+    if circuito:
+        ax.text(xm, y, f"Circuito de entrada: {circuito}", ha="center", fontsize=9, color="#555555")
+        y -= 6
+    else:
+        y -= 2
+
+    # ---------- tronco de acometida (proteccion -> trafo -> interruptor ppal) ----------
+    y_prot, y_xfmr, y_break = y - 6, y - 16, y - 26
+    y_bus = y_break - 8
+    ax.plot([xm, xm], [y, y_bus], color=INK, lw=2.2, zorder=2)
+
+    prot_txt = cfg.get("proteccion_primaria", "")
+    if "seccion" in prot_txt.lower():
+        _u_disc(ax, xm, y_prot, INK, 1.1)
+    else:
+        _u_fuse(ax, xm, y_prot, INK, 1.1)
+    ax.text(xm + 5, y_prot, prot_txt or "Proteccion primaria", ha="left", va="center",
+            fontsize=8.3, color=INK, fontweight="bold")
+
+    _u_xfmr(ax, xm, y_xfmr, INK, 1.15, ground=True)
+    kva, serie = cfg.get("trafo_kva"), cfg.get("trafo_serie")
+    tlabel = "TRAFO" + (f" {kva} kVA" if kva else "") + (f" · {serie}" if serie else "")
+    ax.text(xm + 6.5, y_xfmr, tlabel, ha="left", va="center",
+            fontsize=8.3, color=INK, fontweight="bold")
+
+    _u_breaker(ax, xm, y_break, INK, 1.15)
+    interr = cfg.get("interruptor_principal", "")
+    ax.text(xm + 5, y_break, ("Interruptor ppal. " + interr).strip(), ha="left", va="center",
+            fontsize=8.3, color=INK, fontweight="bold")
+
+    # ---------- barra general ----------
+    xs = [legend_w + branch_w / 2 + i * branch_w for i in range(n)]
+    bx0, bx1 = min(xs) - 6, max(xs) + 6
+    ax.plot([bx0, bx1], [y_bus, y_bus], color=INK, lw=4.2, zorder=3, solid_capstyle="butt")
+    volt = cfg.get("bus_voltaje", "")
+    ax.text(xm, y_bus + 2.4, ("BARRA GENERAL " + volt).strip(), ha="center", va="bottom",
+            fontsize=9, fontweight="bold", color=INK)
+
+    # ---------- ramales de salida ----------
+    y_load = 20
+    for x, ram in zip(xs, ramales):
+        yy = y_bus - 2
+        ax.plot([x, x], [y_bus, yy], color=INK, lw=1.8, zorder=2)
+
+        prot = ram.get("proteccion")
+        if prot:
+            yy -= 4
+            _u_breaker(ax, x, yy, INK, 0.85)
+            ax.text(x, yy - 3.3, prot, ha="center", va="top", fontsize=6.6, color=INK)
+            yy -= 4.5
+
+        med, medidor = ram.get("medicion"), ram.get("medidor")
+        if med:
+            yy -= 3.5
+            _u_ct(ax, x, yy, COL["R"], 0.8)
+            ax.text(x, yy - 3.0, med, ha="center", va="top", fontsize=6.4, color=COL["R"])
+            yy -= 4.2
+        elif medidor:
+            yy -= 4.5
+            mw, mh = branch_w * 0.62, 6.5
+            ax.add_patch(FancyBboxPatch((x - mw / 2, yy - mh / 2), mw, mh,
+                         boxstyle="round,pad=0.3,rounding_size=1.4",
+                         fill=True, fc=SLATE, ec="#0B1220", lw=1.4, zorder=5))
+            ax.text(x, yy + 1.0, "MEDIDOR", ha="center", fontsize=6.3, fontweight="bold",
+                    color="white", zorder=6)
+            ax.text(x, yy - 1.6, medidor, ha="center", fontsize=6.0, color="#36DF8F",
+                    family="monospace", zorder=6)
+            yy -= mh / 2 + 2
+
+        cond = ram.get("conductor")
+        if cond:
+            ax.text(x + 1.0, (yy + y_load + 8) / 2, cond, ha="left", va="center",
+                    fontsize=6.2, color="#555555", style="italic", rotation=90)
+
+        ax.plot([x, x], [yy, y_load + 8], color=INK, lw=1.6, zorder=2)
+
+        bw, bh = branch_w * 0.82, 8
+        ax.add_patch(FancyBboxPatch((x - bw / 2, y_load - bh / 2), bw, bh,
+                     boxstyle="round,pad=0.35,rounding_size=1.6",
+                     fill=True, fc=SLATE, ec=SLATE_ED, lw=1.6, zorder=5))
+        ax.text(x, y_load, ram.get("carga", "Carga"), ha="center", va="center",
+                fontsize=7.4, fontweight="bold", color="white", zorder=6)
+
+    # ---------- tabla de convenciones ----------
+    lx0, lx1, ly0, ly1 = 2, legend_w - 2, 2, 34
+    ax.add_patch(FancyBboxPatch((lx0, ly0), lx1 - lx0, ly1 - ly0,
+                 boxstyle="round,pad=0.5,rounding_size=1.8",
+                 fill=True, fc="#FAFAFA", ec="#2B2B2B", lw=1.3, zorder=7))
+    ax.text((lx0 + lx1) / 2, ly1 - 3, "CONVENCIONES", ha="center", fontsize=8.6,
+            fontweight="bold", color=INK, zorder=8)
+    conv_items = [
+        ("Fusible / cortacircuitos", lambda x, y: _u_fuse(ax, x, y, INK, 0.6)),
+        ("Seccionador",              lambda x, y: _u_disc(ax, x, y, INK, 0.6)),
+        ("Transformador",            lambda x, y: _u_xfmr(ax, x, y, INK, 0.55, False)),
+        ("Interruptor automatico",   lambda x, y: _u_breaker(ax, x, y, INK, 0.6)),
+        ("TC (medicion)",            lambda x, y: _u_ct(ax, x, y, COL["R"], 0.55)),
+        ("Carga / tablero",          lambda x, y: ax.add_patch(
+            FancyBboxPatch((x - 2.6, y - 1.6), 5.2, 3.2, boxstyle="round,pad=0.15",
+                           fill=True, fc=SLATE, ec=SLATE_ED, lw=1.0, zorder=8))),
+    ]
+    sx, tx = lx0 + 4.5, lx0 + 9
+    item_ys = np.linspace(ly1 - 6.5, ly0 + 2.5, len(conv_items))
+    for (lbl, draw_sym), yy in zip(conv_items, item_ys):
+        draw_sym(sx, yy)
+        ax.text(tx, yy, lbl, ha="left", va="center", fontsize=6.6, color=INK, zorder=8)
+
+    plt.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white", pad_inches=0.3)
+    plt.close(fig)
+    return out_path
+
 # ---------- pruebas ----------
 if __name__=="__main__":
     import os; base=os.path.dirname(os.path.abspath(__file__))
@@ -1732,4 +1889,13 @@ if __name__=="__main__":
          os.path.join(base,"muestra_unifilar_indirecta.png"))
     draw_unifilar(dict(sistema="tri4h",tipo="semidirecta",norma="RA8",rel_tc="300/5"),
          os.path.join(base,"muestra_unifilar_semidirecta.png"))
+    draw_unifilar_tablero(dict(
+        proyecto="Subestacion Cliente X", circuito_entrada="Cto X-01",
+        proteccion_primaria="Fusible 15 kV", trafo_kva="150", trafo_serie="#12345",
+        interruptor_principal="3x600 A", bus_voltaje="220/127 V",
+        ramales=[
+            dict(proteccion="3x400 A", medicion="TC 400/5 A + CEM", conductor="3 N.2/0", carga="Tablero Principal"),
+            dict(medidor="kWh", carga="Bombeo / Servicios"),
+            dict(proteccion="3x150 A", conductor="3 N.2", carga="Iluminacion Comun"),
+        ]), os.path.join(base,"muestra_unifilar_tablero.png"))
     print("OK todas")
