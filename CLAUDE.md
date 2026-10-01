@@ -531,6 +531,55 @@ las que emiten ese callback (`grep '"n_trafos"'`) y corre `test_menu_walk.py`.
   "unifilar" sola, el menú NUNCA pregunta `sistema`, así que queda el default
   `tri4h` y el plano dice "Trifásica 4 Hilos" aunque la instalación sea mono/bifásica.
 
+## Seccionador, cuadro de datos y rótulos de secundarios (oct/2026)
+Pedido del usuario, tomando como ejemplo un script externo de unifilar
+indirecta (700 kVA, TC 30/5, TP 13200/120, "seccionador tripolar 13,2 kV
+después de la medida"). Se conservó el motor IEC con protecciones y bloque de
+prueba (el ejemplo omitía CC fusibles, pararrayos y bloque de prueba, que aquí
+son obligatorios) y se adoptó de él lo siguiente:
+- **El seccionador se describe SIEMPRE respecto al TRAFO**, no a la medida:
+  `'antes'` = entre el punto de medida y el trafo (lado MT, rótulo "Seccionador
+  MT 13.2 kV"); `'despues'` = aguas abajo del trafo (lado BT, "Seccionador BT").
+  Antes el menú preguntaba "antes/después de la medida", que en indirecta (medida
+  en MT, aguas arriba del trafo) significaba lo CONTRARIO de lo dibujado. Todo
+  texto visible sale de `_SECC_TXT/_SECC_CORTO/_SECC_BOTONES/_SECC_PREGUNTA`
+  (bot.py) -- no escribas literales nuevos. Los valores del cfg no cambiaron.
+- `parser.py` ahora reconoce "seccionador": posición explícita (antes/después
+  del trafo, lado MT/BT) o relativa a la medida ("después de la medida" ->
+  `'antes'` en indirecta, `'despues'` en semi/directa); mencionado sin posición
+  -> `'antes'`; "sin seccionador" -> nada. `test_seccionador.py` lo cubre.
+- `_verificar_coherencia()` avisa (ya no descarta en silencio) cuando el
+  seccionador "antes" no tiene trafo, y cuando una subestación multi-celda
+  (n_trafos>=2 en indirecta) no dibuja seccionador/protección generales.
+- **Cuadro de datos** (columna derecha, sobre el plano de simbología): lista
+  SOLO lo que realmente queda dibujado (p.ej. no lista el seccionador en
+  multi-celda). Sus filas se arman ANTES de crear la figura porque su altura
+  decide `H` (el lienzo crece lo necesario; la figura crece en proporción
+  `11*H/115` para que la escala de símbolos/texto no cambie). Si agregas un
+  elemento nuevo al unifilar, agrégalo también a `filas` o el cuadro mentirá.
+- Rótulos "sec. 5 A" / "sec. 120 V" sobre el hilo TC/TP -> bloque (derivados
+  de `rel_tc`/`rel_tp`), alineados a la derecha pegados al bloque.
+- Arreglos de dibujo encontrados al "energizar":
+  1. la línea principal atravesaba el símbolo del seccionador (se leía como
+     puenteado/cerrado): ahora llega solo a los contactos;
+  2. hueco de 1 unidad entre el trafo y el siguiente elemento (circuito
+     abierto en el dibujo);
+  3. el seccionador tocaba el círculo del trafo / el triángulo de CARGA;
+  4. "(paralelo) TP ..." se encimaba con el pararrayos de indirecta;
+  5. el rótulo del conductor ("cal. ?") tocaba el trafo / quedaba sobre el
+     rótulo de la protección: ahora tiene su propio tramo;
+  6. trafo compartido: el recinto del gabinete CRUZABA el círculo del trafo
+     (contra el invariante documentado) y "(red abierta)" tocaba el medidor
+     PRINCIPAL: el barraje compartido se separó 4 u del trafo (`bt_y =
+     trafo_y - 9`) y la conexión del usuario bajó 3 u.
+- **Pendiente conocido (preexistente, no tocado)**: en directa el medidor
+  (`y_mid = y - 5`, `r = 6.5`) sube 1.5 u por encima de `y` y se encima con la
+  protección/línea de arriba; los rótulos "MEDIDOR/PRINCIPAL/RESPALDO" quedan
+  tachados por la línea que continúa; en multi-celda las etiquetas "TRi kVA"
+  quedan cruzadas por la línea de cada rama. Además `parser.py` toma "RA8" en
+  cualquier parte del texto como NORMA (un circuito llamado "RA8" junto a
+  "CENS" lanza "Norma ambigua").
+
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
 - Mapeo medidor 3 elem (forma 9S): `1 IA · 2 VA · 3 IA' · 4 IB · 5 VB · 6 IB' · 7 IC · 8 VC · 9 IC' · N(10 RA8 / 11 CENS)`.
