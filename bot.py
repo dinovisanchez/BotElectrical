@@ -2299,13 +2299,12 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 else:
                     cfg["instalacion"] = "trafo"
                     _adv()
-                    kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3"),("4  (banco cuatro)","4")], "n_trafos")
+                    # n_trafos es entrada de texto libre (ya no hay botones
+                    # "n_trafos:*" ni handler para ellos en on_button).
+                    ctx.user_data["esperando_n_trafos"] = True
                     await q.edit_message_text(
                         _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                        "  1  — un transformador trifásico\n"
-                                        "  2  — banco de 2 monofásicos\n"
-                                        "  3  — banco de 3 monofásicos"),
-                        reply_markup=InlineKeyboardMarkup(kb)
+                                        "  Escribe el número  ej: 1  2  3  ...")
                     )
             else:  # semidirecta
                 if cfg.get("salida") == "conexiones":
@@ -2341,13 +2340,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             cfg["instalacion"] = "trafo"
             _adv()
-            kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3"),("4  (banco cuatro)","4")], "n_trafos")
+            ctx.user_data["esperando_n_trafos"] = True
             await q.edit_message_text(
                 _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                "  1  — un transformador trifásico\n"
-                                "  2  — banco de 2 monofásicos\n"
-                                "  3  — banco de 3 monofásicos"),
-                reply_markup=InlineKeyboardMarkup(kb)
+                                "  Escribe el número  ej: 1  2  3  ...")
             )
 
     # ── Conexión del medidor (directa) ────────────────────────────────────────

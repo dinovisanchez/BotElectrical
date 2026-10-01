@@ -26,6 +26,10 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   confirma que el PNG generado no salió vacío/corrupto antes de enviarlo.
 - `test_e2e.py`, `test_menu_flow.py`, `test_parser_fields.py` — pruebas locales
   sin Telegram, contra las funciones reales de producción (no las legacy).
+  OJO: `test_menu_flow.py` solo llama al motor, NO recorre el menú de botones.
+- `test_menu_walk.py` — recorre el menú de botones REAL (`on_button`/`on_text`
+  con objetos de Telegram simulados) por todos los tipo × salida y falla si
+  algún camino queda sin respuesta. `--draw` además dibuja cada diagrama.
 - `requirements.txt`, `README.md`.
 
 ## Velocidad y timeouts en las llamadas a Gemini
@@ -511,6 +515,21 @@ multi-celda -- todo eso YA estaba. Lo que se agrego nuevo:
     `parser.DEFAULT` (nunca se leian en ningun lado); `test_parser_fields.py`
     actualizado para imprimir `instalacion`/`interruptor` (los campos reales)
     en vez de esos.
+
+## QA de oct/2026: menú "Indirecta + Cx + Uni" no generaba nada
+Reporte: "el unifilar no me está generando diagrama". El motor
+(`draw_unifilar_generico`) NO era el problema (sin fallos en ~1000 cfgs
+sintéticos). Causa real, en `bot.py`: el commit `c8ce231` pasó `n_trafos` de
+botones a TEXTO LIBRE (`esperando_n_trafos`) y borró el handler
+`campo == "n_trafos"`, pero dejó 2 pantallas (`sistema` y `subtipo`, solo
+alcanzables con tipo=indirecta y salida="ambos") mostrando los botones viejos
+`n_trafos:1..4` -> al tocarlos el bot no respondía y nunca llegaba a generar.
+Arreglo: ambas pantallas ahora piden el número por texto, igual que las demás.
+**Regla**: si cambias una pantalla de botones a texto (o viceversa), busca TODAS
+las que emiten ese callback (`grep '"n_trafos"'`) y corre `test_menu_walk.py`.
+- Pendiente conocido (no tocado, requiere decidir el flujo): con salida
+  "unifilar" sola, el menú NUNCA pregunta `sistema`, así que queda el default
+  `tri4h` y el plano dice "Trifásica 4 Hilos" aunque la instalación sea mono/bifásica.
 
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
