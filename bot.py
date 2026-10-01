@@ -1440,7 +1440,9 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
             _claude_client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=CLAUDE_MAX_TOKENS,
-                temperature=0.2,
+                # SIN temperature/top_p/top_k: el SDK anthropic 1.x ya no los acepta
+                # (TypeError: create() got an unexpected keyword argument) y la API
+                # los rechaza en los modelos Sonnet 5 / Opus 4.7+.
                 messages=[{
                     "role": "user",
                     "content": [
@@ -1723,18 +1725,24 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
     await update.message.reply_chat_action("typing")
     response = None
     last_err = None
+
+    async def _llamar(max_tok):
+        # SIN temperature/top_p/top_k: el SDK anthropic 1.x ya no los acepta
+        # (TypeError) y la API los rechaza en Sonnet 5 / Opus 4.7+. Ver
+        # test_claude_sdk.py, que usa el SDK REAL (un cliente falso lo habia ocultado).
+        return await asyncio.wait_for(
+            _claude_client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=max_tok,
+                system=PROMPT_DIAGRAMA,
+                messages=[{"role": "user", "content": conv}],
+            ),
+            timeout=CLAUDE_TIMEOUT_S,
+        )
+
     for intento in range(3):
         try:
-            response = await asyncio.wait_for(
-                _claude_client.messages.create(
-                    model=CLAUDE_MODEL,
-                    max_tokens=CLAUDE_DIALOGO_MAX_TOKENS,
-                    temperature=0.2,
-                    system=PROMPT_DIAGRAMA,
-                    messages=[{"role": "user", "content": conv}],
-                ),
-                timeout=CLAUDE_TIMEOUT_S,
-            )
+            response = await _llamar(CLAUDE_DIALOGO_MAX_TOKENS)
             break
         except asyncio.TimeoutError:
             # Un timeout puntual no es motivo para rendirse al primer
@@ -1774,6 +1782,19 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         await update.message.reply_text(txt)
         return
 
+    # Sonnet 5 piensa por defecto (thinking adaptativo) y ese razonamiento sale del
+    # MISMO max_tokens que la respuesta visible: con el limite corto del dialogo (500)
+    # puede agotarse y dejar la respuesta vacia o el JSON de DIAGRAMA_LISTO cortado
+    # (el mismo bug que ya tuvimos con gemini-2.5-flash). Se reintenta UNA vez con el
+    # presupuesto completo antes de rendirse.
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        log.warning("dialogo_diagrama: stop_reason=max_tokens con %s tokens; reintento con %s",
+                    CLAUDE_DIALOGO_MAX_TOKENS, CLAUDE_MAX_TOKENS)
+        try:
+            response = await _llamar(CLAUDE_MAX_TOKENS)
+        except Exception as e:                       # se conserva la respuesta truncada
+            log.warning(f"dialogo_diagrama: el reintento por max_tokens fallo: {e}")
+
     try:
         respuesta = "".join(b.text for b in response.content if b.type == "text").strip()
     except (ValueError, AttributeError) as e:
@@ -1781,6 +1802,13 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         await update.message.reply_text(
             "⚠️ Respuesta bloqueada por el filtro de seguridad.\n"
             "Intenta reformular tu descripcion."
+        )
+        return
+    if not respuesta:
+        # Telegram rechaza mensajes vacios (BadRequest) y el usuario se quedaba sin respuesta.
+        log.error(f"dialogo_diagrama: respuesta vacia (stop_reason={getattr(response, 'stop_reason', None)})")
+        await update.message.reply_text(
+            "⚠️ No pude generar una respuesta. Intenta de nuevo o usa /menu para el flujo guiado."
         )
         return
     respuesta_clean = respuesta.replace("**", "").replace("__", "").replace("`", "")
