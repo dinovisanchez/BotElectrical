@@ -1094,6 +1094,16 @@ def _verificar_coherencia(cfg):
             "y la protección generales no se dibujan: cada celda lleva su propio fusible."
         )
 
+    if tipo == "indirecta":
+        # Validacion numerica del punto de medida (In del trafo vs TC, TP vs red).
+        # Solo avisa lo que NO esta bien: lo correcto ya sale en el cuadro de datos.
+        try:
+            for nivel, _corto, largo in diagram_engine._validar_indirecta(cfg):
+                if nivel != "ok":
+                    notas_usuario.append(largo)
+        except Exception as e:                      # nunca bloquear el diagrama por esto
+            log.warning(f"[coherencia] validacion indirecta fallo: {e}")
+
     if tipo == "indirecta" and not cfg.get("rel_tc"):
         log.warning("[coherencia] indirecta sin relacion de TC")
     if tipo == "indirecta" and not cfg.get("rel_tp"):
@@ -1189,7 +1199,12 @@ async def _enviar_foto(mensaje, cfg, ctx=None):
     extra = ("\n\n⚠️ " + " ".join(notas)) if notas else ""
     for tipo_diagrama, path in imgs:
         with open(path, "rb") as f:
-            await mensaje.reply_photo(photo=f, caption=_caption(tipo_diagrama, cfg) + extra)
+            # Telegram rechaza captions de mas de 1024 caracteres (BadRequest) y el
+            # diagrama no se entrega: con los avisos de validacion puede pasarse.
+            cap = _caption(tipo_diagrama, cfg) + extra
+            if len(cap) > 1024:
+                cap = cap[:1021].rstrip() + "…"
+            await mensaje.reply_photo(photo=f, caption=cap)
         try: os.remove(path)
         except OSError: pass
     # Guarda el cfg (ya corregido por _verificar_coherencia) para /ultimo y

@@ -54,7 +54,7 @@ def main():
 
     # Avisos de coherencia: nada se descarta en silencio
     base = dict(DEFAULT, salida="unifilar", tipo="indirecta", instalacion="trafo",
-                trafo_kva="700", rel_tc="30/5", rel_tp="13200/120")
+                trafo_kva="700", rel_tc="50/5", rel_tp="13200/120")   # 50/5: sin avisos de validacion
     c, notas = bot._verificar_coherencia(dict(base, instalacion="", seccionador="antes"))
     ok = "seccionador" not in c and any("seccionador" in n.lower() for n in notas)
     malos += not ok; print("OK  " if ok else "MAL ", "antes sin trafo -> se quita y se avisa")

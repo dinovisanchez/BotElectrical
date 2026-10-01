@@ -591,35 +591,54 @@ son obligatorios) y se adoptó de él lo siguiente:
   líneas ("TRi / 500 / kVA"). Verificado con 3, 6 y 8 celdas.
 - Hueco de 1 u entre el barraje compartido y la derivación a los medidores.
 
-## Unifilar de medida INDIRECTA en estilo "plano limpio" (oct/2026)
-Pedido explícito del usuario ("hazlo como el ejemplo, tal cual, es más estético
-y más pro") tras compartir un script/imagen de ejemplo. `draw_unifilar_generico`
+## Unifilar de medida INDIRECTA en estilo "plano limpio" v2 (oct/2026)
+Pedido explícito del usuario ("hazlo como el ejemplo, tal cual") y luego
+("critica esta versión, detecta 3 debilidades y crea una mejor"). `draw_unifilar_generico`
 despacha a **`draw_unifilar_indirecta_pro(cfg, out)`** cuando `tipo='indirecta'`,
-`n_trafos < 2` y `cfg.get('estilo') != 'detallado'`. Layout vertical idéntico al
-ejemplo: barra de RED -> TC -> derivación TP (a la derecha, con tierra) ->
-[seccionador] -> trafo -> flecha "A CARGA", con el medidor a la izquierda unido
-por los secundarios punteados (TC azul, TP verde, rotulados "Secundario TC – 5 A"
-/ "Secundario TP – 120 V") y un cuadro de datos al pie. Todo sale del cfg:
-título/red desde `v_mt` ("13.2 kV" -> "13,2 kV" / "13.200 V"), nº de TC/TP desde
-`n_tc`/`n_tp` o el sistema (mono 1, bifásico 2, Aron 2, 3 elementos 3).
-- **Sin el cuadro "RA8" ni su "13.200 V"** (el usuario lo pidió quitar): la barra
-  baja directo al TC. El cuadro de punto de conexión NO existe en este estilo;
-  `circuito` va en el cuadro de datos.
-- **Cambios de convención asumidos por el usuario en este estilo**: ya NO se
-  dibujan CC fusibles MT, pararrayos ZnO, bloque de prueba ni plano de
-  simbología (el ejemplo no los tiene). Siguen en `draw_unifilar_generico`:
-  directa, semidirecta, multi-celda (n_trafos>=2) e indirecta con
-  `cfg['estilo']='detallado'` (no hay botón/campo en el menú para elegirlo; es un
-  flag de cfg). Si el usuario pide volver a ver fusibles/pararrayos/bloque en
-  indirecta, la salida es `estilo='detallado'` o portarlos al estilo pro.
-- Seccionador: `'antes'` = entre la medida y el trafo (como el ejemplo, "Seccionador
-  tripolar 13,2 kV"); `'despues'` = tras el trafo/protección (lado BT). Protección
-  (`proteccion_despues` o `interruptor`) = cuadrito + etiqueta bajo el trafo.
-  `proteccion_antes` no se dibuja en indirecta (igual que antes). Respaldo = dos
-  medidores lado a lado en paralelo. El lienzo crece con el contenido (alto = f(filas
-  del cuadro + elementos bajo el trafo)); 1 unidad = 1 pulgada, dpi=180.
-- Si agregas un elemento a este estilo, agrégalo también a las filas del cuadro
-  (lista `filas`/`l3` al inicio de la función) o el cuadro no lo mencionará.
+`n_trafos < 2` y `cfg.get('estilo') != 'detallado'`. Layout vertical del ejemplo:
+barra de RED -> [pararrayos + CC fusibles] -> TC -> derivación TP (derecha, a
+tierra) -> [seccionador] -> trafo -> flecha "A CARGA"; medidor a la izquierda con
+sus secundarios punteados pasando por el **BLOQUE DE PRUEBAS**; cuadro de datos al
+pie. Sin el cuadro "RA8" (el usuario lo pidió quitar): la barra baja directo a
+las protecciones/TC; `circuito` va en el cuadro de datos.
+
+Las 3 debilidades de la v1 (y su arreglo en v2):
+1. **Circuito no energizable / incompleto.** La v1 dibujaba el seccionador ABIERTO
+   (la línea se cortaba en los contactos -> el único camino a la carga quedaba
+   abierto; ese corte lo introduje yo al "arreglar" que la línea atravesara el
+   símbolo) y había perdido neutro del trafo a tierra, Dyn11, CC fusibles y
+   pararrayos. v2: seccionador **cerrado por defecto** y rotulado "(cerrado)"
+   (`cfg['seccionador_estado']='abierto'` lo abre: línea cortada + "(ABIERTO)");
+   neutro del secundario a tierra + "Dyn11" (solo trifásico); "N CC fusibles MT" y
+   pararrayos ZnO (`dps_cantidad` -> "banco de N", un solo icono) en la entrada.
+2. **Símbolos ambiguos y secundarios incorrectos.** TC, TP y trafo usaban el mismo
+   par de círculos y los secundarios iban directo al medidor. v2: TC = anillo ROJO
+   sobre el conductor, TP = par AZUL pequeño a tierra, trafo = par grande NEGRO;
+   cada secundario punteado toma el color de su transformador; ambos pasan por el
+   bloque de pruebas con "secundarios a tierra". Texto de referencia del repo
+   (`retie_docs/creg_calidad_servicio_energia.txt`): bloque de pruebas "obligatorio
+   en medida semidirecta e indirecta"; (`subestaciones_transformadores_distribucion.txt`)
+   pararrayos ZnO en entradas MT y neutro del trafo a la malla de tierra.
+3. **Números sin validar.** La v1 dibujaba TC 30/5 para 700 kVA a 13,2 kV (In =
+   30,6 A = 102 % del primario) sin avisar. v2: `_validar_indirecta(cfg)` ->
+   `[(nivel, corto, largo)]`: In = kVA/(√3·kV) (mono/bif: kVA/kV) vs primario del
+   TC (>120 % err, 100-120 % warn "justo", <20 % warn "sobredimensionado", resto
+   ok) y primario del TP vs red (L-L o L-N). Si no hay `v_mt`, el kV se deduce
+   del TP (trifásico: L-L, o L-N si ×√3 coincide con una tensión normalizada;
+   mono/bifásico: tal cual) y se marca "[kV est. del TP]". Son criterios de
+   DISEÑO, no una cita normativa. Salen en el cuadro (✓/⚠/✗) y `_verificar_coherencia`
+   agrega al caption solo lo que NO está ok. `_enviar_foto` recorta el caption a
+   1024 caracteres (límite de Telegram: si se pasa, la foto no se entrega).
+- Todo el texto dibujado usa coma decimal (`_es()`): "13,2 kV", "30,6 A".
+- Seccionador: `'antes'` = entre la medida y el trafo (lado MT); `'despues'` = tras
+  el trafo/protección (lado BT). Protección (`proteccion_despues` o `interruptor`) =
+  cuadrito bajo el trafo. `proteccion_antes` no se dibuja en indirecta. Respaldo =
+  dos medidores lado a lado. El lienzo crece con el contenido; 1 unidad = 1 pulgada.
+- Siguen en `draw_unifilar_generico`: directa, semidirecta, multi-celda e indirecta
+  con `cfg['estilo']='detallado'` (flag de cfg, sin botón en el menú).
+- Si agregas un elemento a este estilo, agrégalo también a `filas`/`l3` (cuadro de
+  datos) o el cuadro no lo mencionará.
+- `test_validacion_indirecta.py` (valores calculados a mano) y `test_seccionador.py`.
 - Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
   propio comando de shell (se mata a sí mismo y no ejecuta nada).
 
