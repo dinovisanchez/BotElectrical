@@ -590,6 +590,8 @@ son obligatorios) y se adoptó de él lo siguiente:
   tachaba la línea); con celdas muy juntas (`cell_w < 8`) se parte en tres
   líneas ("TRi / 500 / kVA"). Verificado con 3, 6 y 8 celdas.
 - Hueco de 1 u entre el barraje compartido y la derivación a los medidores.
+- Renderer detallado, indirecta: faltaba el conductor desde el nodo del TC hasta el
+  seccionador/trafo/barra (~3 u de circuito abierto bajo el TC): `vline(tc_y, tc_y - 3)`.
 
 ## Unifilar de medida INDIRECTA en estilo "plano limpio" v2 (oct/2026)
 Pedido explícito del usuario ("hazlo como el ejemplo, tal cual") y luego
@@ -635,10 +637,22 @@ Las 3 debilidades de la v1 (y su arreglo en v2):
   cuadrito bajo el trafo. `proteccion_antes` no se dibuja en indirecta. Respaldo =
   dos medidores lado a lado. El lienzo crece con el contenido; 1 unidad = 1 pulgada.
 - Siguen en `draw_unifilar_generico`: directa, semidirecta, multi-celda e indirecta
-  con `cfg['estilo']='detallado'` (flag de cfg, sin botón en el menú).
+  con `cfg['estilo']='detallado'` (con plano de simbología).
+- **En el menú** (pantalla de confirmación, NO en el flujo lineal de preguntas): fila
+  `Estilo` + botones de un toque `🎨 Estilo: Limpio ⇄` y `🔀 Seccionador: cerrado ⇄`
+  (callbacks `editval:estilo:<v>` / `editval:seccionador_estado:<v>`, reusan el handler
+  de edición) y los mismos campos en ✏️ Editar. `_aplica_estilo(cfg)`: solo indirecta +
+  unifilar/ambos + un trafo. Valores del cfg: `estilo` 'limpio'|'detallado',
+  `seccionador_estado` 'cerrado'|'abierto' (default cerrado en AMBOS renderers; abierto
+  corta el conductor, dice "ABIERTO" y `_verificar_coherencia` avisa que el diagrama
+  muestra la instalación desenergizada). También en el parser ("seccionador abierto",
+  "detallado"/"plano de simbología") y en el prompt de la IA (omitir salvo que lo pidan).
+  `test_menu_opciones.py` pulsa los botones reales.
+- Si cambias algo del resumen de `_paso_confirmar`, replica el cambio en `_campos_editables`
+  (mismo orden y condiciones) o el campo quedará sin poder editarse.
 - Si agregas un elemento a este estilo, agrégalo también a `filas`/`l3` (cuadro de
   datos) o el cuadro no lo mencionará.
-- `test_validacion_indirecta.py` (valores calculados a mano) y `test_seccionador.py`.
+- `test_validacion_indirecta.py` (valores calculados a mano), `test_seccionador.py` y `test_menu_opciones.py`.
 - Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
   propio comando de shell (se mata a sí mismo y no ejecuta nada).
 

@@ -917,6 +917,11 @@ PROMPT_DIAGRAMA = (
     'seccionador: "antes" (antes del trafo, lado MT) | "despues" (despues del '
     'trafo, lado BT) | "" (SOLO tiene efecto si instalacion="trafo"; '
     "si instalacion es \"barraje\" o \"\", no preguntes esto, se ignora)\n"
+    'seccionador_estado: "cerrado" | "abierto" (OMITE el campo salvo que el usuario '
+    "diga que el seccionador esta abierto; por defecto va cerrado = servicio normal; "
+    "NO lo preguntes)\n"
+    'estilo: "limpio" | "detallado" (OMITE el campo salvo que el usuario pida el unifilar '
+    "detallado / con plano de simbologia; solo aplica a medida indirecta; NO lo preguntes)\n"
     "rel_tc: string ej '200/5'\n"
     "rel_tp: string ej '13200/120'\n"
     "calibre_conductor: string ej 'AWG 2/0'\n"
@@ -987,6 +992,28 @@ _SECC_PREGUNTA = (
     "  Después  aguas abajo del trafo (lado BT)"
 )
 
+# Estilo del unifilar de medida indirecta y estado del seccionador. Ambos se eligen en
+# la pantalla de confirmacion del menu (boton de un toque + submenu Editar): son datos
+# de refinamiento que casi nadie cambia, asi que NO alargan el flujo lineal de preguntas.
+_ESTILO_TXT   = {"limpio": "Limpio (vertical)", "detallado": "Detallado (con plano de simbología)"}
+_ESTILO_CORTO = {"limpio": "Limpio", "detallado": "Detallado"}
+
+def _aplica_estilo(cfg):
+    """El estilo solo existe para unifilar de medida INDIRECTA con un solo trafo
+    (multi-celda, directa y semidirecta siempre usan el renderer detallado)."""
+    try:
+        n_tr = int(cfg.get("n_trafos", 1) or 1)
+    except (TypeError, ValueError):
+        n_tr = 1
+    return (cfg.get("tipo") == "indirecta" and cfg.get("salida") in ("unifilar", "ambos")
+            and n_tr < 2)
+
+def _estilo_de(cfg):
+    return "detallado" if cfg.get("estilo") == "detallado" else "limpio"
+
+def _estado_secc(cfg):
+    return "abierto" if cfg.get("seccionador_estado") == "abierto" else "cerrado"
+
 def _mini(cfg):
     """Breadcrumb horizontal con los campos seleccionados."""
     p = []
@@ -1046,7 +1073,9 @@ def _caption(tipo_diagrama, cfg):
     elif inst == "barraje":
         t_bt = cfg.get("tension_bt","")
         lineas.append(f"🏗️ Barraje: {t_bt} V" if t_bt else "🏗️ Barraje BT")
-    if cfg.get("seccionador"):    lineas.append(f"🔀 Seccionador: {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}")
+    if cfg.get("seccionador"):
+        lineas.append(f"🔀 Seccionador: {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}"
+                      + ("  ·  ABIERTO" if _estado_secc(cfg) == "abierto" else ""))
     if cfg.get("rel_tc"):         lineas.append(f"🔄 TC: {cfg['rel_tc']}")
     if cfg.get("rel_tp"):         lineas.append(f"📊 TP: {cfg['rel_tp']}")
     if cfg.get("proteccion_amp"): lineas.append(f"🔐 Protección: {cfg['proteccion_amp']} A")
@@ -1092,6 +1121,12 @@ def _verificar_coherencia(cfg):
         notas_usuario.append(
             "Con varias celdas de transformación (subestación) el seccionador "
             "y la protección generales no se dibujan: cada celda lleva su propio fusible."
+        )
+
+    if cfg.get("seccionador") and _estado_secc(cfg) == "abierto":
+        notas_usuario.append(
+            "El seccionador se dibuja ABIERTO: el diagrama muestra la instalación "
+            "desenergizada (para el servicio normal déjalo cerrado)."
         )
 
     if tipo == "indirecta":
@@ -2718,6 +2753,9 @@ def _campos_editables(cfg):
         dict(key="norma", label="Norma", kind="choice", options=[
             ("CENS", "CENS"), ("RA8", "RA8")]),
     ]
+    if _aplica_estilo(cfg):      # en el resumen va justo despues de "Diagrama" (antes de Norma)
+        campos.insert(3, dict(key="estilo", label="Estilo del unifilar", kind="choice", options=[
+            ("Limpio (vertical)", "limpio"), ("Detallado (con simbología)", "detallado")]))
     if cfg.get("conexion"):
         campos.append(dict(key="conexion", label="Conexión (bornera)", kind="choice", options=[
             ("Simétrica", "simetrica"), ("Asimétrica", "asimetrica")]))
@@ -2740,6 +2778,8 @@ def _campos_editables(cfg):
     if cfg.get("seccionador"):
         campos.append(dict(key="seccionador", label="Seccionador", kind="choice",
                             options=list(_SECC_BOTONES)))
+        campos.append(dict(key="seccionador_estado", label="Estado del seccionador", kind="choice", options=[
+            ("🟢 Cerrado (normal)", "cerrado"), ("⚪ Abierto (desenergizado)", "abierto")]))
     if cfg.get("rel_tc"):
         campos.append(dict(key="rel_tc", label="Relación TC", kind="text",
                             prompt="¿Nueva relación de TC?\n\n  Formato primario/secundario  ej: 200/5",
@@ -2803,8 +2843,10 @@ async def _paso_confirmar(q, cfg, edit=True):
         f"  Tipo          {tipo}",
         f"  Sistema       {sis}",
         f"  Diagrama      {sal}",
-        f"  Norma         {norma}",
     ]
+    if _aplica_estilo(cfg):
+        lines.append(f"  Estilo        {_ESTILO_TXT[_estilo_de(cfg)]}")
+    lines.append(f"  Norma         {norma}")
 
     if cfg.get("conexion"):
         lines.append(f"  Conexión      {cfg['conexion'].capitalize()}")
@@ -2833,7 +2875,8 @@ async def _paso_confirmar(q, cfg, edit=True):
         lines.append(f"  Protección    {amp} A  {('· ' + pos) if pos else ''}".rstrip())
 
     if cfg.get("seccionador"):
-        lines.append(f"  Seccionador   {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}")
+        lines.append(f"  Seccionador   {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}"
+                     f"  ·  {_estado_secc(cfg)}")
 
     if cfg.get("rel_tc") or cfg.get("rel_tp") or cfg.get("calibre_conductor"):
         lines.append("")
@@ -2851,6 +2894,18 @@ async def _paso_confirmar(q, cfg, edit=True):
          InlineKeyboardButton("✏️  Editar",   callback_data="generar:editar")],
         [InlineKeyboardButton("↩  Reiniciar", callback_data="generar:no")],
     ]
+    # Botones de un toque (reusan el handler "editval": cambian el campo y vuelven aqui)
+    toggles = []
+    if _aplica_estilo(cfg):
+        otro = "limpio" if _estilo_de(cfg) == "detallado" else "detallado"
+        toggles.append(InlineKeyboardButton(f"🎨 Estilo: {_ESTILO_CORTO[_estilo_de(cfg)]}  ⇄",
+                                            callback_data=f"editval:estilo:{otro}"))
+    if cfg.get("seccionador"):
+        otro = "cerrado" if _estado_secc(cfg) == "abierto" else "abierto"
+        toggles.append(InlineKeyboardButton(f"🔀 Seccionador: {_estado_secc(cfg)}  ⇄",
+                                            callback_data=f"editval:seccionador_estado:{otro}"))
+    if toggles:
+        kb.insert(1, toggles)
     texto = "\n".join(lines)
     markup = InlineKeyboardMarkup(kb)
     if edit:

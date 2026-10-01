@@ -52,6 +52,19 @@ def main():
         ok = True
     malos += not ok; print("OK  " if ok else "MAL ", "CENS + RA8 como normas -> sigue lanzando 'Norma ambigua'")
 
+    # Estado del seccionador y estilo del unifilar en texto libre
+    for txt, estado, estilo in [
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva seccionador abierto", "abierto", None),
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva seccionador antes del trafo en red abierta", None, None),
+        ("unifilar detallado indirecta CENS 30/5 13200/120 trafo 700 kva", None, "detallado"),
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva con plano de simbologia", None, "detallado"),
+        ("unifilar semidirecta detallado 200/5 trafo 100 kva", None, None),      # el estilo solo existe en indirecta
+    ]:
+        cfg = parse_spec(txt)[0]
+        ok = cfg.get("seccionador_estado") == estado and cfg.get("estilo") == estilo
+        malos += not ok
+        print("OK  " if ok else "MAL ", f"estado={cfg.get('seccionador_estado')!r} estilo={cfg.get('estilo')!r} | {txt}")
+
     # Avisos de coherencia: nada se descarta en silencio
     base = dict(DEFAULT, salida="unifilar", tipo="indirecta", instalacion="trafo",
                 trafo_kva="700", rel_tc="50/5", rel_tp="13200/120")   # 50/5: sin avisos de validacion

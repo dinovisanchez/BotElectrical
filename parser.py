@@ -258,6 +258,14 @@ def parse_spec(text):
             entendido.append("Seccionador: " + ("antes del trafo (lado MT)" if pos == "antes"
                                                   else "despues del trafo (lado BT)"))
         cfg["seccionador"] = pos
+        if re.search(r"\babierto\b", clausula):       # masculino: "red abierta" no cuenta
+            cfg["seccionador_estado"] = "abierto"
+            entendido.append("Seccionador ABIERTO")
+
+    # --- ESTILO del unifilar (solo existe para indirecta): "detallado" / "con plano de simbologia"
+    if cfg["tipo"] == "indirecta" and re.search(r"\bdetallad[oa]\b|plano\s+de\s+simbolog", t):
+        cfg["estilo"] = "detallado"
+        entendido.append("Estilo: detallado (con plano de simbologia)")
 
     # --- CONEXION (simetrica / asimetrica) — solo aplica a medida directa ---
     if re.search(r"asimetr", t):
