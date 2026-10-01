@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seccionador: texto libre -> cfg, avisos de coherencia y render sin errores.
+"""Seccionador y norma/circuito: texto libre -> cfg, avisos de coherencia y render.
 
 "antes"   = entre el punto de medida y el trafo (lado MT)
 "despues" = aguas abajo del trafo (lado BT)
@@ -34,6 +34,23 @@ def main():
         ok = got == esperado
         malos += not ok
         print("OK  " if ok else "MAL ", f"{got!r:10} esp {esperado!r:10} | {txt}")
+
+    # Un circuito/punto de conexion llamado "RA8" NO es la norma RA8
+    for txt, norma, cto in [
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva circuito RA8", "CENS", "RA8"),
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva cto: RA8", "CENS", "RA8"),
+        ("unifilar indirecta CENS 30/5 13200/120 trafo 700 kva punto de conexion RA8", "CENS", None),
+        ("unifilar indirecta norma RA8 30/5 13200/120 trafo 700 kva circuito Magdalena", "RA8", "Magdalena"),
+    ]:
+        cfg = parse_spec(txt)[0]
+        ok = cfg["norma"] == norma and (cto is None or cfg.get("circuito") == cto)
+        malos += not ok
+        print("OK  " if ok else "MAL ", f"norma={cfg['norma']} circuito={cfg.get('circuito')!r} | {txt}")
+    try:   # ambiguedad real: sigue avisando
+        parse_spec("indirecta CENS RA8 30/5 13200/120"); ok = False
+    except ValueError:
+        ok = True
+    malos += not ok; print("OK  " if ok else "MAL ", "CENS + RA8 como normas -> sigue lanzando 'Norma ambigua'")
 
     # Avisos de coherencia: nada se descarta en silencio
     base = dict(DEFAULT, salida="unifilar", tipo="indirecta", instalacion="trafo",

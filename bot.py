@@ -2241,60 +2241,26 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cfg["salida"] = val
         _adv()
         tipo = cfg["tipo"]
-        incluye_cx = val in ("conexiones", "ambos")
 
-        _kb_sis_dir = _kb([
-            ("1φ  Monofásica",  "mono"),
-            ("2φ  Bifásica",    "bifasico"),
-            ("3φ  Trifásica",   "tri4h"),
-        ], "sistema")
-        _kb_sis_bi = _kb([
-            ("2φ  Bifásica",   "bifasico"),
-            ("3φ  Trifásica",  "tri4h" if tipo != "indirecta" else "tri_pend"),
-        ], "sistema")
-        _kb_inst = _kb([
-            ("🔧  Transformador",  "trafo"),
-            ("🏗  Barraje BT",    "barraje"),
-        ], "instalacion")
-
+        # El sistema (mono/bifasico/trifasico) se pregunta SIEMPRE, tambien con
+        # "solo unifilar": antes se saltaba y quedaba el default tri4h, asi que
+        # una instalacion monofasica salia rotulada "Trifasica 4 Hilos".
+        # El handler de "sistema" decide el siguiente paso segun tipo/salida.
         if tipo == "directa":
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_dir)
-                )
-            else:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Punto de conexión?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_inst)
-                )
-
-        elif tipo == "semidirecta":
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_bi)
-                )
-            else:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Punto de conexión?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_inst)
-                )
-
-        else:  # indirecta
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_bi)
-                )
-            else:
-                cfg["instalacion"] = "trafo"
-                _adv()
-                ctx.user_data["esperando_n_trafos"] = True
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                    "  Escribe el número  ej: 1  2  3  ...")
-                )
+            kb_sis = _kb([
+                ("1φ  Monofásica",  "mono"),
+                ("2φ  Bifásica",    "bifasico"),
+                ("3φ  Trifásica",   "tri4h"),
+            ], "sistema")
+        else:   # semidirecta / indirecta
+            kb_sis = _kb([
+                ("2φ  Bifásica",   "bifasico"),
+                ("3φ  Trifásica",  "tri4h" if tipo != "indirecta" else "tri_pend"),
+            ], "sistema")
+        await q.edit_message_text(
+            _header(n, cfg, "¿Sistema eléctrico?"),
+            reply_markup=InlineKeyboardMarkup(kb_sis)
+        )
 
     # ── Sistema ───────────────────────────────────────────────────────────────
     elif campo == "sistema":
@@ -2345,7 +2311,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
                                         "  Escribe el número  ej: 1  2  3  ...")
                     )
-            else:  # semidirecta
+            else:  # semidirecta (y directa con solo unifilar: tambien sigue al punto de conexion)
                 if cfg.get("salida") == "conexiones":
                     # Solo diagrama de conexiones — ir directo a RTC
                     ctx.user_data["esperando_rel_tc"] = True

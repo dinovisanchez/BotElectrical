@@ -18,6 +18,7 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
     existían aquí se eliminaron en la limpieza de QA — ver "QA de sept/2026"
     más abajo. Si vas a tocar el motor de unifilares, edita
     `draw_unifilar_generico`, la única función real.)
+  - `draw_unifilar_indirecta_pro(cfg, out)` → unifilar de indirecta en estilo "plano limpio" (lo despacha `draw_unifilar_generico`; ver sección "Unifilar de medida INDIRECTA en estilo ...").
   - Símbolos IEC: `_u_breaker, _u_disc, _u_fuse, _u_arrester, _u_ct, _u_vt, _u_xfmr, _u_relay, _ground`.
 - `parser.py` — `parse_spec(text)` → `(cfg, entendido, faltante)`. Sin dependencias.
 - `bot.py` — handlers de Telegram (start/help/menu/diagrama + texto libre + botones).
@@ -527,9 +528,8 @@ alcanzables con tipo=indirecta y salida="ambos") mostrando los botones viejos
 Arreglo: ambas pantallas ahora piden el número por texto, igual que las demás.
 **Regla**: si cambias una pantalla de botones a texto (o viceversa), busca TODAS
 las que emiten ese callback (`grep '"n_trafos"'`) y corre `test_menu_walk.py`.
-- Pendiente conocido (no tocado, requiere decidir el flujo): con salida
-  "unifilar" sola, el menú NUNCA pregunta `sistema`, así que queda el default
-  `tri4h` y el plano dice "Trifásica 4 Hilos" aunque la instalación sea mono/bifásica.
+- (Corregido después, ver "Pendientes resueltos" abajo): con salida "unifilar"
+  sola el menú no preguntaba `sistema`; ahora sí, siempre.
 
 ## Seccionador, cuadro de datos y rótulos de secundarios (oct/2026)
 Pedido del usuario, tomando como ejemplo un script externo de unifilar
@@ -569,23 +569,66 @@ son obligatorios) y se adoptó de él lo siguiente:
   5. el rótulo del conductor ("cal. ?") tocaba el trafo / quedaba sobre el
      rótulo de la protección: ahora tiene su propio tramo;
   6. trafo compartido: el recinto del gabinete CRUZABA el círculo del trafo
-     (contra el invariante documentado) y "(red abierta)" tocaba el medidor
-     PRINCIPAL: el barraje compartido se separó 4 u del trafo (`bt_y =
-     trafo_y - 9`) y la conexión del usuario bajó 3 u.
-- **Pendiente conocido (preexistente, no tocado)**: en directa el medidor
-  (`y_mid = y - 5`, `r = 6.5`) sube 1.5 u por encima de `y` y se encima con la
-  protección/línea de arriba; los rótulos "MEDIDOR/PRINCIPAL/RESPALDO" quedan
-  tachados por la línea que continúa; en multi-celda las etiquetas "TRi kVA"
-  quedan cruzadas por la línea de cada rama. Además `parser.py` toma "RA8" en
-  cualquier parte del texto como NORMA (un circuito llamado "RA8" junto a
-  "CENS" lanza "Norma ambigua").
+     (contra el invariante documentado): el barraje compartido se separó 4 u
+     del trafo (`bt_y = trafo_y - 9`, el recinto llega hasta `bt_y + 2`).
+### Pendientes resueltos (oct/2026, segunda pasada)
+- **Menú**: `salida` ya no se salta la pregunta de `sistema` con "solo unifilar"
+  (el handler de `sistema` decide el siguiente paso). `test_menu_walk.py` falla si
+  un camino de solo-unifilar genera sin pasar por `sistema:*`. No se deriva
+  `trafo_tipo` del sistema a propósito: un usuario monofásico puede colgar de un
+  trafo trifásico compartido.
+- **Parser**: el nombre de un circuito / punto de conexión ("circuito RA8",
+  "cto: RA8", "punto de conexión RA8") se quita del texto antes de buscar la
+  norma; "CENS RA8" suelto sigue lanzando "Norma ambigua".
+- **Medida directa en línea**: el medidor arrancaba por encima de `y` (se
+  encimaba con la protección). Ahora `y_mid = y - 2 - r` (y en respaldo el nodo
+  de derivación está 2 u bajo `y`); bajo el círculo hay 5 u de conductor antes de
+  la CARGA. Los rótulos MEDIDOR/PRINCIPAL/RESPALDO van al costado de su
+  conductor (`_u_meter(..., label_dx, label_ha)`), no encima: antes los
+  tachaba la línea. La barra de unión del respaldo bajó para no cruzar los rótulos.
+- **Multi-celda**: el rótulo "TRi kVA" va a la derecha de su rama (antes lo
+  tachaba la línea); con celdas muy juntas (`cell_w < 8`) se parte en tres
+  líneas ("TRi / 500 / kVA"). Verificado con 3, 6 y 8 celdas.
+- Hueco de 1 u entre el barraje compartido y la derivación a los medidores.
+
+## Unifilar de medida INDIRECTA en estilo "plano limpio" (oct/2026)
+Pedido explícito del usuario ("hazlo como el ejemplo, tal cual, es más estético
+y más pro") tras compartir un script/imagen de ejemplo. `draw_unifilar_generico`
+despacha a **`draw_unifilar_indirecta_pro(cfg, out)`** cuando `tipo='indirecta'`,
+`n_trafos < 2` y `cfg.get('estilo') != 'detallado'`. Layout vertical idéntico al
+ejemplo: barra de RED -> TC -> derivación TP (a la derecha, con tierra) ->
+[seccionador] -> trafo -> flecha "A CARGA", con el medidor a la izquierda unido
+por los secundarios punteados (TC azul, TP verde, rotulados "Secundario TC – 5 A"
+/ "Secundario TP – 120 V") y un cuadro de datos al pie. Todo sale del cfg:
+título/red desde `v_mt` ("13.2 kV" -> "13,2 kV" / "13.200 V"), nº de TC/TP desde
+`n_tc`/`n_tp` o el sistema (mono 1, bifásico 2, Aron 2, 3 elementos 3).
+- **Sin el cuadro "RA8" ni su "13.200 V"** (el usuario lo pidió quitar): la barra
+  baja directo al TC. El cuadro de punto de conexión NO existe en este estilo;
+  `circuito` va en el cuadro de datos.
+- **Cambios de convención asumidos por el usuario en este estilo**: ya NO se
+  dibujan CC fusibles MT, pararrayos ZnO, bloque de prueba ni plano de
+  simbología (el ejemplo no los tiene). Siguen en `draw_unifilar_generico`:
+  directa, semidirecta, multi-celda (n_trafos>=2) e indirecta con
+  `cfg['estilo']='detallado'` (no hay botón/campo en el menú para elegirlo; es un
+  flag de cfg). Si el usuario pide volver a ver fusibles/pararrayos/bloque en
+  indirecta, la salida es `estilo='detallado'` o portarlos al estilo pro.
+- Seccionador: `'antes'` = entre la medida y el trafo (como el ejemplo, "Seccionador
+  tripolar 13,2 kV"); `'despues'` = tras el trafo/protección (lado BT). Protección
+  (`proteccion_despues` o `interruptor`) = cuadrito + etiqueta bajo el trafo.
+  `proteccion_antes` no se dibuja en indirecta (igual que antes). Respaldo = dos
+  medidores lado a lado en paralelo. El lienzo crece con el contenido (alto = f(filas
+  del cuadro + elementos bajo el trafo)); 1 unidad = 1 pulgada, dpi=180.
+- Si agregas un elemento a este estilo, agrégalo también a las filas del cuadro
+  (lista `filas`/`l3` al inicio de la función) o el cuadro no lo mencionará.
+- Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
+  propio comando de shell (se mata a sí mismo y no ejecuta nada).
 
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
 - Mapeo medidor 3 elem (forma 9S): `1 IA · 2 VA · 3 IA' · 4 IB · 5 VB · 6 IB' · 7 IC · 8 VC · 9 IC' · N(10 RA8 / 11 CENS)`.
 - 2 elem (Aron): corrientes en R y T, tensión de referencia en S.
 - Normas base: **CENS Cap. 6** (bornera 13 term., neutro=11) y **PA-NC-RA8** (bornera 1-10, B1-B26).
-- Simbología unifilar: **IEC/UNE 60617**. Todo unifilar lleva "plano de simbología".
+- Simbología unifilar: **IEC/UNE 60617**. Todo unifilar lleva "plano de simbología" (EXCEPCIÓN pedida por el usuario: el estilo pro de indirecta, ver sección arriba).
 - Estilo del unifilar (v2, tras research de SLDs profesionales reales): NADA
   de cajas con degradado/sombra/estilo "app UI" — eso se ve como mockup de
   interfaz, no como plano de ingeniería. Un unifilar profesional real (ETAP,

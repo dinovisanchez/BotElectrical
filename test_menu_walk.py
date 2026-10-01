@@ -86,6 +86,10 @@ async def recorrer(tipo, salida):
         fotos = [e for e in ev if e[0] == "photo"]
         txts = [e[1] for e in ev if e[0] == "text"]
         if fotos:
+            if salida == "unifilar" and not any(a.startswith("sistema:") for _, a in path):
+                # Regresion: el menu llego a generar sin preguntar el sistema y
+                # un monofasico salia rotulado "Trifasica 4 Hilos".
+                out.append(("NO_PREGUNTA_SISTEMA", path, "genero sin pasar por sistema:*")); continue
             out.append(("OK", path, None)); continue
         if any("No pude generar" in t or "Error al generar" in t for t in txts):
             out.append(("ERROR_GENERAR", path, txts[-1])); continue
