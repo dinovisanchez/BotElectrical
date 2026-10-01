@@ -61,12 +61,34 @@ CLAUDE_MAX_TOKENS  = GEMINI_MAX_OUTPUT_TOKENS
 # alargue. _analizar_foto_cx SI necesita el presupuesto completo (emite un
 # reporte con varias secciones), no le apliques este limite.
 CLAUDE_DIALOGO_MAX_TOKENS = 500
-# A diferencia de gemini-2.5-flash, Claude NO activa "thinking" por defecto
-# (hay que pedirlo explicitamente con el parametro `thinking`) -- por eso no
-# existe aqui un equivalente a GEMINI_THINKING_CONFIG: simplemente no se pide
-# thinking y el modelo no lo hace, sin el bug de presupuesto compartido que
-# motivo ese workaround del lado de Gemini (ver mas arriba).
+# Sonnet 5 SI piensa por defecto (thinking adaptativo): ese razonamiento se
+# factura como salida ($10/M) y sale del MISMO max_tokens que la respuesta
+# visible (el bug que ya tuvimos con gemini-2.5-flash). El dialogo es captura de
+# datos con reglas claras en el prompt, no necesita razonar -> se apaga con
+# `thinking`. OJO: solo vale para claude-sonnet-5; en claude-sonnet-5-5
+# {"type": "disabled"} da 400 (alli se usa {"type": "between_tools"}).
+# _analizar_foto_cx NO lo apaga: validar un cableado si se beneficia de razonar.
+CLAUDE_DIALOGO_THINKING = {"type": "disabled"}
+# USD por 1M de tokens (Sonnet 5; revisar si cambia CLAUDE_MODEL). Solo para
+# ESTIMAR el costo en el log (_log_uso_claude); la factura real manda.
+CLAUDE_PRECIO = {"in": 2.00, "out": 10.00, "cache_read": 0.20, "cache_write": 2.50}
 _claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
+
+
+def _log_uso_claude(tag: str, response) -> None:
+    """Registra tokens y costo estimado (USD) de UNA llamada a Claude. Nunca lanza.
+    `out` incluye el razonamiento oculto (thinking), asi que aqui se ve cuanto pesa."""
+    try:
+        u = response.usage
+        i, o = u.input_tokens or 0, u.output_tokens or 0
+        cr = getattr(u, "cache_read_input_tokens", 0) or 0
+        cw = getattr(u, "cache_creation_input_tokens", 0) or 0
+        p = CLAUDE_PRECIO
+        usd = (i * p["in"] + o * p["out"] + cr * p["cache_read"] + cw * p["cache_write"]) / 1e6
+        log.info("claude[%s] in=%s cache_leido=%s cache_escrito=%s out=%s ~US$%.4f",
+                 tag, i, cr, cw, o, usd)
+    except Exception:
+        pass
 
 # ── Control de acceso — Google Sheets ─────────────────────────────────────────
 try:
@@ -1455,6 +1477,7 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
             ),
             timeout=CLAUDE_TIMEOUT_S,
         )
+        _log_uso_claude("foto", response)
         texto = "".join(b.text for b in response.content if b.type == "text").strip()
         texto = texto.replace("**", "").replace("__", "").replace("`", "")
         return texto or "⚠️ El modelo no generó diagnóstico. Intenta con una foto más nítida."
@@ -1730,15 +1753,23 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         # SIN temperature/top_p/top_k: el SDK anthropic 1.x ya no los acepta
         # (TypeError) y la API los rechaza en Sonnet 5 / Opus 4.7+. Ver
         # test_claude_sdk.py, que usa el SDK REAL (un cliente falso lo habia ocultado).
-        return await asyncio.wait_for(
+        resp = await asyncio.wait_for(
             _claude_client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=max_tok,
-                system=PROMPT_DIAGRAMA,
+                # El prompt (~2.700 tokens) es identico para todos los usuarios y se
+                # reenvia en CADA turno: con cache_control se paga a $0,20/M en vez
+                # de $2/M (-70 % del costo del dialogo). Mantenlo BYTE A BYTE
+                # estable: nada de fechas/ids dentro de PROMPT_DIAGRAMA.
+                system=[{"type": "text", "text": PROMPT_DIAGRAMA,
+                         "cache_control": {"type": "ephemeral"}}],
+                thinking=CLAUDE_DIALOGO_THINKING,
                 messages=[{"role": "user", "content": conv}],
             ),
             timeout=CLAUDE_TIMEOUT_S,
         )
+        _log_uso_claude("dialogo", resp)
+        return resp
 
     for intento in range(3):
         try:
@@ -1782,11 +1813,9 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         await update.message.reply_text(txt)
         return
 
-    # Sonnet 5 piensa por defecto (thinking adaptativo) y ese razonamiento sale del
-    # MISMO max_tokens que la respuesta visible: con el limite corto del dialogo (500)
-    # puede agotarse y dejar la respuesta vacia o el JSON de DIAGRAMA_LISTO cortado
-    # (el mismo bug que ya tuvimos con gemini-2.5-flash). Se reintenta UNA vez con el
-    # presupuesto completo antes de rendirse.
+    # Red de seguridad: el thinking ya va apagado (CLAUDE_DIALOGO_THINKING), pero si
+    # la respuesta igual se corta por max_tokens (500) el JSON de DIAGRAMA_LISTO
+    # quedaria incompleto. Se reintenta UNA vez con el presupuesto completo.
     if getattr(response, "stop_reason", None) == "max_tokens":
         log.warning("dialogo_diagrama: stop_reason=max_tokens con %s tokens; reintento con %s",
                     CLAUDE_DIALOGO_MAX_TOKENS, CLAUDE_MAX_TOKENS)

@@ -285,18 +285,18 @@ Detalles tecnicos de la migracion:
   mas de un bloque de texto) -- se concatenan con
   `"".join(b.text for b in response.content if b.type == "text")`.
 - **Thinking en Claude (CORREGIDO, oct/2026)**: antes este documento decia que
-  Claude NO activa "thinking" por defecto y que por eso no hacia falta un
-  equivalente a `GEMINI_THINKING_CONFIG`. Eso ya NO es cierto para
-  `claude-sonnet-5`: corre con adaptive thinking por defecto, y esos tokens
-  se descuentan del MISMO `max_tokens` que la respuesta visible -- el mismo
-  riesgo que ya mordio a Gemini. Por eso `_dialogo_diagrama` usa un helper
-  interno `_llamar(max_tok)` y, si `response.stop_reason == "max_tokens"`,
-  reintenta UNA vez con `CLAUDE_MAX_TOKENS` (si el reintento falla se queda
-  con la respuesta truncada); y si el texto final sale vacio responde con un
-  mensaje claro en vez de mandar un mensaje vacio (Telegram lo rechaza). No
-  se pudo verificar el comportamiento real del thinking sin API key: si las
-  respuestas del dialogo salen cortadas o vacias en produccion, revisa
-  primero esto.
+  Claude NO activa "thinking" por defecto. Eso es FALSO para `claude-sonnet-5`:
+  corre con adaptive thinking por defecto, y esos tokens (a) se facturan como
+  salida ($10/M) y (b) salen del MISMO `max_tokens` que la respuesta visible --
+  el mismo riesgo que ya mordio a Gemini. Por eso `_dialogo_diagrama` manda
+  `thinking=CLAUDE_DIALOGO_THINKING` (`{"type": "disabled"}`): es captura de
+  datos con reglas claras en el prompt, no necesita razonar. **Solo vale para
+  `claude-sonnet-5`**: en `claude-sonnet-5-5` `disabled` da 400 (alli se usa
+  `{"type": "between_tools"}`), asi que si cambias `CLAUDE_MODEL` revisa esa
+  constante. `_analizar_foto_cx` deja el thinking ACTIVO a proposito (validar
+  un cableado si se beneficia). El reintento por `stop_reason == "max_tokens"`
+  (con `CLAUDE_MAX_TOKENS`) y el aviso por respuesta vacia se conservan como red
+  de seguridad. No se pudo verificar el comportamiento en vivo sin API key.
 - **SDK `anthropic` 1.x (bug real, oct/2026)**: el usuario vio "Error con el
   servicio IA (TypeError)" en CADA intento de diagrama por IA. Causa:
   `client.messages.create()` en el SDK 1.x ya NO acepta `temperature`/`top_p`/
@@ -343,6 +343,32 @@ Detalles tecnicos de la migracion:
 - `requirements.txt` gano `anthropic>=1.0.0,<2`; `render.yaml` gano la env var
   `ANTHROPIC_API_KEY` (junto a la ya existente `GEMINI_API_KEY`, que sigue
   siendo necesaria para `_consulta_retie` y el RAG).
+
+### Costo de la API de Claude (oct/2026)
+Precios Sonnet 5 (USD / 1M tokens): entrada $2, salida $10, lectura de cache
+$0,20, escritura de cache (5 min) $2,50 (`CLAUDE_PRECIO` en `bot.py`; revisar si
+cambia el modelo). **Estimacion** (sin API key no se pudo usar `count_tokens`;
+tokens ±25 %): `PROMPT_DIAGRAMA` ~2.700 tokens, un dialogo de ~4 llamadas.
+- Antes (sin cache, thinking por defecto): ~$0,03 a $0,07 por diagrama. Lo caro NO
+  era la salida visible (~45 tokens/turno, el 14 %) sino (1) reenviar el prompt
+  entero en cada turno (86 % del costo sin thinking) y (2) el razonamiento oculto.
+  Pedir la salida "en JSON" casi no ahorra: ya es corta, y JSON usa MAS tokens.
+- Ahora: `cache_control` ephemeral en el bloque `system` del dialogo (-70 %) y
+  thinking apagado -> ~$0,008 por diagrama (~$0,014 con cache frio). Foto de
+  conexiones ~$0,01 a $0,02. El menu y `parse_spec` NO llaman a la IA ($0).
+- **El prompt debe ser byte a byte estable** (`PROMPT_DIAGRAMA` es constante;
+  verificado). Una fecha, un id o un `.format()` dentro de el invalida el cache y
+  el costo vuelve a ~4x sin que nada falle. El minimo cacheable de Sonnet 5 es
+  1.024 tokens; el prompt de fotos (~560) NO llega, por eso no lleva cache.
+- **Medir, no estimar**: `_log_uso_claude(tag, response)` escribe en el log
+  `claude[dialogo|foto] in= cache_leido= cache_escrito= out= ~US$`. `out` incluye
+  el thinking. Si `cache_leido` es 0 en turnos repetidos, algo invalida el cache.
+- NO aplicado (el usuario eligio solo cache + thinking + log): una sola llamada que devuelva el
+  JSON con `output_config.format` (~$0,003/diagrama, la mas barata) -- quita el
+  dialogo pregunta por pregunta. Si se retoma: `parse_spec` primero (gratis) y
+  llamar a la IA una vez solo si falta algo.
+- `test_claude_sdk.py` cubre: cache_control, thinking apagado, conservarlos en el
+  reintento, y el log de uso/costo.
 
 ### Brevedad en `_dialogo_diagrama` (feedback tras la migracion a Claude)
 El usuario reporto que las respuestas del dialogo de diagramas quedaron
