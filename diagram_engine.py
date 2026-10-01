@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle, FancyBboxPatch, Arc, Polygon
 from matplotlib.lines import Line2D
 import numpy as np
+import math, re, textwrap
 
 COL = {"R": "#D32F2F", "S": "#1565C0", "T": "#F9A825", "N": "#5A5A5A", "G": "#2E7D32"}
 INK = "#1F2A37"
@@ -190,7 +191,8 @@ def _u_relay(ax,x,y,c="#6A1B9A",funcs="50/51",s=1.0):
     ax.add_patch(Circle((x,y),2.6*s,fill=False,ec=c,lw=2,zorder=4))
     ax.text(x,y,funcs,ha="center",va="center",fontsize=6.8,color=c,fontweight="bold",zorder=5)
 
-def _u_meter(ax, x, y, r=8.0, fontsize=8, lw=1.8, label_below=None, label_fontsize=6.3):
+def _u_meter(ax, x, y, r=8.0, fontsize=8, lw=1.8, label_below=None, label_fontsize=6.3,
+             label_dx=0.0, label_ha="center"):
     """Medidor de energia (kWh): circulo doble -- convencion IEC 60617 para
     instrumento INTEGRADOR (distinta de un instrumento simple, que se
     representa con un solo circulo). Es la unica funcion que dibuja este
@@ -204,7 +206,10 @@ def _u_meter(ax, x, y, r=8.0, fontsize=8, lw=1.8, label_below=None, label_fontsi
     ax.text(x, y, "kWh", ha="center", va="center",
             fontsize=fontsize, fontweight="bold", color=INK, family="monospace", zorder=5)
     if label_below:
-        ax.text(x, y - r - 2.2, label_below, ha="center", va="top",
+        # label_dx/label_ha: cuando el conductor CONTINUA hacia abajo (medida
+        # directa en linea) el rotulo centrado queda tachado por la linea; se
+        # corre a un lado (ha="left"/"right" + dx) para que quede junto a ella.
+        ax.text(x + label_dx, y - r - 2.2, label_below, ha=label_ha, va="top",
                 fontsize=label_fontsize, color="#555", fontweight="bold")
 
 def _u_bloque_prueba(ax, x0, y0, w, h, linea1="", linea2=""):
@@ -976,12 +981,397 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 # ============================================================
 #  DIAGRAMA UNIFILAR - version generica con barraje/transformador
 # ============================================================
+# ============================================================
+#  UNIFILAR MEDIDA INDIRECTA — estilo "plano limpio" (vertical)
+#  Basado en el ejemplo del usuario (script de unifilar indirecta 13,2 kV):
+#  RED -> TC -> derivacion TP -> [seccionador] -> trafo -> A CARGA, con el
+#  medidor a la izquierda unido por los secundarios punteados (TC azul, TP
+#  verde) y un cuadro de datos al pie. Sin cuadro de punto de conexion.
+# ============================================================
+_SIS_PRO = {   # sistema -> (adjetivo MAYUS, adjetivo, fases, n_elem, polos, texto medidor)
+    "mono":     ("MONOFÁSICA", "monofásica", "1φ", 1, "unipolar", "Medidor monofásico\n1 elemento – 2 hilos"),
+    "bifasico": ("BIFÁSICA",   "bifásica",   "2φ", 2, "bipolar",  "Medidor bifásico\n2 elementos – 3 hilos"),
+    "tri3h":    ("TRIFÁSICA",  "trifásica",  "3φ", 2, "tripolar", "Medidor trifásico\n2 elementos – 3 hilos (Aron)"),
+    "tri4h":    ("TRIFÁSICA",  "trifásica",  "3φ", 3, "tripolar", "Medidor trifásico\n3 elementos – 4 hilos"),
+}
+
+def _kv_de(v_mt):
+    """'13.2 kV' / '13,2kV' -> 13.2 (float) o None."""
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*kv", str(v_mt or "").lower())
+    return float(m.group(1).replace(",", ".")) if m else None
+
+# Tensiones normalizadas MT/AT (kV) para deducir la red cuando solo se conoce el TP
+_STD_KV = (4.16, 6.6, 11.4, 13.2, 13.8, 22.0, 33.0, 34.5, 44.0, 66.0, 110.0, 115.0, 230.0)
+
+def _es(x, nd=1):
+    """Numero con coma decimal (convencion del resto del plano: '13,2 kV')."""
+    return f"{x:.{nd}f}".replace(".", ",")
+
+def _num(v):
+    m = re.search(r"\d+(?:[.,]\d+)?", str(v if v is not None else ""))
+    return float(m.group().replace(",", ".")) if m else None
+
+def _primario(rel):
+    """'30/5' -> 30.0 ; '13200/120' -> 13200.0 ; None si no es una relacion."""
+    m = re.match(r"\s*(\d+(?:[.,]\d+)?)\s*/\s*\d", str(rel or ""))
+    return float(m.group(1).replace(",", ".")) if m else None
+
+def _corriente_nominal(cfg):
+    """(In [A], kV usado, estimada:bool) del trafo de un punto de medida
+    indirecta con UN trafo, o (None, None, False) si faltan datos.
+    kV sale de v_mt; si no hay, se deduce del primario del TP (L-L, o L-N si
+    coincide con una tension normalizada / sqrt(3)) y se marca como estimada."""
+    if "+" in str(cfg.get("trafo_kva", "")):
+        return None, None, False
+    kva = _num(cfg.get("trafo_kva"))
+    if not kva:
+        return None, None, False
+    kv, estimada = _kv_de(cfg.get("v_mt")), False
+    if kv is None:
+        vp = _primario(cfg.get("rel_tp"))
+        if not vp or vp < 1000:
+            return None, None, False
+        kv, estimada = vp / 1000.0, True
+        if cfg.get("sistema", "tri4h") in ("tri3h", "tri4h"):
+            for std in _STD_KV:                   # trifasico: primario fase-neutro (kV/sqrt3)?
+                if abs(vp * math.sqrt(3) - std * 1000) <= 0.03 * std * 1000:
+                    kv = std; break
+        # mono/bifasico: la tension del TP ES la que alimenta el trafo -> sin conversion
+    tri = cfg.get("sistema", "tri4h") in ("tri3h", "tri4h")
+    return (kva / (math.sqrt(3) * kv) if tri else kva / kv), kv, estimada
+
+def _validar_indirecta(cfg):
+    """Chequeos numericos del punto de medida indirecta. Devuelve
+    [(nivel, corto, largo)] con nivel 'ok'|'warn'|'err'; [] si no aplica o
+    faltan datos. 'corto' va al cuadro de datos; 'largo' al aviso del bot.
+    Criterios de DISENO (no una cita normativa): el TC debe llevar la corriente
+    nominal del trafo dentro de ~20-100 % de su primario (maximo 120 %), y el
+    primario del TP debe ser la tension de la red (L-L) o L-L/sqrt(3)."""
+    out = []
+    try:
+        if cfg.get("tipo") != "indirecta":
+            return out
+        if int(cfg.get("n_trafos", 1) or 1) >= 2:
+            return out
+        rel_tc, rel_tp = str(cfg.get("rel_tc", "") or ""), str(cfg.get("rel_tp", "") or "")
+        ip, vp = _primario(rel_tc), _primario(rel_tp)
+        In, kv, est = _corriente_nominal(cfg)
+        if In and ip:
+            pct = In / ip * 100
+            nota = " (kV estimado desde el TP)" if est else ""
+            nota_c = " [kV est. del TP]" if est else ""
+            if pct > 120:
+                out.append(("err",
+                    f"TC {rel_tc} subdimensionado: In = {_es(In)} A = {pct:.0f} % del primario (máx. 120 %){nota_c}",
+                    f"El TC {rel_tc} queda subdimensionado: la corriente nominal del trafo ({_es(In)} A) es "
+                    f"{pct:.0f} % de su primario (máximo recomendado 120 %){nota}. Usa un TC de mayor relación."))
+            elif pct > 100:
+                out.append(("warn",
+                    f"TC {rel_tc} justo: In = {_es(In)} A = {pct:.0f} % del primario (sin margen){nota_c}",
+                    f"El TC {rel_tc} queda justo: la corriente nominal del trafo ({_es(In)} A) es {pct:.0f} % de "
+                    f"su primario, sin margen de sobrecarga{nota}. Considera la siguiente relación normalizada."))
+            elif pct < 20:
+                out.append(("warn",
+                    f"TC {rel_tc} sobredimensionado: In = {_es(In)} A = {pct:.0f} % del primario{nota_c}",
+                    f"El TC {rel_tc} queda sobredimensionado: la corriente nominal del trafo ({_es(In)} A) es solo "
+                    f"{pct:.0f} % de su primario{nota}; la exactitud a baja carga puede degradarse."))
+            else:
+                out.append(("ok",
+                    f"TC {rel_tc}: In = {_es(In)} A = {pct:.0f} % del primario{nota_c}",
+                    f"TC {rel_tc}: In = {_es(In)} A = {pct:.0f} % del primario."))
+        kv_red = _kv_de(cfg.get("v_mt"))
+        if vp and kv_red:
+            ll, ln = kv_red * 1000, kv_red * 1000 / math.sqrt(3)
+            if abs(vp - ll) <= 0.03 * ll:
+                out.append(("ok", f"TP {rel_tp}: primario = tensión de línea ({_es(kv_red)} kV)",
+                                  f"TP {rel_tp}: primario = tensión de línea."))
+            elif abs(vp - ln) <= 0.03 * ln:
+                out.append(("ok", f"TP {rel_tp}: primario fase-neutro ({_es(kv_red)} kV/√3)",
+                                  f"TP {rel_tp}: primario fase-neutro."))
+            else:
+                out.append(("warn",
+                    f"TP {rel_tp}: su primario no coincide con la red de {_es(kv_red)} kV",
+                    f"El primario del TP ({vp:.0f} V) no coincide con la red de {_es(kv_red)} kV "
+                    f"(ni {ll:.0f} V línea-línea ni {ln:.0f} V fase-neutro)."))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return []
+    return out
+
+def draw_unifilar_indirecta_pro(cfg, out_path):
+    """Unifilar de medida INDIRECTA en vertical, estilo del ejemplo del usuario
+    (v2). Un solo trafo (o sin trafo). Las subestaciones multi-celda (n_trafos>=2)
+    y el estilo 'detallado' siguen en draw_unifilar_generico.
+
+    v2 corrige tres debilidades de la v1:
+      1. Circuito completo y "energizable": seccionador dibujado CERRADO
+         (cfg['seccionador_estado']='abierto' lo abre), neutro del trafo a
+         tierra + Dyn11, CC fusibles y pararrayos en la entrada MT.
+      2. Simbolos distinguibles y secundarios correctos: TC = anillo sobre el
+         conductor (rojo), TP = par de circulos (azul), trafo = par grande
+         (negro); los secundarios pasan por el BLOQUE DE PRUEBAS (obligatorio
+         en indirecta) con tierra, y cada color sigue a su transformador.
+      3. Numeros validados: In del trafo vs primario del TC y primario del TP
+         vs red (ver _validar_indirecta), en el cuadro de datos y en el aviso.
+    """
+    sistema = cfg.get("sistema", "tri4h")
+    if sistema not in _SIS_PRO: sistema = "tri4h"
+    SIS_MAY, sis_adj, fases, n_elem, polos, med_txt = _SIS_PRO[sistema]
+    tri       = sistema in ("tri3h", "tri4h")
+    norma     = cfg.get("norma", "RA8")
+    rel_tc    = str(cfg.get("rel_tc", "") or "")
+    rel_tp    = str(cfg.get("rel_tp", "") or "")
+    respaldo  = bool(cfg.get("respaldo", False))
+    instal    = cfg.get("instalacion") or ""
+    kva       = re.sub(r"\s*kva\s*$", "", str(cfg.get("trafo_kva", "") or ""), flags=re.I).strip()
+    secc_pos  = cfg.get("seccionador", "")
+    secc_open = cfg.get("seccionador_estado") == "abierto"
+    calibre   = cfg.get("calibre_conductor", "") or cfg.get("calibre_acometida", "")
+    circuito  = str(cfg.get("circuito", "") or "").strip()
+    subterr   = cfg.get("tendido") == "subterraneo"
+    kv        = _kv_de(cfg.get("v_mt"))
+    kv_es     = (f"{kv:g}".replace(".", ",") + " kV") if kv else ""
+    volts_pto = f"{int(round(kv * 1000)):,}".replace(",", ".") + " V" if kv else ""   # 13.200 V
+    volts_raw = f"{int(round(kv * 1000))} V" if kv else "M.T."                         # 13200 V
+    def _n(v, d):
+        try: return max(1, int(v))
+        except (TypeError, ValueError): return d
+    n_tc, n_tp = _n(cfg.get("n_tc"), n_elem), _n(cfg.get("n_tp"), n_elem)
+    n_cc, dps_n = _n(cfg.get("n_cc"), n_elem), _n(cfg.get("dps_cantidad"), 1)
+    In, _kv_in, _est = _corriente_nominal(cfg)
+    validacion = _validar_indirecta(cfg)
+
+    prot = cfg.get("proteccion_despues") or cfg.get("interruptor") or ""
+    prot_det = "  ".join(p for p in (prot, f"{cfg.get('interruptor_polos')}P" if cfg.get("interruptor_polos") else None,
+                                     cfg.get("interruptor_tipo")) if p) if prot else ""
+    def _sec(rel, u):
+        parte = rel.split("/")[-1].strip() if "/" in rel else ""
+        return f"{parte} {u}" if re.fullmatch(r"\d+(?:[.,]\d+)?", parte) else ""
+    sec_tc, sec_tp = _sec(rel_tc, "A"), _sec(rel_tp, "V")
+
+    # ── Cuadro de datos (se arma antes: su altura decide el alto del lienzo) ──
+    n_el_txt = f"{n_elem} elemento" + ("s" if n_elem != 1 else "")
+    cab = f"Medida indirecta {sis_adj} – {n_el_txt}" + (" (Aron)" if sistema == "tri3h" else "") \
+          + (" · Principal + Respaldo" if respaldo else "")
+    l2 = []
+    if instal == "trafo":
+        l2.append(f"Transformador: {kva} kVA" + (f" ({_es(In)} A)" if In else "") if kva else "Transformador")
+    if rel_tc: l2.append(f"TC: {rel_tc} A")
+    if rel_tp: l2.append(f"TP: {rel_tp} V")
+    l3 = []
+    if kv_es: l3.append(f"Red: {kv_es}")
+    if circuito: l3.append(f"Circuito: {circuito}")
+    if secc_pos == "antes":
+        l3.append(("Seccionador instalado después de la medida (antes del trafo, lado MT)")
+                  + (" – ABIERTO" if secc_open else " – cerrado"))
+    elif secc_pos == "despues":
+        l3.append("Seccionador instalado después del trafo (lado BT)" + (" – ABIERTO" if secc_open else " – cerrado"))
+    if prot_det: l3.append(f"Protección: {prot_det}")
+    if calibre: l3.append(f"Calibre: {calibre}")
+    if subterr: l3.append("Acometida subterránea")
+    SEP = "   |   "
+    filas = [("b", cab)]
+    if l2: filas.append(("n", SEP.join(l2)))
+    linea = ""
+    for item in l3:
+        if linea and len(linea) + len(SEP) + len(item) > 105:
+            filas.append(("n", linea)); linea = item
+        else:
+            linea = (linea + SEP + item) if linea else item
+    if linea: filas.append(("n", linea))
+    for nivel, corto, _largo in validacion:
+        filas.append((nivel, {"ok": "✓ ", "warn": "⚠ ", "err": "✗ "}[nivel] + corto))
+    filas.append(("i", f"Referencia: CREG 038/2014 · RETIE 2024 · Bornera {norma}"))
+    cuadro_h = 0.3 + 0.4 * len(filas)
+
+    # ── Alturas (offsets respecto a la barra de la red; negativos = hacia abajo)
+    O_FUS, O_DPS = -1.0, -0.5
+    O_TC = -2.4
+    O_TPN = O_TC - 1.2                  # nodo de derivacion del TP
+    O_TPM = O_TPN - 0.8                 # centro del TP (= O_TC - 2.0)
+    O_SECT, O_SECB = O_TPN - 1.3, O_TPN - 2.2
+    O_TR1, O_TR2 = O_TPN - 4.2, O_TPN - 4.8
+    trafo_top, trafo_bot = O_TR1 + 0.6, O_TPN - 5.4
+    cursor = trafo_bot
+    prot_c = secc_d_c = None
+    if prot_det:
+        prot_c = cursor; cursor -= 1.9
+    if secc_pos == "despues":
+        secc_d_c = cursor; cursor -= 1.9
+    arrow_start = cursor
+    cuadro_top = cursor - 1.8
+    H = 1.6 + (-(cuadro_top - cuadro_h)) + 0.3
+    W = 11.0
+    bar = H - 1.6
+    Y = lambda off: bar + off
+
+    VERDE, ROJO, AZUL = COL["G"], COL["R"], COL["S"]
+    fig, ax = plt.subplots(figsize=(W, H))
+    ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off"); ax.set_aspect("equal")
+    X = 5.5
+
+    def L(x1, y1, x2, y2, lw=2, c="k", ls="-", z=2):
+        ax.plot([x1, x2], [y1, y2], color=c, lw=lw, ls=ls, solid_capstyle="butt", zorder=z)
+    def dot(x, y, r=0.07, c="k"):
+        ax.add_patch(Circle((x, y), r, color=c, zorder=5))
+    def tierra(x, y, c="k", k=1.0):
+        L(x, y, x, y - 0.2 * k, c=c)
+        for i, w in enumerate([0.4, 0.26, 0.12]):
+            L(x - w * k, y - 0.2 * k - 0.12 * k * i, x + w * k, y - 0.2 * k - 0.12 * k * i, c=c)
+
+    # Título y red
+    titulo = f"DIAGRAMA UNIFILAR – MEDIDA INDIRECTA {SIS_MAY}" + (f" {kv_es}" if kv_es else "")
+    ax.text(W / 2, H - 0.4, titulo, ha="center", fontsize=15, fontweight="bold")
+    L(3.5, bar, 7.5, bar, lw=5)
+    red_txt = "RED DE DISTRIBUCIÓN" + (f" {volts_pto}" if volts_pto else " M.T.") + f" – {fases}"
+    ax.text(W / 2, bar + 0.35, red_txt, ha="center", fontsize=11, fontweight="bold")
+
+    # ── Conductor principal (continuo; los simbolos se superponen) ────────────
+    sub_ls = (0, (1.5, 1.2)) if subterr else "-"
+    if secc_pos == "antes" and secc_open:
+        L(X, bar, X, Y(O_SECT), ls=sub_ls)       # se corta en el seccionador abierto
+        L(X, Y(O_SECB), X, Y(trafo_top if instal == "trafo" else arrow_start))
+    else:
+        L(X, bar, X, Y(trafo_top if instal == "trafo" else arrow_start), ls=sub_ls)
+
+    # Entrada MT: pararrayos (derivacion a la derecha) y CC fusibles
+    L(X, Y(O_DPS), X + 1.4, Y(O_DPS), c=VERDE, lw=1.6)
+    ax.add_patch(Rectangle((X + 1.26, Y(O_DPS - 0.9)), 0.28, 0.6, fc="white", ec=VERDE, lw=2, zorder=4))
+    ax.annotate("", xy=(X + 1.4, Y(O_DPS - 0.78)), xytext=(X + 1.4, Y(O_DPS - 0.42)),
+                arrowprops=dict(arrowstyle="-|>", lw=1.6, color=VERDE))
+    L(X + 1.4, Y(O_DPS), X + 1.4, Y(O_DPS - 0.3), c=VERDE, lw=1.6)
+    tierra(X + 1.4, Y(O_DPS - 0.9), c=VERDE, k=0.8)
+    ax.text(X + 1.75, Y(O_DPS - 0.6), "Pararrayos ZnO" + (f"\n(banco de {dps_n})" if dps_n > 1 else ""),
+            ha="left", va="center", fontsize=10, fontweight="bold", color=VERDE)
+    ax.add_patch(Rectangle((X - 0.13, Y(O_FUS - 0.28)), 0.26, 0.56, fc="white", ec="k", lw=2, zorder=4))
+    L(X, Y(O_FUS + 0.28), X, Y(O_FUS - 0.28), z=5)
+    ax.text(X - 0.35, Y(O_FUS), f"{n_cc} CC fusibles MT", ha="right", va="center", fontsize=10, fontweight="bold")
+
+    # ── TC: anillo ROJO sobre el conductor (serie) ───────────────────────────
+    ax.add_patch(Circle((X, Y(O_TC)), 0.32, fill=False, ec=ROJO, lw=2.6, zorder=6))
+    ax.text(X + 0.55, Y(O_TC), f"{n_tc} × TC  {rel_tc + ' A' if rel_tc else '---'}",
+            ha="left", va="center", fontsize=11, fontweight="bold", color=ROJO)
+
+    # ── Derivación del TP: par de círculos AZUL, a tierra ────────────────────
+    dot(X, Y(O_TPN))
+    L(X, Y(O_TPN), 9.2, Y(O_TPN)); L(9.2, Y(O_TPN), 9.2, Y(O_TPN - 0.25))
+    for dy in (0.55, 1.05):
+        ax.add_patch(Circle((9.2, Y(O_TPN - dy)), 0.3, fc="white", ec=AZUL, lw=2.4, zorder=4))
+    L(9.2, Y(O_TPN - 1.35), 9.2, Y(O_TPN - 1.9)); tierra(9.2, Y(O_TPN - 1.9), c=VERDE)
+    ax.text(9.2, Y(O_TPN - 2.75), f"{n_tp} × TP\n{rel_tp + ' V' if rel_tp else '---'}",
+            ha="center", va="center", fontsize=11, fontweight="bold", color=AZUL)
+
+    # ── Seccionador ANTES del trafo (lado MT): CERRADO por defecto ───────────
+    def seccionador(yt, yb, etiqueta, abierto):
+        dot(X, Y(yt)); dot(X, Y(yb))
+        if abierto:
+            L(X, Y(yt), X + 0.55, Y(yt - 0.75), lw=2.5)
+        else:
+            L(X, Y(yt), X, Y(yb), lw=2.5, z=3)                  # cuchilla cerrada sobre el contacto
+            L(X, Y(yt), X + 0.3, Y(yt - 0.45), lw=2.5, c="k", z=3)   # manija
+        ax.text(X + 0.6, Y((yt + yb) / 2 + 0.1), etiqueta, ha="left", va="center", fontsize=10, fontweight="bold")
+    estado = "ABIERTO" if secc_open else "cerrado"
+    if secc_pos == "antes":
+        seccionador(O_SECT, O_SECB, f"Seccionador {polos}\n" + (kv_es if kv_es else "(lado MT)") + f"\n({estado})", secc_open)
+
+    # ── Transformador: par grande NEGRO, neutro a tierra, Dyn11 ──────────────
+    if instal == "trafo":
+        for yy in (O_TR1, O_TR2):
+            ax.add_patch(Circle((X, Y(yy)), 0.6, fc="white", ec="k", lw=2, zorder=4))
+        L(X - 0.6, Y(O_TR2), X - 1.15, Y(O_TR2), c=VERDE, lw=1.6)      # neutro del secundario a tierra
+        tierra(X - 1.15, Y(O_TR2), c=VERDE)
+        tl = "Transformador" + (f"\n{kva} kVA" + (" · Dyn11" if tri else "") if kva else (" Dyn11" if tri else "")) \
+             + f"\n{volts_raw} / BT" + (f"\nIn = {_es(In)} A" if In else "")
+        ax.text(X + 0.9, Y((O_TR1 + O_TR2) / 2), tl, ha="left", va="center", fontsize=11, fontweight="bold")
+    L(X, Y(trafo_bot if instal == "trafo" else trafo_top), X, Y(arrow_start))
+
+    # Protección y seccionador BT (después del trafo)
+    if prot_c is not None:
+        yb = Y(prot_c - 0.95)
+        ax.add_patch(Rectangle((X - 0.25, yb - 0.25), 0.5, 0.5, fc="white", ec="k", lw=2, zorder=4))
+        ax.text(X + 0.55, yb, "Protección\n" + prot_det, ha="left", va="center", fontsize=10, fontweight="bold")
+    if secc_d_c is not None:
+        seccionador(secc_d_c - 0.45, secc_d_c - 1.35, f"Seccionador {polos}\n(lado BT)\n({estado})", secc_open)
+    if calibre:
+        ax.text(X - 0.25, Y(arrow_start - 0.35), calibre, ha="right", va="center", fontsize=9.5, color="#444", style="italic")
+    ax.annotate("", xy=(X, Y(arrow_start - 1.05)), xytext=(X, Y(arrow_start - 0.7)),
+                arrowprops=dict(arrowstyle="-|>", lw=2, color="k"))
+    L(X, Y(arrow_start), X, Y(arrow_start - 0.7))
+    ax.text(X, Y(arrow_start - 1.35), "A CARGA (BT)" if instal == "trafo" else "A CARGA", ha="center", fontsize=10.5)
+
+    # ── Medidor(es) + BLOQUE DE PRUEBAS en los secundarios ───────────────────
+    y_tc, y_tp = Y(O_TC), Y(O_TPM)
+    y_m = (y_tc + y_tp) / 2
+    bx0, bx1 = 3.15, 4.2
+    rm = 0.75 if not respaldo else 0.6
+    mxs = [1.55] if not respaldo else [0.95, 2.3]
+    for k, mx in enumerate(mxs):
+        ax.add_patch(Circle((mx, y_m), rm, fc="white", ec="k", lw=2, zorder=4))
+        if respaldo:
+            ax.text(mx, y_m + 0.3, "PRINCIPAL" if k == 0 else "RESPALDO", ha="center", va="center",
+                    fontsize=6, fontweight="bold", zorder=6)
+            ax.text(mx, y_m - 0.1, "kWh\nkVArh", ha="center", va="center", fontsize=8.5, fontweight="bold", zorder=6)
+        else:
+            ax.text(mx, y_m, "kWh\nkVArh", ha="center", va="center", fontsize=11, fontweight="bold", zorder=6)
+    ax.text(sum(mxs) / len(mxs), y_tp - 0.75, med_txt + "\n(medida indirecta)",
+            ha="center", va="top", fontsize=10, fontweight="bold")
+    # bloque de pruebas: caja vertical atravesada por ambos secundarios
+    ax.add_patch(Rectangle((bx0, y_tp - 0.55), bx1 - bx0, (y_tc - y_tp) + 1.1, fc="white", ec="k", lw=2, zorder=3))
+    ax.text((bx0 + bx1) / 2, y_m, "BLOQUE DE PRUEBAS", rotation=90, ha="center", va="center",
+            fontsize=9, fontweight="bold", zorder=6)
+    L((bx0 + bx1) / 2, y_tp - 0.55, (bx0 + bx1) / 2, y_tp - 0.75, c=VERDE, lw=1.4)       # secundarios a tierra
+    tierra((bx0 + bx1) / 2, y_tp - 0.75, c=VERDE, k=0.7)
+    ax.text((bx0 + bx1) / 2 + 0.45, y_tp - 1.05, "secundarios\na tierra", ha="left", va="center",
+            fontsize=8, color=VERDE, fontweight="bold")
+    if sec_tc:
+        L(X - 0.32, y_tc, bx1, y_tc, lw=1.7, c=ROJO, ls="--")
+        L(bx0, y_tc, mxs[0], y_tc, lw=1.7, c=ROJO, ls="--")
+        # dos lineas y centrado en el tramo bloque->TC (~1 u): en una linea llegaba al anillo
+        ax.text((bx1 + X - 0.32) / 2, y_tc + 0.12, f"Sec. TC\n{sec_tc}", ha="center", va="bottom",
+                fontsize=9.5, color=ROJO, fontweight="bold")
+    if sec_tp:
+        L(8.9, y_tp, bx1, y_tp, lw=1.7, c=AZUL, ls="--")
+        L(bx0, y_tp, mxs[0], y_tp, lw=1.7, c=AZUL, ls="--")
+        ax.text(7.2, y_tp + 0.12, f"Sec. TP – {sec_tp}", ha="center", fontsize=9.5, color=AZUL, fontweight="bold")
+    for mx in mxs:
+        if sec_tc: L(mx, y_tc, mx, y_m + rm, lw=1.7, c=ROJO, ls="--")
+        if sec_tp: L(mx, y_tp, mx, y_m - rm, lw=1.7, c=AZUL, ls="--")
+    if respaldo:
+        for yy, c in ((y_tc, ROJO), (y_tp, AZUL)):
+            dot(mxs[1], yy, r=0.06, c=c)
+
+    # ── Cuadro de datos ──────────────────────────────────────────────────────
+    ct = Y(cuadro_top)
+    ax.add_patch(Rectangle((0.4, ct - cuadro_h), 10.2, cuadro_h, fc="white", ec="k", lw=2))
+    col = {"ok": "#2E7D32", "warn": "#B26A00", "err": "#C62828"}
+    yy = ct - 0.3
+    for kind, txt in filas:
+        ax.text(0.7, yy, txt, fontsize=9 if kind == "i" else 10, va="center",
+                fontweight="bold" if kind in ("b", "err") else "normal",
+                style="italic" if kind == "i" else "normal", color=col.get(kind, "black"))
+        yy -= 0.4
+
+    plt.savefig(out_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out_path
+
 def draw_unifilar_generico(cfg, out_path):
     """
     Topologia vertical principal. TC/TP como ramas horizontales hacia la derecha.
     BLOQUE DE PRUEBA + MEDIDOR como cajas prominentes a la derecha del eje.
     Proteccion configurable: antes del medidor, despues, o ambas.
+
+    Medida INDIRECTA con un solo trafo (o sin trafo) se dibuja con el estilo
+    "plano limpio" de draw_unifilar_indirecta_pro. Quedan en este renderer: las
+    subestaciones multi-celda (n_trafos>=2), directa/semidirecta, y indirecta
+    con cfg["estilo"] == "detallado" (CC fusibles, pararrayos, bloque de prueba
+    y plano de simbologia).
     """
+    try:
+        _n_tr = int(cfg.get("n_trafos", 1) or 1)
+    except (TypeError, ValueError):
+        _n_tr = 1
+    if cfg.get("tipo") == "indirecta" and cfg.get("estilo") != "detallado" and _n_tr < 2:
+        return draw_unifilar_indirecta_pro(cfg, out_path)
     tipo        = cfg.get("tipo", "directa")
     sistema     = cfg.get("sistema", "tri4h")
     norma       = cfg.get("norma", "RA8")
@@ -1024,8 +1414,75 @@ def draw_unifilar_generico(cfg, out_path):
     seccionador_pos  = cfg.get("seccionador", "")
     calibre          = cfg.get("calibre_conductor", "") or cfg.get("calibre_acometida", "")
 
-    fig, ax = plt.subplots(figsize=(16, 11))
-    W, H = 155, 115
+    tipo_txt = {"directa":"Directa","semidirecta":"Semidirecta","indirecta":"Indirecta"}[tipo]
+    sis_short = SIS_TXT[sistema].split(" (")[0].title()
+
+    # ── Datos del CUADRO DE DATOS (columna derecha, sobre el plano de ─────────
+    # simbologia). Se arman ANTES de crear la figura porque su altura decide
+    # cuanto crece el lienzo. Solo se listan cosas que SI quedan dibujadas: un
+    # cuadro que diga "seccionador" cuando no se dibujo seria peor que no
+    # tener cuadro.
+    # Lado del seccionador: "antes" (del trafo) siempre es MT; "despues" es BT
+    # salvo indirecta sin trafo (no hay trafo que separe MT de BT).
+    secc_dibujado = (not es_multi_celda) and (
+        seccionador_pos == "despues" or (seccionador_pos == "antes" and instalacion == "trafo"))
+    secc_lado = "MT" if (seccionador_pos == "antes" or
+                         (tipo == "indirecta" and instalacion != "trafo")) else "BT"
+    v_mt_cfg = cfg.get("v_mt", "")
+    prot_antes_ef = prot_antes if tipo in ("directa", "semidirecta") else ""
+    prot_desp_ef  = "" if es_multi_celda else prot_despues
+
+    def _prot_txt(amp):
+        polos, tprot = cfg.get("interruptor_polos"), cfg.get("interruptor_tipo")
+        return "  ".join(p for p in (amp, f"{polos}P" if polos else None, tprot) if p)
+
+    filas = [("Medida", f"{tipo_txt} · {sis_short}" + (" · Principal + Respaldo" if respaldo else ""))]
+    if instalacion == "trafo":
+        kva_l = [str(k) for k in (cfg.get("trafo_kva_list") or [])]
+        lista = " + ".join(kva_l) if kva_l else str(kva or "")
+        if es_multi_celda:
+            t_txt = f"{n_trafos} celdas" + (f": {lista} kVA" if lista else "")
+        elif n_trafos >= 2:
+            t_txt = f"banco de {n_trafos}" + (f": {lista} kVA" if lista else "")
+        else:
+            t_txt = " ".join(p for p in (f"{kva} kVA" if kva else "", trafo_tipo) if p)
+        if trafo_uso == "compartido":
+            n_us = str(cfg.get("trafo_n_usuarios", "") or "").strip()
+            t_txt += " · compartido" + (f" ({n_us} usuarios más)" if n_us else "")
+        elif trafo_uso == "exclusivo":
+            t_txt += " · exclusivo"
+        filas.append(("Transformador", t_txt))
+    elif instalacion == "barraje":
+        t_bt = cfg.get("tension_bt", "")
+        filas.append(("Barraje BT", f"{t_bt} V" if t_bt else "B.T."))
+    if v_mt_cfg and (tipo == "indirecta" or instalacion == "trafo"):
+        filas.append(("Tensión MT", v_mt_cfg))
+    if rel_tc or rel_tp:
+        filas.append(("Relaciones", "  ·  ".join(
+            x for x in (f"TC {rel_tc}" if rel_tc else "", f"TP {rel_tp}" if rel_tp else "") if x)))
+    if secc_dibujado:
+        filas.append(("Seccionador",
+                      ("antes del trafo" if seccionador_pos == "antes" else "después del trafo")
+                      + f" (lado {secc_lado}"
+                      + (f" {v_mt_cfg}" if secc_lado == "MT" and v_mt_cfg else "") + ")"))
+    prot_partes = []
+    if prot_antes_ef: prot_partes.append(f"{_prot_txt(prot_antes_ef)} (antes del medidor)")
+    if prot_desp_ef:  prot_partes.append(f"{_prot_txt(prot_desp_ef)} (después)")
+    if prot_partes:
+        filas.append(("Protección", " · ".join(prot_partes)))
+    if calibre:
+        filas.append(("Calibre", calibre))
+    filas.append(("Normativa", f"CREG 038/2014 · RETIE 2024 · Bornera {norma}"))
+
+    filas_w = [(k, textwrap.wrap(v, 46) or [""]) for k, v in filas]
+    cuadro_h = 8.0 + sum(2.7 + 2.0 * (len(ls) - 1) for _, ls in filas_w)
+    W = 155
+    # El cuadro va sobre el plano de simbologia (que termina en y=92): el
+    # lienzo crece solo lo que haga falta (escala constante: la altura de la
+    # figura crece en proporcion, asi el tamano de simbolos y texto no cambia).
+    H = max(115, int(math.ceil(105 + cuadro_h)))
+
+    fig, ax = plt.subplots(figsize=(16, 11 * H / 115))
     ax.set_xlim(0, W); ax.set_ylim(0, H)
     ax.set_aspect("equal"); ax.axis("off")
 
@@ -1036,8 +1493,6 @@ def draw_unifilar_generico(cfg, out_path):
     if circuito:
         ax.text(W/2, H-3.6, f"Circuito: {circuito}",
                 ha="center", fontsize=9.5, fontweight="bold", color="#444")
-    tipo_txt = {"directa":"Directa","semidirecta":"Semidirecta","indirecta":"Indirecta"}[tipo]
-    sis_short = SIS_TXT[sistema].split(" (")[0].title()
     sub_parts = [f"Medida {tipo_txt}", sis_short, f"Norma {norma}"]
     if rel_tc:  sub_parts.append(f"RTC {rel_tc}")
     if rel_tp:  sub_parts.append(f"RTP {rel_tp}")
@@ -1075,6 +1530,18 @@ def draw_unifilar_generico(cfg, out_path):
         ax.plot([xc-14, xc+14], [yy, yy], color=INK, lw=5, zorder=2)
         ax.text(xc-16, yy, label, ha="right", va="center",
                 fontsize=9.5, fontweight="bold", color=INK)
+
+    def secc_rotulo():
+        """Rotulo del seccionador con su lado (MT/BT) -- calculado arriba
+        (secc_lado); en MT incluye la tension de la red si se conoce."""
+        tens = f" {v_mt_cfg}" if secc_lado == "MT" and v_mt_cfg else ""
+        return f"Seccionador {secc_lado}{tens}\n(c/cuchilla a tierra)"
+
+    def _secundario(rel):
+        """'30/5' -> '5' (valor nominal del secundario); '' si no hay relacion
+        legible. Acepta decimales ('13200/115.5')."""
+        parte = str(rel or "").split("/")[-1].strip()
+        return parte if "/" in str(rel or "") and re.fullmatch(r"\d+(?:[.,]\d+)?", parte) else ""
 
     def draw_prot(label, amp, polos=None, tipo=None):
         """Dibuja interruptor de proteccion en la posicion actual de y."""
@@ -1128,6 +1595,13 @@ def draw_unifilar_generico(cfg, out_path):
         _u_ct(ax, sym_x, tc_y, COL["R"], 1.0)
         ax.text(sym_x, tc_y - 3.3, f"TC {rel_tc or '---'}\n(serie)",
                 ha="center", va="top", fontsize=7, color=COL["R"], fontweight="bold")
+        # Rotulo del SECUNDARIO (lo que realmente llega al bloque/medidor):
+        # 30/5 -> 5 A. Corto a proposito: solo hay ~6 unidades entre el
+        # simbolo y el bloque.
+        sec_tc = _secundario(rel_tc)
+        if sec_tc:
+            ax.text(bq_x0 - 0.7, tc_y + 0.9, f"sec. {sec_tc} A", ha="right", va="bottom",
+                    fontsize=5.6, color=COL["R"], fontweight="bold")
         # hilo TC → entrada izquierda del bloque (a la altura bq_cy o tc_y)
         entry_tc_y = bq_cy + bq_h/2 - 3 if tp_y is not None else bq_cy
         ax.plot([sym_x + 1.8, bq_x0], [tc_y, tc_y], color=INK, lw=1.9, zorder=3)
@@ -1145,6 +1619,10 @@ def draw_unifilar_generico(cfg, out_path):
             _u_vt(ax, sym_x, tp_y, COL["S"], 0.9, ground=True)
             ax.text(sym_x, tp_y + 3.3, f"(paralelo)\nTP {rel_tp or '---'}",
                     ha="center", va="bottom", fontsize=7, color=COL["S"], fontweight="bold")
+            sec_tp = _secundario(rel_tp)
+            if sec_tp:
+                ax.text(bq_x0 - 0.7, tp_y + 0.9, f"sec. {sec_tp} V", ha="right", va="bottom",
+                        fontsize=5.6, color=COL["S"], fontweight="bold")
             entry_tp_y = bq_cy - bq_h/2 + 3
             ax.plot([sym_x + 1.8, bq_x0], [tp_y, tp_y], color=INK, lw=1.1, zorder=3)
             if abs(tp_y - entry_tp_y) > 0.5:
@@ -1286,7 +1764,10 @@ def draw_unifilar_generico(cfg, out_path):
             cc_lbl = "CC fusible MT"
         ax.text(xc - 5, cc_y, cc_lbl, ha="right", va="center",
                 fontsize=7.5, color=INK, fontweight="bold")
-        vline(cc_y, cc_y - 3); y = cc_y - 3
+        # 6 (no 3): el rotulo "(paralelo) TP ..." del TP (arriba del simbolo)
+        # llega hasta el pararrayos lateral de arriba (arrx = xc+18) si el TP
+        # queda mas cerca -- se encimaban el texto y la tierra del pararrayos.
+        vline(cc_y, cc_y - 6); y = cc_y - 6
 
         # TC + TP como ramas horizontales (tp arriba, tc abajo del nodo)
         tp_y = y
@@ -1314,10 +1795,16 @@ def draw_unifilar_generico(cfg, out_path):
 
         for i, cx in enumerate(xs):
             kva_i = kva_list[i] if i < len(kva_list) else kva
-            lbl = f"TR{i+1}\n{kva_i} kVA" if kva_i else f"TR{i+1}"
-            # Etiqueta CENTRADA arriba del fusible (no a un lado): a un lado
-            # se solapaba con la celda vecina cuando hay varias muy juntas.
-            ax.text(cx, bus_y - 1, lbl, ha="center", va="top",
+            # Celdas muy juntas (cell_w < 8): "500 kVA" en una linea mide ~6.5 u
+            # y pisa el rotulo de la celda vecina -> tres lineas cortas.
+            if kva_i and cell_w < 8:
+                lbl = f"TR{i+1}\n{kva_i}\nkVA"
+            else:
+                lbl = f"TR{i+1}\n{kva_i} kVA" if kva_i else f"TR{i+1}"
+            # Etiqueta a la DERECHA de la rama (centrada quedaba tachada por la
+            # linea de la rama). Ancho ~3.5 u + 0.9 de margen < cell_w minimo
+            # (5 u), asi que no llega a la celda vecina -- verificado con 8.
+            ax.text(cx + 0.9, bus_y - 1.2, lbl, ha="left", va="top",
                     fontsize=6.2, fontweight="bold", color=INK)
             fy = bus_y - 6.5
             ax.plot([cx, cx], [bus_y, fy + 2.2], color=INK, lw=1.6, zorder=3)
@@ -1360,11 +1847,17 @@ def draw_unifilar_generico(cfg, out_path):
             vline(y - 2, y - 4); y -= 4
 
         if seccionador_pos == "antes":
-            vline(y, y - 3)
+            # La linea llega SOLO hasta el contacto superior (y_c+2) y sale
+            # desde el inferior (y_c-2): si atravesara el simbolo, el
+            # seccionador (abierto) se leeria como puenteado/cerrado.
+            vline(y, y - 1)
             _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
-            ax.text(xc - 5, y - 3, "Seccionador\n(c/cuchilla a tierra)", ha="right", va="center",
+            ax.text(xc - 5, y - 3, secc_rotulo(), ha="right", va="center",
                     fontsize=7.2, color=INK, fontweight="bold")
-            vline(y - 3, y - 5); y -= 5
+            # 7 (no 5): el contacto inferior del seccionador queda en y-5 y el
+            # circulo superior del trafo llega hasta ~y-5.4 -- con 5 el
+            # contacto quedaba DENTRO del circulo del trafo.
+            vline(y - 5, y - 7); y -= 7
 
         trafo_y = y - 5
         kva_list = cfg.get("trafo_kva_list", [])
@@ -1400,7 +1893,9 @@ def draw_unifilar_generico(cfg, out_path):
             trafo_lbl += "\nDyn11"
         ax.text(xc - 8, trafo_y, trafo_lbl,
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
-        vline(y, trafo_y - 5); y = trafo_y - 6
+        # y = trafo_y - 5 (no -6): la linea llega hasta trafo_y-5 y lo que sigue
+        # arranca en y; con -6 quedaba un hueco de 1 unidad (circuito abierto).
+        vline(y, trafo_y - 5); y = trafo_y - 5
 
         if es_compartido:
             # El secundario del trafo alimenta un barraje BT del que se
@@ -1409,7 +1904,12 @@ def draw_unifilar_generico(cfg, out_path):
             # resto se indica de forma esquematica, SIN invadir el espacio
             # donde mas abajo se dibuja la conexion propia de este usuario
             # (TC/bloque/medidor pueden ocupar bastante ancho a la derecha).
-            bt_y = trafo_y - 5
+            # 9 (no 5): el circulo inferior del trafo llega a trafo_y-4.6; con el
+            # barraje a -5 el recinto del gabinete (borde superior en bt_y+2)
+            # CRUZABA el trafo, contra lo documentado (el trafo va siempre por
+            # ENCIMA del borde superior del recinto, fuera de la caja).
+            bt_y = trafo_y - 9
+            vline(y, bt_y)
             n_us = str(cfg.get("trafo_n_usuarios", "") or "").strip()
             gabinete = bool(cfg.get("trafo_gabinete", False))
             lbl_otros = f"+ {n_us} medidores mas\nen este punto" if n_us else "+ otros medidores\nen este punto"
@@ -1434,9 +1934,16 @@ def draw_unifilar_generico(cfg, out_path):
             # para que TC/bloque/medidor -- y su etiqueta "ESTE MEDIDOR" --
             # nunca se crucen con el barraje ni con "(red abierta)".
             cable_lbl(bt_y - 2, bt_y - 6, calibre or "cal. ?", lado=-1)
-            vline(bt_y, bt_y - 7); y = bt_y - 8
+            # y = bt_y - 7 (no -8): con -8 quedaba un hueco de 1 u entre este
+            # tramo y lo que sigue (derivacion a los medidores / proteccion).
+            vline(bt_y, bt_y - 7); y = bt_y - 7
         else:
-            cable_lbl(y + 2, y - 2, calibre or "cal. ?", lado=-1)
+            # El rotulo del conductor necesita su PROPIO tramo de linea, sin
+            # nada pegado: con solo ~0.6 u entre el trafo y la proteccion /
+            # seccionador siguiente, "cal. ?" tocaba el circulo inferior del
+            # trafo y, con proteccion despues, quedaba ENCIMA de su rotulo.
+            cable_lbl(y, y - 5, calibre or "cal. ?", lado=-1)
+            vline(y, y - 5); y -= 5
 
     # ── SEMIDIRECTA: TC como rama horizontal → bloque + medidor ───────────────
     if tipo == "semidirecta":
@@ -1463,11 +1970,16 @@ def draw_unifilar_generico(cfg, out_path):
             draw_prot("Proteccion", prot_antes, polos=cfg.get("interruptor_polos"), tipo=cfg.get("interruptor_tipo"))
         # Medidor en linea -- simbolo normalizado: circulo con "kWh"
         # (igual convencion que el resto del diagrama, sin cajas oscuras).
-        y_mid = y - 5
+        # El medidor arranca 2 u debajo de y (antes y_mid = y-5 con r=6.5 lo
+        # subia 1.5 u POR ENCIMA de y: se encimaba con la proteccion/linea de
+        # arriba y vline(y, y_mid+r) dibujaba hacia arriba).
         r = 6.5
+        y_mid = y - 2 - r
         if not respaldo:
             vline(y, y_mid + r)
-            _u_meter(ax, xc, y_mid, r=r, lw=1.7, label_below="MEDIDOR")
+            # rotulo a la derecha de la linea (la linea sigue hacia abajo)
+            _u_meter(ax, xc, y_mid, r=r, lw=1.7, label_below="MEDIDOR",
+                     label_dx=1.2, label_ha="left")
             if es_compartido:
                 ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid), xytext=(xc + r + 8, y_mid),
                             ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
@@ -1482,8 +1994,11 @@ def draw_unifilar_generico(cfg, out_path):
                                  fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
                     ax.text(gx1 + 1, gy1 - 0.5, "GABINETE\nCOMPARTIDO", ha="left", va="top",
                             fontsize=6.3, color="#8a4b00", fontweight="bold")
-            vline(y_mid - r, y - 12)
-            y -= 12
+            # 5 u de conductor bajo el circulo (antes `y - 12` con el medidor
+            # 3.5 u mas arriba): da espacio al rotulo "MEDIDOR" y deja la CARGA
+            # separada del medidor.
+            vline(y_mid - r, y_mid - r - 5)
+            y = y_mid - r - 5
         else:
             # PRINCIPAL + RESPALDO (chequeo): dos medidores EN PARALELO desde
             # el mismo nodo de derivacion -- ambos miden la misma acometida,
@@ -1492,15 +2007,20 @@ def draw_unifilar_generico(cfg, out_path):
             # que el subtitulo ya decia "Principal + Respaldo": discrepancia
             # real entre el texto y el dibujo.
             r = 5.5
-            jy = y_mid + r + 2.5
+            jy = y - 2                 # nodo de derivacion: justo debajo de y
+            y_mid = jy - 2.5 - r
             dxs = (-(r + 9), (r + 9))
             vline(y, jy)
             ax.plot([xc + dxs[0], xc + dxs[1]], [jy, jy], color=INK, lw=1.8, zorder=3)
-            out_y = y_mid - r - 2.5
+            # 5 (no 2.5): los rotulos PRINCIPAL/RESPALDO quedaban tachados por
+            # la barra horizontal de union; ademas van a cada lado de su
+            # conductor vertical, no encima.
+            out_y = y_mid - r - 5
             for dx, etq in [(dxs[0], "PRINCIPAL"), (dxs[1], "RESPALDO")]:
                 cx = xc + dx
                 ax.plot([cx, cx], [jy, y_mid + r], color=INK, lw=1.5, zorder=3)
-                _u_meter(ax, cx, y_mid, r=r, fontsize=7, lw=1.6, label_below=etq, label_fontsize=6)
+                _u_meter(ax, cx, y_mid, r=r, fontsize=7, lw=1.6, label_below=etq, label_fontsize=6,
+                         label_dx=(-1.0 if dx < 0 else 1.0), label_ha=("right" if dx < 0 else "left"))
                 ax.plot([cx, cx], [y_mid - r, out_y], color=INK, lw=1.5, zorder=3)
             if es_compartido:
                 # Apunta al PUNTO (principal+respaldo juntos), no a un
@@ -1531,11 +2051,13 @@ def draw_unifilar_generico(cfg, out_path):
     if es_multi_celda:
         pass  # cada celda ya tiene su propia proteccion + carga (ver arriba)
     elif seccionador_pos == "despues":
-        vline(y, y - 3)
+        vline(y, y - 1)   # solo hasta el contacto superior (ver nota arriba)
         _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
-        ax.text(xc - 5, y - 3, "Seccionador\n(c/cuchilla a tierra)", ha="right", va="center",
+        ax.text(xc - 5, y - 3, secc_rotulo(), ha="right", va="center",
                 fontsize=7.2, color=INK, fontweight="bold")
-        vline(y - 3, y - 5); y -= 5
+        # 8 (no 5): con 5 el contacto inferior (y-5) quedaba exactamente
+        # sobre el borde superior del triangulo de CARGA, tocandose.
+        vline(y - 5, y - 8); y -= 8
     else:
         vline(y, y - 4); y -= 4
 
@@ -1552,6 +2074,25 @@ def draw_unifilar_generico(cfg, out_path):
                     fontsize=7.5, color="#444", style="italic")
         ax.text(xc, y - 11, "CARGA",
                 ha="center", va="top", fontsize=11, fontweight="bold", color=INK)
+
+    # ── CUADRO DE DATOS (panel derecho, sobre el plano de simbologia) ─────────
+    # Resume lo dibujado (filas armadas arriba, antes de crear la figura).
+    cx0, cx1 = 88, 152
+    c_top = H - 9
+    c_bot = c_top - cuadro_h
+    ax.add_patch(FancyBboxPatch((cx0, c_bot), cx1 - cx0, cuadro_h,
+                 boxstyle="round,pad=0.6,rounding_size=2",
+                 fill=True, fc="#FAFAFA", ec="#2B2B2B", lw=1.5))
+    ax.text((cx0 + cx1) / 2, c_top - 3, "CUADRO DE DATOS",
+            ha="center", fontsize=10, fontweight="bold", color=INK)
+    fy = c_top - 8.0
+    for etq, lineas in filas_w:
+        ax.text(cx0 + 2.5, fy, etq, ha="left", va="center",
+                fontsize=7.2, fontweight="bold", color="#555")
+        for j, ln in enumerate(lineas):
+            ax.text(cx0 + 19, fy - 2.0 * j, ln, ha="left", va="center",
+                    fontsize=7.5, color=INK)
+        fy -= 2.7 + 2.0 * (len(lineas) - 1)
 
     # ── PLANO DE SIMBOLOGIA (panel derecho) ───────────────────────────────────
     px0, px1 = 88, 152

@@ -91,13 +91,18 @@ def parse_spec(text):
         entendido.append("Con respaldo (principal + respaldo)")
 
     # --- NORMA ---
-    norma_count = sum(1 for x in ["cens", "ra8", "ra-8"] if x in t)
+    # El NOMBRE de un circuito o de un punto de conexion puede ser "RA8" (asi se
+    # llama en algunos operadores, p.ej. "circuito RA8"): no es la norma. Se
+    # quita de t ANTES de buscar la norma, o "circuito RA8 ... CENS" lanzaba
+    # "Norma ambigua".
+    t_norma = re.sub(r"\b(?:circuito|cto|punto\s+de\s+conexion)\s*:?\s*[a-z0-9\-]+", " ", t)
+    norma_count = sum(1 for x in ["cens", "ra8", "ra-8"] if x in t_norma)
     if norma_count > 1:
         raise ValueError("Norma ambigua: especifica CENS o RA8")
 
-    if "cens" in t:
+    if "cens" in t_norma:
         cfg["norma"] = "CENS"
-    elif "ra8" in t or "ra-8" in t or "nacional" in t:
+    elif "ra8" in t_norma or "ra-8" in t_norma or "nacional" in t_norma:
         cfg["norma"] = "RA8"
     entendido.append(f"Norma: {cfg['norma']}")
 
@@ -224,6 +229,35 @@ def parse_spec(text):
             # Trafo de uso propio/exclusivo: casi siempre se quiere ver la
             # cadena completa RED->TRAFO->MEDIDOR, por eso se fuerza unifilar.
             cfg["salida"] = "unifilar"
+
+    # --- SECCIONADOR: posicion respecto al TRAFO (lo unico que dibuja el motor) ---
+    # "antes"   = entre el punto de medida y el trafo (lado MT)
+    # "despues" = aguas abajo del trafo (lado BT)
+    # Sin esto, "seccionador despues" en texto libre se descartaba sin avisar.
+    if re.search(r"\bseccionador", t) and not re.search(r"\bsin\s+seccionador", t):
+        # Solo la clausula que sigue a la palabra (hasta coma/punto/";"), para
+        # no contaminarse con otra frase tipo "proteccion despues del medidor".
+        clausula = re.split(r"[,;]|\.(?:\s|$)", t[t.index("seccionador"):], maxsplit=1)[0]
+        pos = None
+        if re.search(r"antes\s+d(?:el|e\s+la)\s+(?:trafo|transformador)|lado\s+(?:de\s+)?(?:red|mt)\b|media\s+tension|\bmt\b", clausula):
+            pos = "antes"
+        elif re.search(r"despues\s+d(?:el|e\s+la)\s+(?:trafo|transformador)|lado\s+(?:de\s+)?(?:carga|bt)\b|baja\s+tension|\bbt\b", clausula):
+            pos = "despues"
+        elif re.search(r"despues\s+d(?:e\s+la|el|e)\s+(?:medida|medicion|medidor|punto\s+de\s+medida)", clausula):
+            # En indirecta la medida esta en MT, AGUAS ARRIBA del trafo: un
+            # seccionador "despues de la medida" queda fisicamente entre la
+            # medida y el trafo -> "antes" del trafo. En semi/directa la
+            # medida es en BT (aguas abajo del trafo) -> "despues".
+            pos = "antes" if cfg["tipo"] == "indirecta" else "despues"
+        elif re.search(r"antes\s+d(?:e\s+la|el|e)\s+(?:medida|medicion|medidor|punto\s+de\s+medida)", clausula):
+            pos = "antes"   # lo mas cercano que dibuja el motor: lado red/MT
+        if pos is None:
+            pos = "antes"   # mencionado sin posicion: el caso tipico
+            entendido.append("Seccionador: antes del trafo (lado MT) — posicion por defecto")
+        else:
+            entendido.append("Seccionador: " + ("antes del trafo (lado MT)" if pos == "antes"
+                                                  else "despues del trafo (lado BT)"))
+        cfg["seccionador"] = pos
 
     # --- CONEXION (simetrica / asimetrica) — solo aplica a medida directa ---
     if re.search(r"asimetr", t):

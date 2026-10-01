@@ -827,9 +827,13 @@ PROMPT_DIAGRAMA = (
     "- PROTECCION (pregunta siempre): ¿Tiene interruptor/proteccion en la acometida?\n"
     "  Si/No. ¿De cuantos amperios? ¿Va ANTES del medidor, DESPUES, o en AMBOS lados?\n"
     "  Referencia: directa -> tipicamente ANTES. Semi/indirecta -> tipicamente DESPUES.\n"
-    "- Seccionador (SOLO si instalacion=trafo, es el de MT junto al "
-    "transformador -- no preguntes esto si no hay trafo): antes (lado de "
-    "red/MT) o despues (lado de carga/BT, tras el trafo y la medida).\n"
+    "- Seccionador (SOLO si instalacion=trafo -- no preguntes esto si no hay "
+    "trafo). Su posicion es SIEMPRE respecto al TRANSFORMADOR, no respecto a "
+    "la medida: 'antes' = entre el punto de medida y el trafo (lado MT, "
+    "tipicamente a la tension de la red); 'despues' = aguas abajo del trafo "
+    "(lado BT). Ojo: en medida indirecta la medida esta en MT, aguas arriba del "
+    "trafo, asi que un seccionador 'despues de la medida' fisicamente es "
+    "'antes' del trafo (seccionador=\"antes\").\n"
     "- Conductor: calibre acometida (ej. 1/0, 2/0, AWG 4). Si no sabe, omitir.\n"
     "- Medidor de respaldo: si/no.\n"
     "- Identificacion del circuito (opcional, solo si el usuario la menciona "
@@ -910,8 +914,8 @@ PROMPT_DIAGRAMA = (
     "proteccion_antes: string ej '200 A' o \"\" (proteccion ANTES del medidor; "
     "NUNCA uses el campo 'interruptor' -- es legacy y queda ambiguo)\n"
     "proteccion_despues: string ej '100 A' o \"\" (proteccion DESPUES del medidor)\n"
-    'seccionador: "antes" | "despues" | "" (SOLO tiene efecto si '
-    'instalacion="trafo" -- es el seccionador de MT junto al transformador; '
+    'seccionador: "antes" (antes del trafo, lado MT) | "despues" (despues del '
+    'trafo, lado BT) | "" (SOLO tiene efecto si instalacion="trafo"; '
     "si instalacion es \"barraje\" o \"\", no preguntes esto, se ignora)\n"
     "rel_tc: string ej '200/5'\n"
     "rel_tp: string ej '13200/120'\n"
@@ -968,6 +972,21 @@ _SIS_SHORT = {
     "tri4h":   "Trifásica 4H",
 }
 
+# Posicion del seccionador. El motor (diagram_engine) la dibuja SIEMPRE
+# respecto al TRAFO: "antes" = entre el punto de medida y el trafo (lado MT);
+# "despues" = aguas abajo del trafo (lado BT). Antes el menu decia "antes/
+# despues de la medida", que en indirecta (medida en MT, aguas arriba del
+# trafo) queria decir lo contrario de lo que se dibujaba. Todo texto visible
+# al usuario sobre el seccionador debe salir de aqui para no volver a divergir.
+_SECC_TXT = {"antes": "antes del trafo (lado MT)", "despues": "después del trafo (lado BT)"}
+_SECC_CORTO = {"antes": "MT", "despues": "BT"}
+_SECC_BOTONES = [("Antes del trafo (MT)", "antes"), ("Después del trafo (BT)", "despues")]
+_SECC_PREGUNTA = (
+    "¿Dónde va el seccionador respecto al transformador?\n\n"
+    "  Antes    entre la medida y el trafo (lado MT)\n"
+    "  Después  aguas abajo del trafo (lado BT)"
+)
+
 def _mini(cfg):
     """Breadcrumb horizontal con los campos seleccionados."""
     p = []
@@ -986,7 +1005,7 @@ def _mini(cfg):
     elif inst == "barraje":
         t = cfg.get("tension_bt", "")
         p.append(f"Barraje {t} V" if t else "Barraje BT")
-    if cfg.get("seccionador"):    p.append(f"Secc. {cfg['seccionador']}")
+    if cfg.get("seccionador"):    p.append(f"Secc. {_SECC_CORTO.get(cfg['seccionador'], cfg['seccionador'])}")
     if cfg.get("rel_tc"):         p.append(f"TC {cfg['rel_tc']}")
     if cfg.get("rel_tp"):         p.append(f"TP {cfg['rel_tp']}")
     if cfg.get("proteccion_amp"): p.append(f"{cfg['proteccion_amp']} A")
@@ -1027,7 +1046,7 @@ def _caption(tipo_diagrama, cfg):
     elif inst == "barraje":
         t_bt = cfg.get("tension_bt","")
         lineas.append(f"🏗️ Barraje: {t_bt} V" if t_bt else "🏗️ Barraje BT")
-    if cfg.get("seccionador"):    lineas.append(f"🔀 Seccionador: {cfg['seccionador']} de medida")
+    if cfg.get("seccionador"):    lineas.append(f"🔀 Seccionador: {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}")
     if cfg.get("rel_tc"):         lineas.append(f"🔄 TC: {cfg['rel_tc']}")
     if cfg.get("rel_tp"):         lineas.append(f"📊 TP: {cfg['rel_tp']}")
     if cfg.get("proteccion_amp"): lineas.append(f"🔐 Protección: {cfg['proteccion_amp']} A")
@@ -1054,6 +1073,36 @@ def _verificar_coherencia(cfg):
         # semidirecta (ver diagram_engine.py, seccion FUENTE/ENTRADA).
         cfg.pop("v_mt", None)
         log.warning(f"[coherencia] v_mt ignorado: tipo={tipo} sin trafo es siempre en B.T.")
+
+    if cfg.get("seccionador") == "antes" and inst != "trafo":
+        # "antes" = antes del TRAFO (lado MT): sin trafo no hay a que anclarlo
+        # y el motor no lo dibuja. Avisar en vez de descartarlo en silencio.
+        cfg.pop("seccionador", None)
+        notas_usuario.append(
+            "El seccionador \"antes del trafo\" solo aplica cuando hay "
+            "transformador: no se dibujó."
+        )
+
+    if (tipo == "indirecta" and inst == "trafo" and int(cfg.get("n_trafos", 1) or 1) >= 2
+            and (cfg.get("seccionador") or cfg.get("interruptor")
+                 or cfg.get("proteccion_antes") or cfg.get("proteccion_despues"))):
+        # Subestacion multi-celda: cada celda ya lleva su propio fusible y su
+        # carga; el seccionador general y la proteccion general NO se dibujan.
+        # Antes se descartaban en silencio.
+        notas_usuario.append(
+            "Con varias celdas de transformación (subestación) el seccionador "
+            "y la protección generales no se dibujan: cada celda lleva su propio fusible."
+        )
+
+    if tipo == "indirecta":
+        # Validacion numerica del punto de medida (In del trafo vs TC, TP vs red).
+        # Solo avisa lo que NO esta bien: lo correcto ya sale en el cuadro de datos.
+        try:
+            for nivel, _corto, largo in diagram_engine._validar_indirecta(cfg):
+                if nivel != "ok":
+                    notas_usuario.append(largo)
+        except Exception as e:                      # nunca bloquear el diagrama por esto
+            log.warning(f"[coherencia] validacion indirecta fallo: {e}")
 
     if tipo == "indirecta" and not cfg.get("rel_tc"):
         log.warning("[coherencia] indirecta sin relacion de TC")
@@ -1150,7 +1199,12 @@ async def _enviar_foto(mensaje, cfg, ctx=None):
     extra = ("\n\n⚠️ " + " ".join(notas)) if notas else ""
     for tipo_diagrama, path in imgs:
         with open(path, "rb") as f:
-            await mensaje.reply_photo(photo=f, caption=_caption(tipo_diagrama, cfg) + extra)
+            # Telegram rechaza captions de mas de 1024 caracteres (BadRequest) y el
+            # diagrama no se entrega: con los avisos de validacion puede pasarse.
+            cap = _caption(tipo_diagrama, cfg) + extra
+            if len(cap) > 1024:
+                cap = cap[:1021].rstrip() + "…"
+            await mensaje.reply_photo(photo=f, caption=cap)
         try: os.remove(path)
         except OSError: pass
     # Guarda el cfg (ya corregido por _verificar_coherencia) para /ultimo y
@@ -2202,60 +2256,26 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cfg["salida"] = val
         _adv()
         tipo = cfg["tipo"]
-        incluye_cx = val in ("conexiones", "ambos")
 
-        _kb_sis_dir = _kb([
-            ("1φ  Monofásica",  "mono"),
-            ("2φ  Bifásica",    "bifasico"),
-            ("3φ  Trifásica",   "tri4h"),
-        ], "sistema")
-        _kb_sis_bi = _kb([
-            ("2φ  Bifásica",   "bifasico"),
-            ("3φ  Trifásica",  "tri4h" if tipo != "indirecta" else "tri_pend"),
-        ], "sistema")
-        _kb_inst = _kb([
-            ("🔧  Transformador",  "trafo"),
-            ("🏗  Barraje BT",    "barraje"),
-        ], "instalacion")
-
+        # El sistema (mono/bifasico/trifasico) se pregunta SIEMPRE, tambien con
+        # "solo unifilar": antes se saltaba y quedaba el default tri4h, asi que
+        # una instalacion monofasica salia rotulada "Trifasica 4 Hilos".
+        # El handler de "sistema" decide el siguiente paso segun tipo/salida.
         if tipo == "directa":
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_dir)
-                )
-            else:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Punto de conexión?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_inst)
-                )
-
-        elif tipo == "semidirecta":
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_bi)
-                )
-            else:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Punto de conexión?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_inst)
-                )
-
-        else:  # indirecta
-            if incluye_cx:
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Sistema eléctrico?"),
-                    reply_markup=InlineKeyboardMarkup(_kb_sis_bi)
-                )
-            else:
-                cfg["instalacion"] = "trafo"
-                _adv()
-                ctx.user_data["esperando_n_trafos"] = True
-                await q.edit_message_text(
-                    _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                    "  Escribe el número  ej: 1  2  3  ...")
-                )
+            kb_sis = _kb([
+                ("1φ  Monofásica",  "mono"),
+                ("2φ  Bifásica",    "bifasico"),
+                ("3φ  Trifásica",   "tri4h"),
+            ], "sistema")
+        else:   # semidirecta / indirecta
+            kb_sis = _kb([
+                ("2φ  Bifásica",   "bifasico"),
+                ("3φ  Trifásica",  "tri4h" if tipo != "indirecta" else "tri_pend"),
+            ], "sistema")
+        await q.edit_message_text(
+            _header(n, cfg, "¿Sistema eléctrico?"),
+            reply_markup=InlineKeyboardMarkup(kb_sis)
+        )
 
     # ── Sistema ───────────────────────────────────────────────────────────────
     elif campo == "sistema":
@@ -2299,15 +2319,14 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 else:
                     cfg["instalacion"] = "trafo"
                     _adv()
-                    kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3"),("4  (banco cuatro)","4")], "n_trafos")
+                    # n_trafos es entrada de texto libre (ya no hay botones
+                    # "n_trafos:*" ni handler para ellos en on_button).
+                    ctx.user_data["esperando_n_trafos"] = True
                     await q.edit_message_text(
                         _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                        "  1  — un transformador trifásico\n"
-                                        "  2  — banco de 2 monofásicos\n"
-                                        "  3  — banco de 3 monofásicos"),
-                        reply_markup=InlineKeyboardMarkup(kb)
+                                        "  Escribe el número  ej: 1  2  3  ...")
                     )
-            else:  # semidirecta
+            else:  # semidirecta (y directa con solo unifilar: tambien sigue al punto de conexion)
                 if cfg.get("salida") == "conexiones":
                     # Solo diagrama de conexiones — ir directo a RTC
                     ctx.user_data["esperando_rel_tc"] = True
@@ -2341,13 +2360,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             cfg["instalacion"] = "trafo"
             _adv()
-            kb = _kb([("1  (un trafo)","1"),("2  (banco dos)","2"),("3  (banco tres)","3"),("4  (banco cuatro)","4")], "n_trafos")
+            ctx.user_data["esperando_n_trafos"] = True
             await q.edit_message_text(
                 _header(n, cfg, "¿Cuántos transformadores de potencia?\n\n"
-                                "  1  — un transformador trifásico\n"
-                                "  2  — banco de 2 monofásicos\n"
-                                "  3  — banco de 3 monofásicos"),
-                reply_markup=InlineKeyboardMarkup(kb)
+                                "  Escribe el número  ej: 1  2  3  ...")
             )
 
     # ── Conexión del medidor (directa) ────────────────────────────────────────
@@ -2722,8 +2738,8 @@ def _campos_editables(cfg):
         campos.append(dict(key="proteccion_pos", label="Posición de la protección", kind="choice", options=[
             ("Antes del TC", "antes_tc"), ("Después del TC", "despues_tc"), ("Ambos lados", "ambos_tc")]))
     if cfg.get("seccionador"):
-        campos.append(dict(key="seccionador", label="Seccionador", kind="choice", options=[
-            ("Antes", "antes"), ("Después", "despues")]))
+        campos.append(dict(key="seccionador", label="Seccionador", kind="choice",
+                            options=list(_SECC_BOTONES)))
     if cfg.get("rel_tc"):
         campos.append(dict(key="rel_tc", label="Relación TC", kind="text",
                             prompt="¿Nueva relación de TC?\n\n  Formato primario/secundario  ej: 200/5",
@@ -2817,7 +2833,7 @@ async def _paso_confirmar(q, cfg, edit=True):
         lines.append(f"  Protección    {amp} A  {('· ' + pos) if pos else ''}".rstrip())
 
     if cfg.get("seccionador"):
-        lines.append(f"  Seccionador   {cfg['seccionador']} de la medida")
+        lines.append(f"  Seccionador   {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}")
 
     if cfg.get("rel_tc") or cfg.get("rel_tp") or cfg.get("calibre_conductor"):
         lines.append("")
@@ -2968,15 +2984,9 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         tipo = cfg["tipo"]
 
         if tipo == "indirecta":
-            kb = _kb([
-                ("Antes de la medida",   "antes"),
-                ("Después de la medida", "despues"),
-            ], "seccionador")
+            kb = _kb(_SECC_BOTONES, "seccionador")
             await update.message.reply_text(
-                _header(n, cfg,
-                        "¿El seccionador está antes o después de la medida?\n\n"
-                        "  Antes    lado de red (MT)\n"
-                        "  Después  lado de carga (BT)"),
+                _header(n, cfg, _SECC_PREGUNTA),
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         elif tipo == "directa":
@@ -3002,15 +3012,9 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         tipo = cfg["tipo"]
 
         if tipo == "indirecta":
-            kb = _kb([
-                ("Antes de la medida",   "antes"),
-                ("Después de la medida", "despues"),
-            ], "seccionador")
+            kb = _kb(_SECC_BOTONES, "seccionador")
             await update.message.reply_text(
-                _header(n, cfg,
-                        "¿El seccionador está antes o después de la medida?\n\n"
-                        "  Antes    lado de red (MT)\n"
-                        "  Después  lado de carga (BT)"),
+                _header(n, cfg, _SECC_PREGUNTA),
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         elif tipo == "directa":

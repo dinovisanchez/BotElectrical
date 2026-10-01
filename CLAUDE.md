@@ -18,6 +18,7 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
     existían aquí se eliminaron en la limpieza de QA — ver "QA de sept/2026"
     más abajo. Si vas a tocar el motor de unifilares, edita
     `draw_unifilar_generico`, la única función real.)
+  - `draw_unifilar_indirecta_pro(cfg, out)` → unifilar de indirecta en estilo "plano limpio" (lo despacha `draw_unifilar_generico`; ver sección "Unifilar de medida INDIRECTA en estilo ...").
   - Símbolos IEC: `_u_breaker, _u_disc, _u_fuse, _u_arrester, _u_ct, _u_vt, _u_xfmr, _u_relay, _ground`.
 - `parser.py` — `parse_spec(text)` → `(cfg, entendido, faltante)`. Sin dependencias.
 - `bot.py` — handlers de Telegram (start/help/menu/diagrama + texto libre + botones).
@@ -26,6 +27,10 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   confirma que el PNG generado no salió vacío/corrupto antes de enviarlo.
 - `test_e2e.py`, `test_menu_flow.py`, `test_parser_fields.py` — pruebas locales
   sin Telegram, contra las funciones reales de producción (no las legacy).
+  OJO: `test_menu_flow.py` solo llama al motor, NO recorre el menú de botones.
+- `test_menu_walk.py` — recorre el menú de botones REAL (`on_button`/`on_text`
+  con objetos de Telegram simulados) por todos los tipo × salida y falla si
+  algún camino queda sin respuesta. `--draw` además dibuja cada diagrama.
 - `requirements.txt`, `README.md`.
 
 ## Velocidad y timeouts en las llamadas a Gemini
@@ -512,12 +517,137 @@ multi-celda -- todo eso YA estaba. Lo que se agrego nuevo:
     actualizado para imprimir `instalacion`/`interruptor` (los campos reales)
     en vez de esos.
 
+## QA de oct/2026: menú "Indirecta + Cx + Uni" no generaba nada
+Reporte: "el unifilar no me está generando diagrama". El motor
+(`draw_unifilar_generico`) NO era el problema (sin fallos en ~1000 cfgs
+sintéticos). Causa real, en `bot.py`: el commit `c8ce231` pasó `n_trafos` de
+botones a TEXTO LIBRE (`esperando_n_trafos`) y borró el handler
+`campo == "n_trafos"`, pero dejó 2 pantallas (`sistema` y `subtipo`, solo
+alcanzables con tipo=indirecta y salida="ambos") mostrando los botones viejos
+`n_trafos:1..4` -> al tocarlos el bot no respondía y nunca llegaba a generar.
+Arreglo: ambas pantallas ahora piden el número por texto, igual que las demás.
+**Regla**: si cambias una pantalla de botones a texto (o viceversa), busca TODAS
+las que emiten ese callback (`grep '"n_trafos"'`) y corre `test_menu_walk.py`.
+- (Corregido después, ver "Pendientes resueltos" abajo): con salida "unifilar"
+  sola el menú no preguntaba `sistema`; ahora sí, siempre.
+
+## Seccionador, cuadro de datos y rótulos de secundarios (oct/2026)
+Pedido del usuario, tomando como ejemplo un script externo de unifilar
+indirecta (700 kVA, TC 30/5, TP 13200/120, "seccionador tripolar 13,2 kV
+después de la medida"). Se conservó el motor IEC con protecciones y bloque de
+prueba (el ejemplo omitía CC fusibles, pararrayos y bloque de prueba, que aquí
+son obligatorios) y se adoptó de él lo siguiente:
+- **El seccionador se describe SIEMPRE respecto al TRAFO**, no a la medida:
+  `'antes'` = entre el punto de medida y el trafo (lado MT, rótulo "Seccionador
+  MT 13.2 kV"); `'despues'` = aguas abajo del trafo (lado BT, "Seccionador BT").
+  Antes el menú preguntaba "antes/después de la medida", que en indirecta (medida
+  en MT, aguas arriba del trafo) significaba lo CONTRARIO de lo dibujado. Todo
+  texto visible sale de `_SECC_TXT/_SECC_CORTO/_SECC_BOTONES/_SECC_PREGUNTA`
+  (bot.py) -- no escribas literales nuevos. Los valores del cfg no cambiaron.
+- `parser.py` ahora reconoce "seccionador": posición explícita (antes/después
+  del trafo, lado MT/BT) o relativa a la medida ("después de la medida" ->
+  `'antes'` en indirecta, `'despues'` en semi/directa); mencionado sin posición
+  -> `'antes'`; "sin seccionador" -> nada. `test_seccionador.py` lo cubre.
+- `_verificar_coherencia()` avisa (ya no descarta en silencio) cuando el
+  seccionador "antes" no tiene trafo, y cuando una subestación multi-celda
+  (n_trafos>=2 en indirecta) no dibuja seccionador/protección generales.
+- **Cuadro de datos** (columna derecha, sobre el plano de simbología): lista
+  SOLO lo que realmente queda dibujado (p.ej. no lista el seccionador en
+  multi-celda). Sus filas se arman ANTES de crear la figura porque su altura
+  decide `H` (el lienzo crece lo necesario; la figura crece en proporción
+  `11*H/115` para que la escala de símbolos/texto no cambie). Si agregas un
+  elemento nuevo al unifilar, agrégalo también a `filas` o el cuadro mentirá.
+- Rótulos "sec. 5 A" / "sec. 120 V" sobre el hilo TC/TP -> bloque (derivados
+  de `rel_tc`/`rel_tp`), alineados a la derecha pegados al bloque.
+- Arreglos de dibujo encontrados al "energizar":
+  1. la línea principal atravesaba el símbolo del seccionador (se leía como
+     puenteado/cerrado): ahora llega solo a los contactos;
+  2. hueco de 1 unidad entre el trafo y el siguiente elemento (circuito
+     abierto en el dibujo);
+  3. el seccionador tocaba el círculo del trafo / el triángulo de CARGA;
+  4. "(paralelo) TP ..." se encimaba con el pararrayos de indirecta;
+  5. el rótulo del conductor ("cal. ?") tocaba el trafo / quedaba sobre el
+     rótulo de la protección: ahora tiene su propio tramo;
+  6. trafo compartido: el recinto del gabinete CRUZABA el círculo del trafo
+     (contra el invariante documentado): el barraje compartido se separó 4 u
+     del trafo (`bt_y = trafo_y - 9`, el recinto llega hasta `bt_y + 2`).
+### Pendientes resueltos (oct/2026, segunda pasada)
+- **Menú**: `salida` ya no se salta la pregunta de `sistema` con "solo unifilar"
+  (el handler de `sistema` decide el siguiente paso). `test_menu_walk.py` falla si
+  un camino de solo-unifilar genera sin pasar por `sistema:*`. No se deriva
+  `trafo_tipo` del sistema a propósito: un usuario monofásico puede colgar de un
+  trafo trifásico compartido.
+- **Parser**: el nombre de un circuito / punto de conexión ("circuito RA8",
+  "cto: RA8", "punto de conexión RA8") se quita del texto antes de buscar la
+  norma; "CENS RA8" suelto sigue lanzando "Norma ambigua".
+- **Medida directa en línea**: el medidor arrancaba por encima de `y` (se
+  encimaba con la protección). Ahora `y_mid = y - 2 - r` (y en respaldo el nodo
+  de derivación está 2 u bajo `y`); bajo el círculo hay 5 u de conductor antes de
+  la CARGA. Los rótulos MEDIDOR/PRINCIPAL/RESPALDO van al costado de su
+  conductor (`_u_meter(..., label_dx, label_ha)`), no encima: antes los
+  tachaba la línea. La barra de unión del respaldo bajó para no cruzar los rótulos.
+- **Multi-celda**: el rótulo "TRi kVA" va a la derecha de su rama (antes lo
+  tachaba la línea); con celdas muy juntas (`cell_w < 8`) se parte en tres
+  líneas ("TRi / 500 / kVA"). Verificado con 3, 6 y 8 celdas.
+- Hueco de 1 u entre el barraje compartido y la derivación a los medidores.
+
+## Unifilar de medida INDIRECTA en estilo "plano limpio" v2 (oct/2026)
+Pedido explícito del usuario ("hazlo como el ejemplo, tal cual") y luego
+("critica esta versión, detecta 3 debilidades y crea una mejor"). `draw_unifilar_generico`
+despacha a **`draw_unifilar_indirecta_pro(cfg, out)`** cuando `tipo='indirecta'`,
+`n_trafos < 2` y `cfg.get('estilo') != 'detallado'`. Layout vertical del ejemplo:
+barra de RED -> [pararrayos + CC fusibles] -> TC -> derivación TP (derecha, a
+tierra) -> [seccionador] -> trafo -> flecha "A CARGA"; medidor a la izquierda con
+sus secundarios punteados pasando por el **BLOQUE DE PRUEBAS**; cuadro de datos al
+pie. Sin el cuadro "RA8" (el usuario lo pidió quitar): la barra baja directo a
+las protecciones/TC; `circuito` va en el cuadro de datos.
+
+Las 3 debilidades de la v1 (y su arreglo en v2):
+1. **Circuito no energizable / incompleto.** La v1 dibujaba el seccionador ABIERTO
+   (la línea se cortaba en los contactos -> el único camino a la carga quedaba
+   abierto; ese corte lo introduje yo al "arreglar" que la línea atravesara el
+   símbolo) y había perdido neutro del trafo a tierra, Dyn11, CC fusibles y
+   pararrayos. v2: seccionador **cerrado por defecto** y rotulado "(cerrado)"
+   (`cfg['seccionador_estado']='abierto'` lo abre: línea cortada + "(ABIERTO)");
+   neutro del secundario a tierra + "Dyn11" (solo trifásico); "N CC fusibles MT" y
+   pararrayos ZnO (`dps_cantidad` -> "banco de N", un solo icono) en la entrada.
+2. **Símbolos ambiguos y secundarios incorrectos.** TC, TP y trafo usaban el mismo
+   par de círculos y los secundarios iban directo al medidor. v2: TC = anillo ROJO
+   sobre el conductor, TP = par AZUL pequeño a tierra, trafo = par grande NEGRO;
+   cada secundario punteado toma el color de su transformador; ambos pasan por el
+   bloque de pruebas con "secundarios a tierra". Texto de referencia del repo
+   (`retie_docs/creg_calidad_servicio_energia.txt`): bloque de pruebas "obligatorio
+   en medida semidirecta e indirecta"; (`subestaciones_transformadores_distribucion.txt`)
+   pararrayos ZnO en entradas MT y neutro del trafo a la malla de tierra.
+3. **Números sin validar.** La v1 dibujaba TC 30/5 para 700 kVA a 13,2 kV (In =
+   30,6 A = 102 % del primario) sin avisar. v2: `_validar_indirecta(cfg)` ->
+   `[(nivel, corto, largo)]`: In = kVA/(√3·kV) (mono/bif: kVA/kV) vs primario del
+   TC (>120 % err, 100-120 % warn "justo", <20 % warn "sobredimensionado", resto
+   ok) y primario del TP vs red (L-L o L-N). Si no hay `v_mt`, el kV se deduce
+   del TP (trifásico: L-L, o L-N si ×√3 coincide con una tensión normalizada;
+   mono/bifásico: tal cual) y se marca "[kV est. del TP]". Son criterios de
+   DISEÑO, no una cita normativa. Salen en el cuadro (✓/⚠/✗) y `_verificar_coherencia`
+   agrega al caption solo lo que NO está ok. `_enviar_foto` recorta el caption a
+   1024 caracteres (límite de Telegram: si se pasa, la foto no se entrega).
+- Todo el texto dibujado usa coma decimal (`_es()`): "13,2 kV", "30,6 A".
+- Seccionador: `'antes'` = entre la medida y el trafo (lado MT); `'despues'` = tras
+  el trafo/protección (lado BT). Protección (`proteccion_despues` o `interruptor`) =
+  cuadrito bajo el trafo. `proteccion_antes` no se dibuja en indirecta. Respaldo =
+  dos medidores lado a lado. El lienzo crece con el contenido; 1 unidad = 1 pulgada.
+- Siguen en `draw_unifilar_generico`: directa, semidirecta, multi-celda e indirecta
+  con `cfg['estilo']='detallado'` (flag de cfg, sin botón en el menú).
+- Si agregas un elemento a este estilo, agrégalo también a `filas`/`l3` (cuadro de
+  datos) o el cuadro no lo mencionará.
+- `test_validacion_indirecta.py` (valores calculados a mano) y `test_seccionador.py`.
+- Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
+  propio comando de shell (se mata a sí mismo y no ejecuta nada).
+
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
 - Mapeo medidor 3 elem (forma 9S): `1 IA · 2 VA · 3 IA' · 4 IB · 5 VB · 6 IB' · 7 IC · 8 VC · 9 IC' · N(10 RA8 / 11 CENS)`.
 - 2 elem (Aron): corrientes en R y T, tensión de referencia en S.
 - Normas base: **CENS Cap. 6** (bornera 13 term., neutro=11) y **PA-NC-RA8** (bornera 1-10, B1-B26).
-- Simbología unifilar: **IEC/UNE 60617**. Todo unifilar lleva "plano de simbología".
+- Simbología unifilar: **IEC/UNE 60617**. Todo unifilar lleva "plano de simbología" (EXCEPCIÓN pedida por el usuario: el estilo pro de indirecta, ver sección arriba).
 - Estilo del unifilar (v2, tras research de SLDs profesionales reales): NADA
   de cajas con degradado/sombra/estilo "app UI" — eso se ve como mockup de
   interfaz, no como plano de ingeniería. Un unifilar profesional real (ETAP,
