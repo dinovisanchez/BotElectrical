@@ -284,12 +284,40 @@ Detalles tecnicos de la migracion:
   Claude devuelve `response.content` como una LISTA de bloques (puede haber
   mas de un bloque de texto) -- se concatenan con
   `"".join(b.text for b in response.content if b.type == "text")`.
-- **No existe equivalente a `GEMINI_THINKING_CONFIG`**: a diferencia de
-  gemini-2.5-flash, Claude NO activa "thinking" por defecto (hay que pedirlo
-  explicitamente con el parametro `thinking`), asi que el bug que motivo ese
-  workaround del lado de Gemini (thinking consumiendo el presupuesto de
-  tokens sin dejar nada para la respuesta visible) no aplica aqui -- no se
-  necesita replicarlo.
+- **Thinking en Claude (CORREGIDO, oct/2026)**: antes este documento decia que
+  Claude NO activa "thinking" por defecto y que por eso no hacia falta un
+  equivalente a `GEMINI_THINKING_CONFIG`. Eso ya NO es cierto para
+  `claude-sonnet-5`: corre con adaptive thinking por defecto, y esos tokens
+  se descuentan del MISMO `max_tokens` que la respuesta visible -- el mismo
+  riesgo que ya mordio a Gemini. Por eso `_dialogo_diagrama` usa un helper
+  interno `_llamar(max_tok)` y, si `response.stop_reason == "max_tokens"`,
+  reintenta UNA vez con `CLAUDE_MAX_TOKENS` (si el reintento falla se queda
+  con la respuesta truncada); y si el texto final sale vacio responde con un
+  mensaje claro en vez de mandar un mensaje vacio (Telegram lo rechaza). No
+  se pudo verificar el comportamiento real del thinking sin API key: si las
+  respuestas del dialogo salen cortadas o vacias en produccion, revisa
+  primero esto.
+- **SDK `anthropic` 1.x (bug real, oct/2026)**: el usuario vio "Error con el
+  servicio IA (TypeError)" en CADA intento de diagrama por IA. Causa:
+  `client.messages.create()` en el SDK 1.x ya NO acepta `temperature`/`top_p`/
+  `top_k` (`TypeError: unexpected keyword argument 'temperature'`), y el bot
+  los pasaba en `_dialogo_diagrama` y `_analizar_foto_cx` -- el
+  `except Exception` genérico lo convertia en ese mensaje sin pistas. Se
+  quitaron. NO los vuelvas a agregar; el control de longitud/estilo va por el
+  prompt y por `max_tokens`. (El `temperature=0.25` de Gemini en
+  `_consulta_retie` es otra API y se queda.) `requirements.txt` ahora fija
+  `anthropic>=1.0.0,<2` para que un salto de major no rompa el deploy sin
+  aviso. El SDK 1.x usa `httpx2` (no `httpx`) internamente.
+- **Los tests de Claude deben usar el SDK REAL**: el cliente simulado a mano
+  que se uso en la migracion original aceptaba cualquier kwarg, por eso no
+  detecto el `TypeError`. `test_claude_sdk.py` construye un
+  `anthropic.AsyncAnthropic(api_key="sk-test", max_retries=0,
+  http_client=<AsyncClient con MockTransport>)` -- la firma de
+  `messages.create()` se valida de verdad. Cubre: ausencia de `temperature`,
+  respuesta correcta, DIAGRAMA_LISTO -> genera y envia el unifilar,
+  `max_tokens` -> reintento, respuesta vacia, 529 con reintento, 401 -> "Clave
+  API", 404 -> "Modelo Claude no disponible" y el analisis de foto con bloque
+  de imagen. Si agregas otra llamada a Claude, agrega su caso ahi.
 - Reintentos: el SDK de Anthropic tiene EXCEPCIONES TIPADAS
   (`anthropic.OverloadedError`, `anthropic.RateLimitError`,
   `anthropic.InternalServerError`, `anthropic.APITimeoutError`,
@@ -302,7 +330,9 @@ Detalles tecnicos de la migracion:
   `asyncio.wait_for(..., timeout=CLAUDE_TIMEOUT_S)` (= `GEMINI_TIMEOUT_S`,
   25s), con reintento en vez de rendirse al primer timeout (mismo
   razonamiento que la seccion de arriba sobre Gemini).
-- Verificado con un cliente de Anthropic simulado (sin key real): respuesta
+- Verificacion original con un cliente de Anthropic simulado a mano (OJO: ese
+  tipo de simulacro NO valida la firma de `messages.create()` -- ver
+  `test_claude_sdk.py` arriba para el test con el SDK real): respuesta
   exitosa con DIAGRAMA_LISTO, reintento tras un `OverloadedError` real (con
   un `httpx.Response`/`httpx.Request` de verdad -- OJO, construir estas
   excepciones a mano con `response=None` para un test truena con
@@ -310,7 +340,7 @@ Detalles tecnicos de la migracion:
   del response; hay que darle un `httpx.Response` real aunque sea de
   prueba), agotamiento de reintentos por timeout, y error de autenticacion
   en `_analizar_foto_cx`.
-- `requirements.txt` gano `anthropic>=1.0.0`; `render.yaml` gano la env var
+- `requirements.txt` gano `anthropic>=1.0.0,<2`; `render.yaml` gano la env var
   `ANTHROPIC_API_KEY` (junto a la ya existente `GEMINI_API_KEY`, que sigue
   siendo necesaria para `_consulta_retie` y el RAG).
 
@@ -590,6 +620,8 @@ son obligatorios) y se adoptó de él lo siguiente:
   tachaba la línea); con celdas muy juntas (`cell_w < 8`) se parte en tres
   líneas ("TRi / 500 / kVA"). Verificado con 3, 6 y 8 celdas.
 - Hueco de 1 u entre el barraje compartido y la derivación a los medidores.
+- Renderer detallado, indirecta: faltaba el conductor desde el nodo del TC hasta el
+  seccionador/trafo/barra (~3 u de circuito abierto bajo el TC): `vline(tc_y, tc_y - 3)`.
 
 ## Unifilar de medida INDIRECTA en estilo "plano limpio" v2 (oct/2026)
 Pedido explícito del usuario ("hazlo como el ejemplo, tal cual") y luego
@@ -635,10 +667,22 @@ Las 3 debilidades de la v1 (y su arreglo en v2):
   cuadrito bajo el trafo. `proteccion_antes` no se dibuja en indirecta. Respaldo =
   dos medidores lado a lado. El lienzo crece con el contenido; 1 unidad = 1 pulgada.
 - Siguen en `draw_unifilar_generico`: directa, semidirecta, multi-celda e indirecta
-  con `cfg['estilo']='detallado'` (flag de cfg, sin botón en el menú).
+  con `cfg['estilo']='detallado'` (con plano de simbología).
+- **En el menú** (pantalla de confirmación, NO en el flujo lineal de preguntas): fila
+  `Estilo` + botones de un toque `🎨 Estilo: Limpio ⇄` y `🔀 Seccionador: cerrado ⇄`
+  (callbacks `editval:estilo:<v>` / `editval:seccionador_estado:<v>`, reusan el handler
+  de edición) y los mismos campos en ✏️ Editar. `_aplica_estilo(cfg)`: solo indirecta +
+  unifilar/ambos + un trafo. Valores del cfg: `estilo` 'limpio'|'detallado',
+  `seccionador_estado` 'cerrado'|'abierto' (default cerrado en AMBOS renderers; abierto
+  corta el conductor, dice "ABIERTO" y `_verificar_coherencia` avisa que el diagrama
+  muestra la instalación desenergizada). También en el parser ("seccionador abierto",
+  "detallado"/"plano de simbología") y en el prompt de la IA (omitir salvo que lo pidan).
+  `test_menu_opciones.py` pulsa los botones reales.
+- Si cambias algo del resumen de `_paso_confirmar`, replica el cambio en `_campos_editables`
+  (mismo orden y condiciones) o el campo quedará sin poder editarse.
 - Si agregas un elemento a este estilo, agrégalo también a `filas`/`l3` (cuadro de
   datos) o el cuadro no lo mencionará.
-- `test_validacion_indirecta.py` (valores calculados a mano) y `test_seccionador.py`.
+- `test_validacion_indirecta.py` (valores calculados a mano), `test_seccionador.py` y `test_menu_opciones.py`.
 - Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
   propio comando de shell (se mata a sí mismo y no ejecuta nada).
 

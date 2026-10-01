@@ -1428,6 +1428,10 @@ def draw_unifilar_generico(cfg, out_path):
         seccionador_pos == "despues" or (seccionador_pos == "antes" and instalacion == "trafo"))
     secc_lado = "MT" if (seccionador_pos == "antes" or
                          (tipo == "indirecta" and instalacion != "trafo")) else "BT"
+    # Estado: CERRADO por defecto (posicion normal de servicio: la instalacion se
+    # lee energizada); cfg["seccionador_estado"]="abierto" corta el conductor.
+    secc_abierto = cfg.get("seccionador_estado") == "abierto"
+    secc_estado_txt = "ABIERTO" if secc_abierto else "cerrado"
     v_mt_cfg = cfg.get("v_mt", "")
     prot_antes_ef = prot_antes if tipo in ("directa", "semidirecta") else ""
     prot_desp_ef  = "" if es_multi_celda else prot_despues
@@ -1464,7 +1468,7 @@ def draw_unifilar_generico(cfg, out_path):
         filas.append(("Seccionador",
                       ("antes del trafo" if seccionador_pos == "antes" else "después del trafo")
                       + f" (lado {secc_lado}"
-                      + (f" {v_mt_cfg}" if secc_lado == "MT" and v_mt_cfg else "") + ")"))
+                      + (f" {v_mt_cfg}" if secc_lado == "MT" and v_mt_cfg else "") + f") · {secc_estado_txt}"))
     prot_partes = []
     if prot_antes_ef: prot_partes.append(f"{_prot_txt(prot_antes_ef)} (antes del medidor)")
     if prot_desp_ef:  prot_partes.append(f"{_prot_txt(prot_desp_ef)} (después)")
@@ -1535,7 +1539,7 @@ def draw_unifilar_generico(cfg, out_path):
         """Rotulo del seccionador con su lado (MT/BT) -- calculado arriba
         (secc_lado); en MT incluye la tension de la red si se conoce."""
         tens = f" {v_mt_cfg}" if secc_lado == "MT" and v_mt_cfg else ""
-        return f"Seccionador {secc_lado}{tens}\n(c/cuchilla a tierra)"
+        return f"Seccionador {secc_lado}{tens}\n(c/cuchilla a tierra)\n{secc_estado_txt}"
 
     def _secundario(rel):
         """'30/5' -> '5' (valor nominal del secundario); '' si no hay relacion
@@ -1774,6 +1778,10 @@ def draw_unifilar_generico(cfg, out_path):
         tc_y = y - 6
         vline(tp_y, tc_y)
         draw_medida_lateral(tc_y, tp_y=tp_y)
+        # Conductor desde el nodo del TC hasta lo que sigue (seccionador / trafo /
+        # barra de distribucion). Faltaba: dejaba ~3 u de circuito abierto bajo el
+        # TC (semidirecta si lo dibuja: vline(tc_y, tc_y - 5)).
+        vline(tc_y, tc_y - 3)
         y = tc_y - 3
 
     # ── SUBESTACION MULTI-CELDA: N transformadores INDEPENDIENTES, cada uno ───
@@ -1852,6 +1860,8 @@ def draw_unifilar_generico(cfg, out_path):
             # seccionador (abierto) se leeria como puenteado/cerrado.
             vline(y, y - 1)
             _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
+            if not secc_abierto:
+                vline(y - 1, y - 5)      # cerrado: el conductor pasa por el seccionador
             ax.text(xc - 5, y - 3, secc_rotulo(), ha="right", va="center",
                     fontsize=7.2, color=INK, fontweight="bold")
             # 7 (no 5): el contacto inferior del seccionador queda en y-5 y el
@@ -2053,6 +2063,8 @@ def draw_unifilar_generico(cfg, out_path):
     elif seccionador_pos == "despues":
         vline(y, y - 1)   # solo hasta el contacto superior (ver nota arriba)
         _u_disc(ax, xc, y - 3, INK, 1.0, tierra=True)
+        if not secc_abierto:
+            vline(y - 1, y - 5)          # cerrado: el conductor pasa por el seccionador
         ax.text(xc - 5, y - 3, secc_rotulo(), ha="right", va="center",
                 fontsize=7.2, color=INK, fontweight="bold")
         # 8 (no 5): con 5 el contacto inferior (y-5) quedaba exactamente

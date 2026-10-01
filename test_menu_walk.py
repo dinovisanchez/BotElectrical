@@ -104,6 +104,10 @@ async def recorrer(tipo, salida):
         for b in botones:
             campo, val = b.split(":", 1)
             if campo == "generar" and val != "si": continue   # editar/reiniciar: otro sub-flujo
+            # Botones de un toque y submenu Editar vuelven a la MISMA pantalla de
+            # confirmacion: seguirlos es un ciclo infinito (el recorrido no deduplica
+            # estados). Su comportamiento lo cubre test_menu_opciones.py.
+            if campo in ("editval", "editcampo"): continue
             pila.append(path + [("btn", b)])
     return out
 
