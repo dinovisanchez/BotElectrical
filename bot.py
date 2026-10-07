@@ -962,6 +962,19 @@ PROMPT_DIAGRAMA = (
     "-- el default es 1 y ya se dibuja sin preguntarlo)\n"
     'tendido: "aereo" | "subterraneo" (SOLO si el usuario menciono que es '
     "subterraneo/enterrado; el default es aereo, omite el campo si no aplica)\n"
+    "CAMPOS OPCIONALES DE ACTA (OMITELOS por completo salvo que el usuario los mencione; "
+    "NO los preguntes):\n"
+    "transformadores: lista de objetos {kva, tipo, uso}, uno por transformador "
+    "(SOLO si menciona 2 o mas transformadores en la misma frontera; con uno solo usa "
+    "trafo_kva). ej [{\"kva\":\"300\",\"tipo\":\"trifasico\",\"uso\":\"exclusivo\"},"
+    "{\"kva\":\"150\",\"tipo\":\"trifasico\",\"uso\":\"compartido\"}]\n"
+    'configuracion_transformadores: "paralelo" (secundarios a un mismo barraje BT; '
+    'default) | "independientes" (cada uno con su barraje y carga)\n'
+    'planta_respaldo: {"existe": true|false, "kva": numero|null, "transferencia": '
+    '"automatica"|"manual"|null} (planta/generador de emergencia)\n'
+    'ubicacion_medida: "BT" | "MT" (default MT si es indirecta, BT en los demas casos)\n'
+    'celda_medida: {"existe": true|false, "tipo": texto|null, "estado": texto|null} '
+    "(medidor dentro de una celda de media tension)\n"
 )
 
 SIS_TXT = {
@@ -1092,7 +1105,14 @@ def _caption(tipo_diagrama, cfg):
     ]
     if cfg.get("conexion"):       lineas.append(f"🔁 Conexión: {cfg['conexion'].capitalize()}")
     inst = cfg.get("instalacion","")
-    if inst == "trafo":
+    trafos_acta = []
+    if isinstance(cfg.get("transformadores"), (list, tuple)):
+        try: trafos_acta = diagram_engine._trafos_de(cfg)
+        except Exception: trafos_acta = []
+    if inst == "trafo" and len(trafos_acta) >= 2:
+        conf = "independientes" if cfg.get("configuracion_transformadores") == "independientes" else "en paralelo"
+        lineas.append(f"🔧 Transformadores: {diagram_engine._resumen_trafos(trafos_acta)} · {conf}")
+    elif inst == "trafo":
         kva = cfg.get("trafo_kva",""); uso = cfg.get("trafo_uso","")
         lineas.append(f"🔧 Trafo: {kva} kVA {uso}".strip())
     elif inst == "barraje":
@@ -1106,6 +1126,14 @@ def _caption(tipo_diagrama, cfg):
     if cfg.get("proteccion_amp"): lineas.append(f"🔐 Protección: {cfg['proteccion_amp']} A")
     if cfg.get("calibre_conductor"): lineas.append(f"🔗 Calibre: {cfg['calibre_conductor']}")
     if cfg.get("respaldo"):       lineas.append("👥 Principal + Respaldo")
+    pl = cfg.get("planta_respaldo")
+    if isinstance(pl, dict) and diagram_engine._si_no(pl.get("existe")) is True:
+        kp = diagram_engine._num(pl.get("kva"))
+        lineas.append("⚡ Planta de respaldo" + (f": {diagram_engine._kva_txt(kp)} kVA" if kp else ""))
+    ce = cfg.get("celda_medida")
+    if isinstance(ce, dict) and diagram_engine._si_no(ce.get("existe")) is True:
+        tc_ = diagram_engine._t1(ce.get("tipo"), 30)
+        lineas.append("🗄️ Celda de medida" + (f": {tc_}" if tc_ else ""))
     lineas += ["━━━━━━━━━━━━━━━━━━━━", "✅ Conforme a CREG 038/2014"]
     return "\n".join(lineas)
 
@@ -1119,6 +1147,38 @@ def _verificar_coherencia(cfg):
     notas_usuario = []
     tipo = cfg.get("tipo", "directa")
     inst = cfg.get("instalacion", "")
+    # 2+ transformadores del acta: los dibuja el unifilar de frontera (paralelo / independientes),
+    # NO la subestacion multi-celda -- las reglas de abajo para multi-celda no le aplican.
+    es_frontera = False
+    if isinstance(cfg.get("transformadores"), (list, tuple)):
+        try: es_frontera = len(diagram_engine._trafos_de(cfg)) >= 2
+        except Exception: es_frontera = False
+
+    if isinstance(cfg.get("transformadores"), (list, tuple)) or isinstance(cfg.get("transformador"), dict):
+        # Con transformadores informados (acta / dialogo IA) hay trafo aunque `instalacion` no
+        # venga, y el uso (exclusivo/compartido) sale de la propia lista si no se dio aparte.
+        try: lista_tr = diagram_engine._trafos_de(cfg)
+        except Exception: lista_tr = []
+        if lista_tr:
+            if inst != "trafo":
+                cfg["instalacion"] = inst = "trafo"
+            if len(lista_tr) == 1:       # los dibujos de 1 trafo leen los campos historicos
+                t0 = lista_tr[0]
+                if t0["kva"] is not None and not cfg.get("trafo_kva"):
+                    cfg["trafo_kva"] = diagram_engine._kva_txt(t0["kva"]).replace(",", ".")
+                if t0["tipo"] and not cfg.get("trafo_tipo"): cfg["trafo_tipo"] = t0["tipo"]
+            usos = [t["uso"] for t in lista_tr]
+            if not cfg.get("trafo_uso"):
+                if "compartido" in usos: cfg["trafo_uso"] = "compartido"
+                elif "exclusivo" in usos: cfg["trafo_uso"] = "exclusivo"
+
+    if str(cfg.get("ubicacion_medida", "")).upper() == "MT" and tipo in ("directa", "semidirecta"):
+        # Directa y semidirecta miden en BT (TC en baja): "MT" es contradictorio con el tipo.
+        cfg["ubicacion_medida"] = "BT"
+        notas_usuario.append(
+            f"La medida {tipo} se hace en baja tensión: ignoré la ubicación \"MT\" "
+            "(para medir en MT la medida debe ser indirecta)."
+        )
 
     if tipo in ("directa", "semidirecta") and inst != "trafo" and cfg.get("v_mt"):
         # Sin trafo no hay ningun tramo de M.T. en el dibujo -- v_mt no
@@ -1138,6 +1198,7 @@ def _verificar_coherencia(cfg):
         )
 
     if (tipo == "indirecta" and inst == "trafo" and int(cfg.get("n_trafos", 1) or 1) >= 2
+            and not es_frontera
             and (cfg.get("seccionador") or cfg.get("interruptor")
                  or cfg.get("proteccion_antes") or cfg.get("proteccion_despues"))):
         # Subestacion multi-celda: cada celda ya lleva su propio fusible y su
@@ -1172,7 +1233,7 @@ def _verificar_coherencia(cfg):
         log.warning("[coherencia] semidirecta sin relacion de TC")
 
     if inst == "trafo":
-        if not cfg.get("trafo_kva"):
+        if not cfg.get("trafo_kva") and not any(t.get("kva") for t in (cfg.get("transformadores") or []) if isinstance(t, dict)):
             log.warning("[coherencia] instalacion=trafo sin kVA")
         if not cfg.get("trafo_uso"):
             cfg["trafo_uso"] = "exclusivo"
@@ -1180,7 +1241,8 @@ def _verificar_coherencia(cfg):
                 "No especificaste si el transformador es EXCLUSIVO o COMPARTIDO "
                 "con otros usuarios: el diagrama asume EXCLUSIVO."
             )
-        elif cfg.get("trafo_uso") == "compartido" and tipo == "indirecta" and int(cfg.get("n_trafos", 1)) >= 2:
+        elif (cfg.get("trafo_uso") == "compartido" and tipo == "indirecta"
+              and int(cfg.get("n_trafos", 1)) >= 2 and not es_frontera):
             # Subestacion multi-celda (N transformadores independientes, cada
             # uno con su propia carga) es por definicion un punto EXCLUSIVO de
             # este usuario -- no tiene sentido combinarlo con "compartido"
@@ -1195,7 +1257,7 @@ def _verificar_coherencia(cfg):
                 "Con varios transformadores independientes (subestacion), el "
                 "punto se trata como EXCLUSIVO aunque hayas indicado compartido."
             )
-        elif cfg.get("trafo_uso") == "compartido":
+        elif cfg.get("trafo_uso") == "compartido" and not es_frontera:
             if tipo == "indirecta":
                 log.warning("[coherencia] trafo compartido + tipo indirecta (combinacion inusual)")
             if cfg.get("trafo_gabinete") is None:
@@ -3398,11 +3460,43 @@ PROMPT_PDF = (
     "dps_cantidad: 0 salvo que mencione un banco de N pararrayos/DPS. tendido: "
     "aereo | subterraneo solo si el documento lo dice. respaldo: 'si' solo si habla de "
     "medidor de respaldo o de chequeo.\n"
+    "\n"
+    "=== CAMPOS DE ACTA (todos opcionales) ===\n"
+    "transformadores: UNA entrada por transformador de potencia que alimenta ESTE punto "
+    "de medida: {kva, tipo, uso}. kva: solo el numero ('300'). tipo: monofasico | "
+    "bifasico | trifasico. uso: exclusivo | compartido. Lista vacia si no hay "
+    "informacion. Con 2 o mas transformadores deja trafo_kva_list vacia y n_trafos en 0 "
+    "(se derivan de esta lista); con UNO puedes llenar tambien trafo_kva.\n"
+    "configuracion_transformadores: 'paralelo' (sus secundarios confluyen en un mismo "
+    "barraje BT) | 'independientes' (cada uno alimenta su propio barraje BT y su carga). "
+    "Vacio si el documento no lo dice.\n"
+    "planta_respaldo: {existe, kva, transferencia}. existe: 'si' | 'no' ('no' tambien "
+    "si el acta dice que no se encontro planta). kva: capacidad en kVA (si el acta la da "
+    "en HP, dejala vacia y anotalo en `faltantes`). transferencia: automatica | manual "
+    "solo si el documento lo dice.\n"
+    "ubicacion_medida: 'BT' | 'MT' = lado del transformador donde esta el medidor, "
+    "solo si el documento lo dice.\n"
+    "celda_medida: {existe, tipo, estado}. existe: 'si' | 'no' (el medidor esta o no en "
+    "una celda). tipo: ej 'AE319'. estado: ej 'Bueno'.\n"
+    "EQUIVALENCIAS ACTA -> CAMPO:\n"
+    "  'Informacion del transformador-1, -2, -3' (cada bloque) -> transformadores[i].kva / tipo / uso\n"
+    "  'Se encontro planta de respaldo?' -> planta_respaldo.existe\n"
+    "  'Capacidad (kVA) (HP) de la planta' -> planta_respaldo.kva\n"
+    "  'El medidor esta en celda?' -> celda_medida.existe\n"
+    "  'Tipo de celda del medidor' -> celda_medida.tipo\n"
+    "  'Estado de celda del medidor' -> celda_medida.estado\n"
+    "En el acta, un valor '-', 'n.i' (no informado) o vacio significa que el dato NO "
+    "esta: dejalo vacio (\"\"), no escribas '-' ni 'n.i'.\n"
 )
 
 _PDF_S = {"type": "string"}
 def _pdf_enum(*vals, **kw):
     return {"type": "string", "enum": [*vals, ""]}
+
+def _pdf_objeto(props):
+    """Objeto anidado en modo estricto: todo `required` y sin propiedades extra."""
+    return {"type": "object", "properties": props, "required": list(props),
+            "additionalProperties": False}
 
 _PDF_PROPS_MEDIDA = {
     "nombre": _PDF_S,
@@ -3425,6 +3519,22 @@ _PDF_PROPS_MEDIDA = {
     "calibre_conductor": _PDF_S, "circuito": _PDF_S,
     "dps_cantidad": {"type": "integer"},
     "tendido": _pdf_enum("aereo", "subterraneo"),
+    "transformadores": {"type": "array", "items": _pdf_objeto({
+        "kva": _PDF_S,
+        "tipo": _pdf_enum("monofasico", "bifasico", "trifasico"),
+        "uso": _pdf_enum("exclusivo", "compartido"),
+    })},
+    "configuracion_transformadores": _pdf_enum("paralelo", "independientes"),
+    "planta_respaldo": _pdf_objeto({
+        "existe": {"type": "string", "enum": ["si", "no", ""]},
+        "kva": _PDF_S,
+        "transferencia": _pdf_enum("automatica", "manual"),
+    }),
+    "ubicacion_medida": _pdf_enum("BT", "MT"),
+    "celda_medida": _pdf_objeto({
+        "existe": {"type": "string", "enum": ["si", "no", ""]},
+        "tipo": _PDF_S, "estado": _PDF_S,
+    }),
     "faltantes": {"type": "array", "items": _PDF_S},
     "supuestos": {"type": "array", "items": _PDF_S},
 }
@@ -3450,6 +3560,16 @@ PDF_ESQUEMA = {
 def _txt(v, n=40):
     """Texto de usuario/PDF -> una linea, sin espacios raros, recortado."""
     return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:n]
+
+_NO_INFORMADO = {"-", "--", "n.i", "ni", "n/i", "n.a", "na", "n/a", "null", "none"}
+
+def _dato(v, n=40):
+    """Como _txt, pero '-', 'n.i' o vacio (como lo escribe el acta) = no informado -> ''."""
+    t = _txt(v, n)
+    return "" if t.lower().strip(".") in _NO_INFORMADO else t
+
+def _elegir_en(v, validos):
+    return v if v in validos else ""
 
 def _numero_txt(v):
     """'700 kVA' -> '700'; '13,2' -> '13.2'; sin numero -> ''."""
@@ -3501,7 +3621,22 @@ def _cfg_desde_pdf(item):
         supuestos.append(f"norma {norma} (el documento no la nombra)")
     cfg.update(sistema=sistema, tipo=tipo, norma=norma)
 
+    # Transformadores del acta (lista): solo se conservan los que traen algun dato
+    trafos = []
+    crudo_tr = item.get("transformadores")
+    for t in (crudo_tr if isinstance(crudo_tr, list) else [])[:12]:
+        if not isinstance(t, dict): continue
+        d = {"kva": _numero_txt(_dato(t.get("kva"), 20)),
+             "tipo": _dato(t.get("tipo"), 12).lower(), "uso": _dato(t.get("uso"), 12).lower()}
+        if d["tipo"] not in ("monofasico", "bifasico", "trifasico"): d["tipo"] = ""
+        if d["uso"] not in ("exclusivo", "compartido"): d["uso"] = ""
+        if d["kva"] or d["tipo"] or d["uso"]: trafos.append(d)
+
     inst = elegir("instalacion", ("trafo", "barraje"))
+    if trafos and inst != "trafo":
+        if inst == "barraje":
+            supuestos.append("instalación con transformador (el acta informa transformadores)")
+        inst = "trafo"
     cfg["instalacion"] = inst
     if inst == "trafo":
         uso = elegir("trafo_uso", ("exclusivo", "compartido"))
@@ -3527,6 +3662,24 @@ def _cfg_desde_pdf(item):
         if tt: cfg["trafo_tipo"] = tt
         sec = elegir("seccionador", ("antes", "despues"))
         if sec: cfg["seccionador"] = sec
+        if trafos:                       # la lista del acta manda sobre los campos sueltos
+            cfg["transformadores"] = trafos
+            kvas = [t["kva"] for t in trafos]
+            cfg["n_trafos"] = len(trafos)
+            if len(trafos) >= 2:
+                cfg["trafo_kva_list"] = kvas if all(kvas) else []
+            else:
+                cfg["trafo_kva_list"] = []
+                if kvas[0]: cfg["trafo_kva"] = kvas[0]
+            if trafos[0]["tipo"]: cfg["trafo_tipo"] = trafos[0]["tipo"]
+            usos = [t["uso"] for t in trafos]
+            uso_g = "compartido" if "compartido" in usos else "exclusivo" if "exclusivo" in usos else ""
+            if uso_g: cfg["trafo_uso"] = uso_g
+            conf = elegir("configuracion_transformadores", ("paralelo", "independientes"))
+            if len(trafos) >= 2 and not conf:
+                conf = "paralelo"
+                supuestos.append("transformadores en paralelo (el documento no dice la configuración)")
+            if conf: cfg["configuracion_transformadores"] = conf
     elif inst == "barraje":
         tb = _numero_txt(item.get("tension_bt"))
         if tb: cfg["tension_bt"] = tb
@@ -3548,11 +3701,32 @@ def _cfg_desde_pdf(item):
     nombre = _txt(item.get("nombre"), 40)
     if nombre: cfg["proyecto"] = nombre
 
+    # Planta de respaldo, ubicacion de la medida y celda (acta): solo lo que el documento dice
+    pl = item.get("planta_respaldo")
+    if isinstance(pl, dict) and _txt(pl.get("existe")) in ("si", "no"):
+        if _txt(pl.get("existe")) == "si":
+            kp = _numero_txt(_dato(pl.get("kva"), 20))
+            tr = _elegir_en(_dato(pl.get("transferencia"), 12).lower(), ("automatica", "manual"))
+            cfg["planta_respaldo"] = {"existe": True, "kva": kp or None, "transferencia": tr or None}
+            if not kp: faltantes.append("capacidad de la planta de respaldo")
+        else:
+            cfg["planta_respaldo"] = {"existe": False, "kva": None, "transferencia": None}
+    ub = _dato(item.get("ubicacion_medida"), 4).upper()
+    if ub in ("BT", "MT"): cfg["ubicacion_medida"] = ub
+    ce = item.get("celda_medida")
+    if isinstance(ce, dict):
+        ex = _txt(ce.get("existe"))
+        ct, cs = _dato(ce.get("tipo"), 30), _dato(ce.get("estado"), 30)
+        if ex in ("si", "no") or ct or cs:
+            cfg["celda_medida"] = {"existe": True if ex == "si" else False if ex == "no" else None,
+                                   "tipo": ct, "estado": cs}
+
     # Datos que el unifilar necesita y el documento no trajo: se piden con nombre propio
     criticos = []
     if tipo in ("semidirecta", "indirecta") and not cfg["rel_tc"]: criticos.append("relación del TC")
     if tipo == "indirecta" and not cfg["rel_tp"]:                  criticos.append("relación del TP")
-    if inst == "trafo" and not cfg.get("trafo_kva") and not cfg.get("trafo_kva_list"):
+    if inst == "trafo" and (any(not t["kva"] for t in trafos) if trafos
+                            else not cfg.get("trafo_kva") and not cfg.get("trafo_kva_list")):
         criticos.append("potencia del trafo (kVA)")
     # Los criticos se calculan aqui (nombre propio, siempre igual); lo que el modelo dijo sobre
     # el MISMO dato ("relacion del TC", "rel_tc", "TC"...) se descarta para no repetirlo.
@@ -3662,9 +3836,23 @@ def _resumen_medida(i, total, cfg, faltantes, supuestos, avisos):
     if cfg.get("rel_tc"): partes.append(f"TC {cfg['rel_tc']}")
     if cfg.get("rel_tp"): partes.append(f"TP {cfg['rel_tp']}")
     if cfg.get("instalacion") == "trafo":
-        k = "+".join(cfg.get("trafo_kva_list") or []) or cfg.get("trafo_kva", "")
-        partes.append(f"Trafo {k} kVA" if k else "Trafo")
+        tr = diagram_engine._trafos_de(cfg) if cfg.get("transformadores") else []
+        if len(tr) >= 2:
+            conf = "independientes" if cfg.get("configuracion_transformadores") == "independientes" else "en paralelo"
+            partes.append(f"{diagram_engine._resumen_trafos(tr)} {conf}")
+        else:
+            k = "+".join(cfg.get("trafo_kva_list") or []) or cfg.get("trafo_kva", "")
+            partes.append(f"Trafo {k} kVA" if k else "Trafo")
     if cfg.get("v_mt"): partes.append(cfg["v_mt"])
+    pl = cfg.get("planta_respaldo")
+    if isinstance(pl, dict) and pl.get("existe"):
+        kp = diagram_engine._num(pl.get("kva"))
+        partes.append("Planta" + (f" {diagram_engine._kva_txt(kp)} kVA" if kp else "")
+                      + (f" ({pl['transferencia']})" if pl.get("transferencia") else ""))
+    if cfg.get("ubicacion_medida"): partes.append(f"medida en {cfg['ubicacion_medida']}")
+    ce = cfg.get("celda_medida")
+    if isinstance(ce, dict) and ce.get("existe") is not None:
+        partes.append("con celda" + (f" {ce['tipo']}" if ce.get("tipo") else "") if ce["existe"] else "sin celda")
     titulo = f"🔌 Medida {i}/{total}" if total > 1 else "🔌 Medida"
     if cfg.get("proyecto"): titulo += f" — {cfg['proyecto']}"
     lineas = [titulo, "   " + " · ".join(p for p in partes if p)]

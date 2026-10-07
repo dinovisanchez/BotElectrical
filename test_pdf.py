@@ -25,8 +25,11 @@ PDF = pdf_real()
 
 def medida(**kw):
     """Una entrada de `medidas` con TODOS los campos del esquema (como los devuelve la API)."""
-    base = {k: ([] if v.get("type") == "array" else 0 if v.get("type") == "integer" else "")
-            for k, v in bot._PDF_PROPS_MEDIDA.items()}
+    def vacio(v):
+        t = v.get("type")
+        return ([] if t == "array" else 0 if t == "integer"
+                else {k: vacio(x) for k, x in v["properties"].items()} if t == "object" else "")
+    base = {k: vacio(v) for k, v in bot._PDF_PROPS_MEDIDA.items()}
     base.update(kw)
     return base
 
@@ -224,6 +227,54 @@ async def main():
             "segundo plano: on_document vuelve enseguida y deja la lectura como tarea")
         await app.tareas[0]
         chk(len(u.message.fotos) == 1 and "pdf_en_curso" not in c.user_data, "segundo plano: al terminar entrega el unifilar y libera el candado")
+
+        # ---- 9b) campos de acta: transformadores, planta, ubicacion, celda ----
+        ACTA = dict(M_IND, n_trafos=0, trafo_kva="", seccionador="", v_mt="11.4 kV", rel_tp="11400/120",
+                    transformadores=[{"kva": "300", "tipo": "trifasico", "uso": "compartido"},
+                                     {"kva": "300 kVA", "tipo": "trifasico", "uso": "exclusivo"},
+                                     {"kva": "-", "tipo": "n.i", "uso": ""}],      # bloque vacio del acta -> se descarta
+                    planta_respaldo={"existe": "si", "kva": "150", "transferencia": "automatica"},
+                    ubicacion_medida="MT", celda_medida={"existe": "si", "tipo": "AE319", "estado": "Bueno"})
+        cfg, falt, sup, avi = bot._cfg_desde_pdf(medida(**ACTA))
+        chk(len(cfg.get("transformadores", [])) == 2 and cfg["transformadores"][0] == {"kva": "300", "tipo": "trifasico", "uso": "compartido"}
+            and cfg["transformadores"][1]["kva"] == "300" and cfg["transformadores"][1]["uso"] == "exclusivo",
+            "acta: 2 transformadores utiles; '-' / 'n.i' (bloque vacio) se descartan, '300 kVA' -> '300'")
+        chk(cfg["n_trafos"] == 2 and cfg["trafo_kva_list"] == ["300", "300"] and cfg["instalacion"] == "trafo"
+            and cfg["trafo_uso"] == "compartido", "acta: deriva n_trafos / trafo_kva_list / trafo_uso (compartido manda)")
+        chk(cfg["configuracion_transformadores"] == "paralelo" and any("paralelo" in x for x in sup),
+            "acta: sin configuracion con 2+ trafos -> 'paralelo' y se avisa en 'Supuse'")
+        chk(cfg["planta_respaldo"] == {"existe": True, "kva": "150", "transferencia": "automatica"}
+            and cfg["ubicacion_medida"] == "MT" and cfg["celda_medida"] == {"existe": True, "tipo": "AE319", "estado": "Bueno"},
+            "acta: planta, ubicacion y celda llegan al cfg")
+        chk("potencia del trafo (kVA)" not in falt, "acta: con kVA en la lista no se pide la potencia del trafo")
+        # valores hostiles / '-' en los campos nuevos
+        cfg, falt, sup, avi = bot._cfg_desde_pdf(medida(**dict(M_IND, planta_respaldo={"existe": "si", "kva": "n.i", "transferencia": "x"},
+                                                             ubicacion_medida="AT", celda_medida={"existe": "", "tipo": "-", "estado": "n.i"},
+                                                             transformadores=[{"kva": "<b>5</b>", "tipo": "hexafasico", "uso": "dueno"}])))
+        chk(cfg["planta_respaldo"] == {"existe": True, "kva": None, "transferencia": None} and any("planta" in f for f in falt),
+            "acta: planta con kVA 'n.i' -> existe sin kVA (se dibuja 'kVA no informado') y se anota en faltantes")
+        chk("ubicacion_medida" not in cfg and "celda_medida" not in cfg
+            and cfg["transformadores"] == [{"kva": "5", "tipo": "", "uso": ""}],
+            "acta: ubicacion invalida, celda toda '-' y enums invalidos se descartan (nada llega crudo al motor)")
+        cfg, *_ = bot._cfg_desde_pdf(medida(**dict(M_IND, planta_respaldo={"existe": "no", "kva": "99", "transferencia": "manual"})))
+        chk(cfg["planta_respaldo"]["existe"] is False and cfg["planta_respaldo"]["kva"] is None, "acta: 'no hay planta' -> existe=false, sin kVA")
+        cfg, *_ = bot._cfg_desde_pdf(medida(**dict(M_IND, instalacion="barraje", n_trafos=0, trafo_kva="",
+                                                   transformadores=[{"kva": "75", "tipo": "", "uso": ""}])))
+        chk(cfg["instalacion"] == "trafo" and cfg["trafo_kva"] == "75" and cfg["n_trafos"] == 1 and "configuracion_transformadores" not in cfg,
+            "acta: un transformador en la lista -> instalacion=trafo y trafo_kva (sin configuracion)")
+        # de punta a punta: el PDF con 2 transformadores en paralelo genera el unifilar de frontera con su resumen
+        m, c = await enviar([ok(respuesta([ACTA]))])
+        txt = "\n".join(m.textos)
+        chk(len(m.fotos) == 1 and "2 × 300 kVA" in txt and "en paralelo" in txt and "Planta 150 kVA" in txt and "con celda AE319" in txt,
+            f"acta: de punta a punta entrega 1 unifilar y el resumen cita trafos/planta/celda -> {txt[:160]!r}")
+        chk(m.fotos and "Transformadores: 2 × 300 kVA" in m.fotos[0] and "Planta de respaldo: 150 kVA" in m.fotos[0],
+            "acta: el caption de la imagen cita los transformadores y la planta")
+        # coherencia: MT con semidirecta se corrige; compartido + 2 trafos NO se fuerza a exclusivo
+        cfg2, notas = bot._verificar_coherencia(dict(cfg, tipo="semidirecta", ubicacion_medida="MT"))
+        chk(cfg2["ubicacion_medida"] == "BT" and any("baja tensión" in n for n in notas), "coherencia: ubicacion MT con semidirecta -> BT con aviso")
+        cfg3, notas3 = bot._verificar_coherencia(bot._cfg_desde_pdf(medida(**ACTA))[0])
+        chk(cfg3["trafo_uso"] == "compartido" and not any("EXCLUSIVO" in n or "subestación" in n for n in notas3),
+            f"coherencia: 2 trafos del acta con uno compartido -> sin avisos de subestacion multi-celda {notas3}")
 
         # ---- 10) conexion con el resto del bot ----
         fuente = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.py"), encoding="utf-8").read()

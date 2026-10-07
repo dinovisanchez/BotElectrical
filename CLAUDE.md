@@ -33,6 +33,9 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   algún camino queda sin respuesta. `--draw` además dibuja cada diagrama.
 - `test_conexiones.py` — geometria del diagrama de conexiones (sin solapes, reglas in/cierre,
   barra BN). `test_pdf.py` — PDF -> unifilar. `test_claude_sdk.py` — llamadas a Claude con el SDK real.
+- `test_frontera.py` — campos de acta (varios transformadores, planta de respaldo, celda de medida,
+  ubicacion de la medida): helpers, escenarios e–p (`FRONTERA_OUT=<dir>` guarda los PNG) y un
+  detector de textos superpuestos (texto/texto, texto/cable, texto/borde de recuadro).
 - `requirements.txt`, `README.md`.
 
 ## Velocidad y timeouts en las llamadas a Gemini
@@ -174,6 +177,8 @@ trafo_n_usuarios: str      # cantidad de otros usuarios (solo si trafo_uso='comp
 trafo_gabinete: bool|None  # True=gabinete/cuarto cerrado, False=red abierta, None=sin especificar
 trafo_kva, trafo_tipo, trafo_kva_list, n_trafos, n_cc, n_tc, interruptor, v_mt, v_bt
 # opcionales unifilar: dps (bool), rele (bool), rele_funcs (str ANSI)
+# campos de acta (opcionales, ver "Unifilar de frontera"): transformadores [{kva,tipo,uso}],
+#   configuracion_transformadores, planta_respaldo {existe,kva,transferencia}, ubicacion_medida, celda_medida {existe,tipo,estado}
 ```
 
 ### Subestación multi-celda (`tipo='indirecta'` + `n_trafos >= 2`)
@@ -413,7 +418,8 @@ Claude y dibuja el unifilar de cada punto de medida. **Solo unifilar**
   `max_tokens` (4096) -> si `stop_reason == 'max_tokens'` reintenta con 16000. Costo: lo
   manda el numero de paginas (~1.500-3.000 tokens por pagina a $2/M) -> un PDF de 10
   paginas ~ $0,03-0,06; se registra con `_log_uso_claude("pdf", ...)`.
-- `test_pdf.py` (41 comprobaciones, SDK real + `MockTransport`, PDF real generado con
+- Campos de acta (transformadores, planta, celda, ubicacion): ver "Unifilar de frontera" mas abajo.
+- `test_pdf.py` (54 comprobaciones, SDK real + `MockTransport`, PDF real generado con
   matplotlib): peticion (bloque document, json_schema, caption), valores hostiles, varios
   puntos, faltantes, errores 400/401/404/529, max_tokens, segundo plano, candado.
 - No verificado en vivo (sin API key): que el modelo extraiga bien de PDFs reales, y que la
@@ -811,6 +817,49 @@ renderizaron y revisaron a mano los casos principales; errores REALES encontrado
    normal deberian estar abiertos -- confirmar que se quiere mostrar el estado de servicio.
 6. `bornes_medidor_colombia.py` (referencia, no la importa nadie) pone S=amarillo y T=azul, al reves
    de la convencion de colores de este archivo (S azul, T amarillo).
+
+## Unifilar de frontera: campos de acta (oct/2026)
+Anexo pedido por el usuario ("CAMPOS NUEVOS EN EL ESQUEMA ... VARIANTES A–D ... PRUEBAS e–j"). Todos
+los campos son OPCIONALES; sin ellos nada cambia respecto a lo anterior. Su base ("los 4 JSON anteriores")
+no estaba disponible, asi que lo no especificado se decidio asi (cambialo si no es lo que querias):
+- **Campos del cfg**: `transformadores` (lista de `{kva, tipo, uso}`; un `transformador` suelto = lista de
+  uno), `configuracion_transformadores` ('paralelo' por defecto con 2+ | 'independientes'),
+  `planta_respaldo` `{existe, kva, transferencia}`, `ubicacion_medida` ('BT'|'MT'; por defecto MT si
+  indirecta, BT en los demas), `celda_medida` `{existe, tipo, estado}`. "-", "n.i", "n/a" o vacio = no
+  informado (`_t1` en el motor, `_dato` en bot.py). Helpers en `diagram_engine.py` (antes de
+  `draw_unifilar_indirecta_pro`): `_trafos_de`, `_planta_de`, `_celda_de`, `_ubic_medida`, `_clasif_creg`,
+  `_resumen_trafos`, `_planta_simbolo`. **Tres renderers los leen**: no los toques por separado.
+- **2+ transformadores** -> `draw_unifilar_frontera` (despacho al inicio de `draw_unifilar_generico`).
+  NO es la subestacion multi-celda (`n_trafos>=2` sin `transformadores`, que sigue igual): aqui cada
+  TRFi lleva su FUi desde el barraje MT. *Paralelo*: secundarios a un barraje BT comun, luego TC/BKR1/
+  carga. *Independientes*: cada uno con su barraje/BKR/carga; MED1 solo en el ramal de esta frontera
+  (el primero NO compartido, que se dibuja primero a la izquierda conservando su numero TRFk) y el resto
+  punteado gris "(fuera de esta frontera)". Maximo 4 (`_TRAFOS_MAX`) + nota "+N transformador(es) no
+  mostrado(s)". La insignia COMPARTIDO y el "Ramal de otro usuario" salen solo en el trafo compartido.
+  Clasificacion CREG 038 en el cuadro: SUMA de kVA (paralelo) o kVA del ramal medido (independientes).
+- **Planta de respaldo**: generador "G" + ATS (o "TRANSFERENCIA MANUAL") conectados al nodo de carga
+  DESPUES de BKR1 y de la medida; rotulo "Planta de respaldo (no medida por MED1)" + kVA o "kVA no
+  informado"; fila en el cuadro. En frontera y en el unifilar "limpio" va a un costado del nodo de carga
+  (izquierda en frontera, derecha en el limpio); `draw_unifilar_generico` la dibuja con `_planta_simbolo`.
+  El cable se dibuja en TRAMOS (nodo -> ATS -> G), nunca por detras de un simbolo ni de su texto.
+- **Celda de medida (MT)**: recuadro violeta (`_VIOLETA`) que encierra TC + TP con "CELDA DE MEDIDA – <tipo>";
+  `existe=false` en MT -> TC/TP sin recuadro y nota "Sin celda de medida". Los rotulos "Sec. TC" y
+  "secundarios a tierra" se colocaron FUERA del borde del recuadro (el detector de tests ya lo vigila).
+- **Ficha = "cuadro de datos"** (el repo no tiene un elemento llamado "ficha"). Fila "Punto de medición:
+  lado BT del transformador" solo con ubicacion BT + trafo (informativa; no cambia el dibujo ni la
+  clasificacion). La fila de clasificacion CREG solo existe en el renderer de frontera.
+- **Pegamento en `bot.py`**: `_PDF_PROPS_MEDIDA` (esquema estricto con objetos anidados via `_pdf_objeto`),
+  `PROMPT_PDF` (tabla acta -> campo; "-"/"n.i" = vacio), `_cfg_desde_pdf` (sanea todo, deriva
+  `n_trafos`/`trafo_kva_list`/`trafo_uso`/`trafo_tipo`, `instalacion='trafo'` si hay transformadores,
+  'paralelo' por defecto con aviso en "Supuse"), `PROMPT_DIAGRAMA` (campos opcionales, "no los preguntes"),
+  `_caption` y `_resumen_medida` (citan trafos/planta/celda). `_verificar_coherencia`: con 2+
+  `transformadores` NO aplica las reglas de multi-celda (no fuerza `exclusivo`, no avisa de seccionador/
+  proteccion general ni de gabinete), deriva `instalacion`/`trafo_uso`/`trafo_kva` desde la lista y
+  corrige `ubicacion_medida='MT'` con directa/semidirecta (BT) avisando.
+- `parser.py` (texto libre) NO reconoce estos campos: llegan por PDF, por el dialogo IA o por cfg directo.
+- Verificado: `test_frontera.py` (escenarios e–p sin textos superpuestos, revisados a ojo), `test_pdf.py`
+  (casos de acta, incl. valores hostiles) y fuzz de 400 cfgs con los campos nuevos. NO verificado en vivo
+  (sin API key): que el modelo extraiga bien de un acta real; probar con un PDF verdadero tras el deploy.
 
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
