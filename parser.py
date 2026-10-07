@@ -17,6 +17,139 @@ def _norm(s):
         s = s.replace(a, b)
     return s
 
+_NUM_PAL = {"un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+            "seis": 6, "siete": 7, "ocho": 8}
+_ORD_PAL = {"primer": 0, "primero": 0, "primera": 0, "segundo": 1, "segunda": 1, "tercer": 2,
+            "tercero": 2, "tercera": 2, "cuarto": 3, "cuarta": 3, "ultimo": -1, "ultima": -1}
+# lista de kVA: "300 kva", "300 y 150 kva", "300, 150 kva", "300 + 150 kva"
+_KVA_LISTA = r"(\d+(?:[.,]\d+)?(?:\s*(?:,|\by\b|\be\b|\+)\s*\d+(?:[.,]\d+)?)*)\s*kva\b"
+_PLANTA_RE = (r"planta\s+(?:de\s+)?(?:respaldo|emergencia|electrica|generadora)|generador"
+              r"|grupo\s+electrogeno|planta\s+(?:de\s+)?\d+(?:[.,]\d+)?\s*kva")
+_FIN_CLAUSULA = r"[,;]|\.(?:\s|$)|\s+y\s+"
+
+
+def _extraer_planta(t, cfg, entendido):
+    """Planta de respaldo (generador): es OTRA cosa que el medidor de respaldo. Se quita su
+    clausula del texto para que no dispare `respaldo` ni aporte su kVA al trafo. Devuelve t."""
+    neg = re.search(r"\b(?:sin|no\s+(?:hay|tiene|existe|se\s+encontro))\s+(?:una\s+|ninguna\s+)?"
+                    r"(?:planta|generador|grupo\s+electrogeno)(?:\s+de\s+(?:respaldo|emergencia))?", t)
+    if neg:
+        cfg["planta_respaldo"] = {"existe": False, "kva": None, "transferencia": None}
+        entendido.append("Sin planta de respaldo")
+        return t[:neg.start()] + " " + t[neg.end():]
+    m = re.search(r"\b(?:" + _PLANTA_RE + r")\b", t)
+    if not m:
+        return t
+    fin = re.search(_FIN_CLAUSULA, t[m.end():])
+    fin = m.end() + (fin.start() if fin else len(t) - m.end())
+    clausula = t[m.start():fin]
+    mk = re.search(r"(\d+(?:[.,]\d+)?)\s*kva", clausula)
+    kva = mk.group(1).replace(",", ".") if mk else None
+    # la transferencia suele ir despues de una coma: se busca en todo el texto
+    mt = re.search(r"\btransferencia\s+(automatica|manual)\b", t) or re.search(r"\b(automatica|manual)\b", clausula)
+    transf = mt.group(1) if mt else ("automatica" if re.search(r"\bats\b", t) else None)
+    cfg["planta_respaldo"] = {"existe": True, "kva": kva, "transferencia": transf}
+    entendido.append("Planta de respaldo" + (f" {kva} kVA" if kva else "")
+                     + (f", transferencia {transf}" if transf else ""))
+    t = t[:m.start()] + " " + t[fin:]
+    return re.sub(r"\btransferencia\s+(?:automatica|manual)\b|\bats\b", " ", t)
+
+
+def _extraer_trafos(t, cfg, entendido, faltante):
+    """2+ transformadores (cantidad / lista de kVA / 'trafo 1 de 300 kVA, trafo 2 de 150 kVA'),
+    configuracion (paralelo / independientes) y cual es el compartido. Solo actua con 2 o mas."""
+    n = None
+    # (el numero no puede ser el denominador de una relacion: "200/5 trafo 300 kVA" no son 5 trafos)
+    m_n = re.search(r"(?<![/.,\d])\b(\d+|" + "|".join(_NUM_PAL) + r")\s+(?:transformadores|trafos|transformador|trafo)\b", t)
+    if m_n:
+        n = int(m_n.group(1)) if m_n.group(1).isdigit() else _NUM_PAL[m_n.group(1)]
+    indexados = {int(i): k.replace(",", ".") for i, k in re.findall(
+        r"\b(?:trafo|transformador|trf)\s*#?(\d)\s*(?:de|:|=|-)?\s*(\d+(?:[.,]\d+)?)\s*kva", t)}
+    vals = []
+    mk = re.search(_KVA_LISTA, t)
+    if mk:
+        vals = [v.replace(",", ".") for v in re.findall(r"\d+(?:[.,]\d+)?", mk.group(1))]
+    todos_kva = [v.replace(",", ".") for v in re.findall(r"(\d+(?:[.,]\d+)?)\s*kva", t)]
+    if len(vals) < 2 and len(todos_kva) >= 2:      # "300 kVA y 150 kVA" (unidad repetida)
+        vals = todos_kva
+    plural = re.search(r"\b(?:transformadores|trafos)\b", t)
+    if len(indexados) >= 2:
+        n = max(indexados)
+        lista = [indexados.get(i + 1) for i in range(n)]
+    elif n is not None and n >= 2:
+        lista = vals if (len(vals) == n) else vals * n if len(vals) == 1 else vals if len(vals) >= 2 else [None] * n
+        n = len(lista)
+    elif n is None and plural and len(vals) >= 2:
+        lista = vals; n = len(vals)
+    else:
+        return
+    n = min(n, 12); lista = lista[:n]
+
+    tipo = cfg.get("trafo_tipo", "")
+    uso = [""] * n
+    if "compartido" in t:
+        uso = ["exclusivo"] * n
+        idx = None
+        m_num = re.search(r"\b(?:trafo|transformador|trf)\s*#?(\d)\s*(?:es\s+)?compartid", t)
+        m_ord = re.search(r"\b(primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|ultim[oa])\s+(?:trafo\s+|transformador\s+)?(?:es\s+)?compartid", t)
+        m_uno = re.search(r"\b(?:uno|una)\s+(?:de\s+(?:ellos|ellas|los\s+\w+)\s+)?(?:es\s+|sea\s+|esta\s+)?compartid", t)
+        if m_num:   idx = int(m_num.group(1)) - 1
+        elif m_ord: idx = _ORD_PAL[m_ord.group(1)]
+        elif m_uno:
+            idx = n - 1
+            entendido.append(f"Compartido: TRF{n} (no dijiste cual; supuse el ultimo)")
+        if idx is not None:
+            idx = idx if idx >= 0 else n + idx
+            if 0 <= idx < n:
+                uso[idx] = "compartido"
+            else:
+                uso = ["compartido"] * n
+        else:
+            uso = ["compartido"] * n
+            entendido.append("Todos los transformadores compartidos (no dijiste cual)")
+    elif re.search(r"\b(?:exclusivo|propio|privado)\b", t):
+        uso = ["exclusivo"] * n
+
+    cfg["transformadores"] = [{"kva": lista[i] or "", "tipo": tipo, "uso": uso[i]} for i in range(n)]
+    cfg["instalacion"] = "trafo"
+    cfg["n_trafos"] = n
+    cfg.pop("trafo_kva", None)
+    cfg["trafo_kva_list"] = [k for k in lista] if all(lista) else []
+    if "compartido" in uso:
+        cfg["trafo_uso"] = "compartido"
+    elif "exclusivo" in uso:
+        cfg["trafo_uso"] = "exclusivo"
+    if re.search(r"\bindependiente|\bseparad[oa]s?\b|\bcada\s+un[oa]\s+con\s+su\b", t):
+        cfg["configuracion_transformadores"] = "independientes"
+    elif re.search(r"\bparalelo\b", t):
+        cfg["configuracion_transformadores"] = "paralelo"
+    conf = cfg.get("configuracion_transformadores") or "paralelo (por defecto)"
+    entendido.append(f"{n} transformadores: " + (" + ".join(k for k in lista if k) + " kVA" if any(lista) else "kVA sin indicar")
+                     + f" · {conf}")
+    if not all(lista):
+        faltante.append("kVA de cada transformador (ej. 300 kVA cada uno)")
+
+
+def _extraer_acta(t, text, cfg, entendido):
+    """Ubicacion de la medida (BT/MT) y celda de medida."""
+    m = re.search(r"\b(?:medida|medicion|medidor)\s+(?:en|al|del)\s+(?:el\s+)?(?:lado\s+(?:de\s+)?)?"
+                  r"(mt|media\s+tension|alta|bt|baja\s+tension|baja)\b", t)
+    if m:
+        cfg["ubicacion_medida"] = "MT" if m.group(1) in ("mt", "alta") or m.group(1).startswith("media") else "BT"
+        entendido.append(f"Medida en {cfg['ubicacion_medida']}")
+    if re.search(r"\bsin\s+celda\b|\bno\s+(?:esta|hay|tiene)\s+(?:en\s+)?celda\b", t):
+        cfg["celda_medida"] = {"existe": False, "tipo": "", "estado": ""}
+        entendido.append("Sin celda de medida")
+    elif re.search(r"\bcelda\b", t):
+        mt = re.search(r"\bcelda(?:\s+de\s+(?:medida|medicion))?\s+(?:tipo\s+)?([a-z]{1,3}\s?-?\d{2,4})\b", text, re.I)
+        me = re.search(r"\bestado(?:\s+de\s+(?:la\s+)?celda)?\s*(?:es\s+|:)?\s*"
+                       r"(bueno|regular|malo|deficiente|excelente|aceptable|bien|mal)\b", t)
+        tipo = re.sub(r"[\s-]", "", mt.group(1)).upper() if mt else ""
+        estado = me.group(1).capitalize() if me else ""
+        cfg["celda_medida"] = {"existe": True, "tipo": tipo, "estado": estado}
+        entendido.append("Celda de medida" + (f" {tipo}" if tipo else "") + (f", estado {estado}" if estado else ""))
+
+
 def parse_spec(text):
     """
     Devuelve (cfg, entendido:list[str], faltante:list[str]).
@@ -84,6 +217,9 @@ def parse_spec(text):
     sis_txt = {"mono":"monofasica","bifasico":"bifasica",
                "tri3h":"trifasica 3 hilos (2 elem.)","tri4h":"trifasica 4 hilos (3 elem.)"}
     entendido.append(f"Sistema: {sis_txt[cfg['sistema']]}")
+
+    # --- PLANTA DE RESPALDO (generador): distinta del medidor de respaldo ---
+    t = _extraer_planta(t, cfg, entendido)
 
     # --- RESPALDO ---
     if any(x in t for x in ["respaldo", "chequeo", "principal", "2 medidor", "dos medidor"]):
@@ -230,6 +366,11 @@ def parse_spec(text):
             # cadena completa RED->TRAFO->MEDIDOR, por eso se fuerza unifilar.
             cfg["salida"] = "unifilar"
 
+    # --- VARIOS TRANSFORMADORES, UBICACION DE LA MEDIDA, CELDA (campos de acta) ---
+    faltante_acta = []
+    _extraer_trafos(t, cfg, entendido, faltante_acta)
+    _extraer_acta(t, text, cfg, entendido)
+
     # --- SECCIONADOR: posicion respecto al TRAFO (lo unico que dibuja el motor) ---
     # "antes"   = entre el punto de medida y el trafo (lado MT)
     # "despues" = aguas abajo del trafo (lado BT)
@@ -284,6 +425,7 @@ def parse_spec(text):
     # M4: semidirecta tambien necesita RTC para etiquetar correctamente el diagrama
     if cfg["tipo"] == "semidirecta" and not cfg["rel_tc"]:
         faltante.append("relacion de TC (ej. 200/5)")
+    faltante += faltante_acta
 
     return cfg, entendido, faltante
 

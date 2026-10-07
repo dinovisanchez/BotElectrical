@@ -83,6 +83,8 @@ def _seg_cruza_caja(p, q, caja):
     return True
 
 
+from matplotlib.text import Text
+
 def defectos(fig):
     """[(texto, otro)] con cajas de texto que se pisan entre si o que cruza un cable."""
     fig.canvas.draw()
@@ -91,7 +93,7 @@ def defectos(fig):
     cajas = []
     for t in ax.texts:
         if not t.get_visible() or not t.get_text().strip(): continue
-        b = t.get_window_extent(rend)
+        b = Text.get_window_extent(t, rend)       # solo el texto (en un Annotation, .get_window_extent suma la flecha)
         cajas.append((t.get_text().replace("\n", " / ")[:34], (b.x0 + 1, b.y0 + 1, b.x1 - 1, b.y1 - 1)))
     malos = []
     for (ta, ba), (tb, bb) in itertools.combinations(cajas, 2):
@@ -139,6 +141,71 @@ def main():
     chk([t["kva"] for t in de._trafos_de({"transformadores": [{"kva": "300 kVA"}, {"kva": "-"}]})] == [300.0, None], "kVA '-' = no informado")
     chk(de._clasif_creg(600)[0] == 3 and de._clasif_creg(1500)[0] == 2 and de._clasif_creg(50)[0] == 4, "clasificacion CREG 038 por kVA total")
     chk(de._resumen_trafos(de._trafos_de({"transformadores": [{"kva": 300}, {"kva": 300}]})) == "2 × 300 kVA", "ficha: '2 × 300 kVA' si son iguales")
+
+    # ---- parser de texto libre: el usuario escribe el pedido y el dibujo debe parecerse ----
+    # (antes el parser ignoraba estos campos sin avisar y leia "planta de respaldo" como medidor de respaldo)
+    from parser import parse_spec
+    def pt(texto):
+        cfg, ent, fal = parse_spec(texto)
+        return cfg, ent, fal
+    c, e, f = pt("2 transformadores de 300 kVA en paralelo, uno de ellos compartido, planta de respaldo de 150 kVA, "
+                 "transferencia automatica, medida semidirecta CENS TC 600/5")
+    chk([t["kva"] for t in c["transformadores"]] == ["300", "300"] and [t["uso"] for t in c["transformadores"]] == ["exclusivo", "compartido"]
+        and c["configuracion_transformadores"] == "paralelo" and c["n_trafos"] == 2 and "trafo_kva" not in c,
+        "parser: '2 transformadores de 300 kVA en paralelo, uno compartido' -> lista de 2, TRF2 compartido, paralelo")
+    chk(c["planta_respaldo"] == {"existe": True, "kva": "150", "transferencia": "automatica"} and not c["respaldo"],
+        "parser: 'planta de respaldo 150 kVA, transferencia automatica' -> planta (y NO medidor de respaldo)")
+    c, e, f = pt("medida directa trifasica CENS 2 transformadores independientes de 300 y 150 kVA, trafo 1 compartido")
+    chk([t["kva"] for t in c["transformadores"]] == ["300", "150"] and c["configuracion_transformadores"] == "independientes"
+        and [t["uso"] for t in c["transformadores"]] == ["compartido", "exclusivo"], "parser: lista '300 y 150 kVA', independientes, 'trafo 1 compartido'")
+    c, e, f = pt("indirecta CENS 50/5 11400/120 celda de medida AE319 estado bueno medida en MT trafo 300 kVA")
+    chk(c["celda_medida"] == {"existe": True, "tipo": "AE319", "estado": "Bueno"} and c["ubicacion_medida"] == "MT" and "transformadores" not in c
+        and c["trafo_kva"] == "300", "parser: celda AE319 bueno + medida en MT; un solo trafo sigue por trafo_kva")
+    c, e, f = pt("indirecta CENS 50/5 11400/120 sin celda medida en MT trafo 300 kVA")
+    chk(c["celda_medida"]["existe"] is False, "parser: 'sin celda' -> existe=false")
+    c, e, f = pt("semidirecta CENS 200/5 trafo 300 kVA sin planta de respaldo")
+    chk(c["planta_respaldo"]["existe"] is False and not c["respaldo"] and c["trafo_kva"] == "300", "parser: 'sin planta de respaldo' -> existe=false")
+    c, e, f = pt("semidirecta tri4h CENS 200/5 trafos 300 kVA y 150 kVA")
+    chk(len(c["transformadores"]) == 2 and c["transformadores"][1]["kva"] == "150", "parser: unidad repetida '300 kVA y 150 kVA'")
+    c, e, f = pt("semidirecta CENS 200/5 dos transformadores en paralelo")
+    chk(len(c["transformadores"]) == 2 and any("kVA" in x for x in f), "parser: 2 trafos sin kVA -> se pide el dato en 'faltante'")
+    c, e, f = pt("monofasica directa respaldo")
+    chk(c["respaldo"] is True and "planta_respaldo" not in c and "transformadores" not in c, "parser: 'respaldo' solo sigue siendo medidor de respaldo")
+    c, e, f = pt("directa trifasica 4 hilos RA8 trafo compartido gabinete 13.2 kV proteccion 100 A")
+    chk("transformadores" not in c and c["trafo_uso"] == "compartido" and c["trafo_gabinete"] is True, "parser: el caso de un trafo compartido no cambia")
+    # de punta a punta: texto -> coherencia -> motor, sin superposiciones
+    import bot
+    for texto in ("2 transformadores de 300 kVA en paralelo, uno de ellos compartido, planta de respaldo 150 kVA, "
+                  "transferencia automatica, medida semidirecta CENS TC 600/5 13.2 kV proteccion 400 A",
+                  "indirecta CENS 50/5 11400/120 2 transformadores independientes de 300 y 150 kVA celda de medida AE319 "
+                  "estado bueno medida en MT"):
+        c, e, f = pt(texto); c["salida"] = "unifilar"
+        c, _n = bot._verificar_coherencia(c)
+        try:
+            fig = capturar(c); mal = defectos(fig); plt.close(fig)
+            if SALIDA: de.draw_unifilar_generico(c, os.path.join(SALIDA, "texto_" + str(abs(hash(texto)) % 1000) + ".png"))
+            chk(not mal, f"texto -> dibujo sin textos superpuestos: {texto[:50]}... {mal[:3] if mal else ''}")
+        except Exception as ex:
+            chk(False, f"texto -> dibujo lanzo {type(ex).__name__}: {ex}")
+
+    # ---- trafo COMPARTIDO con gabinete en el renderer generico (directa/semidirecta, con/sin respaldo) ----
+    # El recinto punteado no debe cruzar rotulos ni circulos, ni invadir el cuadro de datos
+    # (se encontro con este detector: "ESTE MEDIDOR", "+ otros medidores", "GABINETE COMPARTIDO", MEDIDOR...).
+    import bot
+    for tipo_, resp_, gab_, nus_ in itertools.product(("directa", "semidirecta"), (False, True), (True, False), ("", "6")):
+        c = bot._verificar_coherencia(dict(
+            DEFAULT, salida="unifilar", sistema="tri4h", tipo=tipo_, norma="RA8", instalacion="trafo", trafo_uso="compartido",
+            trafo_gabinete=gab_, trafo_n_usuarios=nus_, trafo_tipo="trifasico", trafo_kva="150", v_mt="13.2 kV", respaldo=resp_,
+            proteccion_antes="100 A", rel_tc="200/5" if tipo_ != "directa" else ""))[0]
+        fig = capturar(c); mal = defectos(fig)
+        # el recinto debe quedar DENTRO del lienzo (con xc=22 el de respaldo se recortaba por la izquierda)
+        ax_ = fig.axes[0]; x0_ax = ax_.get_xlim()[0]
+        recintos = [pt for pt in ax_.patches if type(pt).__name__ == "FancyBboxPatch"
+                    and pt.get_edgecolor()[:3] == (0x8a / 255, 0x4b / 255, 0.0) and pt.get_width() < 0.9 * (ax_.get_xlim()[1] - x0_ax)]
+        recortado = [pt for pt in recintos if pt.get_x() < x0_ax]
+        plt.close(fig)
+        chk(not mal and not recortado,
+            f"compartido generico: {tipo_:11s} respaldo={resp_!s:5} gabinete={gab_!s:5} n={nus_!r:3} sin textos pisados ni recinto recortado {mal[:3] if mal else ''}")
 
     # ---- escenarios: dibujan, no pisan textos, y se dejan en disco para revisarlos ----
     for nombre, cfg in ESCENARIOS.items():

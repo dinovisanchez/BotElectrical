@@ -856,7 +856,33 @@ no estaba disponible, asi que lo no especificado se decidio asi (cambialo si no 
   `transformadores` NO aplica las reglas de multi-celda (no fuerza `exclusivo`, no avisa de seccionador/
   proteccion general ni de gabinete), deriva `instalacion`/`trafo_uso`/`trafo_kva` desde la lista y
   corrige `ubicacion_medida='MT'` con directa/semidirecta (BT) avisando.
-- `parser.py` (texto libre) NO reconoce estos campos: llegan por PDF, por el dialogo IA o por cfg directo.
+- **`parser.py` (texto libre) SI los reconoce** (`_extraer_planta`, `_extraer_trafos`, `_extraer_acta`; solo `re`).
+  Bug real que lo motivo: el usuario pidio algo con varios transformadores / planta / celda por texto y el bot
+  devolvio un unifilar de UN trafo "directa" sin avisar -- el parser ignoraba esas frases y, peor, leia "planta
+  de respaldo" como MEDIDOR de respaldo (`respaldo=True`, que es otra cosa). Ahora:
+  - **planta**: "planta de respaldo|emergencia|electrica", "generador", "grupo electrogeno", "planta 150 kVA";
+    kVA de su clausula (hasta coma/punto/" y "), "transferencia automatica|manual" (o ATS), "sin planta".
+    Su clausula se QUITA del texto antes de buscar `respaldo` y el kVA del trafo (si no, el 150 de la planta
+    terminaba como kVA del trafo y "respaldo" activaba el segundo medidor).
+  - **varios trafos**: "2|dos transformadores" (el numero no puede ser el denominador de una relacion: "200/5 trafo
+    300 kVA" NO son 5 trafos), lista de kVA ("300 y 150 kVA", "300 kVA y 150 kVA", "trafo 1 de 300 kVA, trafo 2 de
+    150 kVA"), "en paralelo" / "independientes", y cual es compartido ("trafo 2 compartido", "el segundo...",
+    "uno de ellos" -> supone el ULTIMO y lo dice en `entendido`; "compartido" a secas -> todos, tambien avisado).
+    Sin kVA -> `faltante`. Con 1 trafo sigue por `trafo_kva` (nada cambia).
+  - **ubicacion** ("medida en MT|BT|media tension|baja tension|lado de alta") y **celda** ("celda de medida
+    AE319 estado bueno", "sin celda").
+  - Regla vieja que se conserva: "compartido" sin tipo de medida explicito fuerza `tipo='directa'`.
+  - Prueba: `test_frontera.py` (parser + texto -> coherencia -> dibujo sin textos pisados) y un fuzz de 3.000
+    frases aleatorias (parser + `_generar`) sin excepciones.
+- **Trafo COMPARTIDO con gabinete en el renderer generico** (`draw_unifilar_generico`): el recinto punteado
+  cruzaba rotulos y hasta los circulos de los medidores. El detector de `test_frontera.py` (que ahora usa SOLO
+  la caja del texto: en un `Annotation`, `get_window_extent` suma la flecha y daba falsos positivos) lo encontro
+  en 8 de 16 combinaciones. Arreglos: con gabinete, "+ N medidores mas" y "ESTE MEDIDOR" van FUERA del recinto
+  (la flecha si puede cruzar el borde); el fondo del recinto baja para cubrir el rotulo MEDIDOR/RESPALDO;
+  "GABINETE COMPARTIDO" va encima del borde superior (a la derecha invadia el cuadro de datos); en directa +
+  PRINCIPAL/RESPALDO el recinto mide xc +- 25 (antes xc +- 18 cortaba los circulos), la barra se ensancha con
+  el y el eje se corre a `xc = 28` (con 22 el borde izquierdo quedaba fuera del lienzo y se recortaba).
+  La prueba tambien comprueba que el recinto no quede recortado por el borde del eje.
 - Verificado: `test_frontera.py` (escenarios e–p sin textos superpuestos, revisados a ojo), `test_pdf.py`
   (casos de acta, incl. valores hostiles) y fuzz de 400 cfgs con los campos nuevos. NO verificado en vivo
   (sin API key): que el modelo extraiga bien de un acta real; probar con un PDF verdadero tras el deploy.
