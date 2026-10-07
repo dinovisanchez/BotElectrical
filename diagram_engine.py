@@ -2066,7 +2066,11 @@ def draw_unifilar_generico(cfg, out_path):
     ax.text(W/2, H-5.5, "  ·  ".join(sub_parts),
             ha="center", fontsize=8.5, color="#666")
 
-    xc = 22   # eje vertical principal
+    # directa + PRINCIPAL/RESPALDO + trafo compartido en gabinete: el recinto abarca los dos medidores
+    # (xc +- 25) y con xc=22 su borde izquierdo quedaba FUERA del lienzo (recortado): se corre el eje.
+    caja_ancha = (bool(cfg.get("trafo_gabinete", False)) and respaldo and tipo == "directa"
+                  and instalacion == "trafo" and trafo_uso == "compartido")
+    xc = 22 + (6 if caja_ancha else 0)   # eje vertical principal
     y  = H - 11
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -2084,9 +2088,9 @@ def draw_unifilar_generico(cfg, out_path):
     def node_dot(yy):
         ax.add_patch(Circle((xc, yy), 0.9, fc=INK, ec=INK, zorder=4))
 
-    def busbar(yy, label):
-        ax.plot([xc-14, xc+14], [yy, yy], color=INK, lw=5, zorder=2)
-        ax.text(xc-16, yy, label, ha="right", va="center",
+    def busbar(yy, label, hw=14, lx=None):
+        ax.plot([xc-hw, xc+hw], [yy, yy], color=INK, lw=5, zorder=2)
+        ax.text(xc-16 if lx is None else lx, yy, label, ha="right", va="center",
                 fontsize=9.5, fontweight="bold", color=INK)
 
     def secc_rotulo():
@@ -2241,11 +2245,12 @@ def draw_unifilar_generico(cfg, out_path):
                 gx0 = xc - 15
                 gx1 = mcx + r + 2
                 gy1 = bt_y + 2
-                gy0 = med_span[0] - 2
+                gy0 = med_span[0] - 4          # (antes -2: el rotulo MEDIDOR/RESPALDO quedaba sobre el borde)
                 ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
                              boxstyle="round,pad=0.4,rounding_size=1.5",
                              fill=False, ec="#8a4b00", lw=1.3, ls=(0, (4, 2)), zorder=1))
-                ax.text(gx1 + 1, gy1 - 0.5, "GABINETE\nCOMPARTIDO", ha="left", va="top",
+                # encima del borde superior derecho: a la derecha del recinto invadia el cuadro de datos
+                ax.text(gx1, gy1 + 1.0, "GABINETE\nCOMPARTIDO", ha="right", va="bottom",
                         fontsize=6.3, color="#8a4b00", fontweight="bold")
 
     # ── FUENTE / ENTRADA ──────────────────────────────────────────────────────
@@ -2484,14 +2489,19 @@ def draw_unifilar_generico(cfg, out_path):
             # MAS ABAJO, despues del medidor -- el gabinete de medidores
             # encierra el barraje + los medidores, NUNCA el transformador
             # (que fisicamente esta afuera: en su propio poste o camara).
-            busbar(bt_y, "BARRAJE BT\n(COMPARTIDO)")
+            # directa + PRINCIPAL/RESPALDO + gabinete: el recinto debe abarcar los DOS medidores
+            # (xc +- 25): la barra se ensancha con el y los rotulos quedan FUERA del recinto.
+            busbar(bt_y, "BARRAJE BT\n(COMPARTIDO)", hw=(24 if caja_ancha else 14),
+                   lx=(xc - 27 if caja_ancha else None))
             # TODA nota del punto compartido va del lado IZQUIERDO: el
             # derecho lo ocupa, mas abajo, la conexion de este usuario
             # (TC/bloque/medidor), y ese bloque puede crecer bastante si
             # hay respaldo -- un texto a la derecha terminaria tapado por
             # esa caja opaca (bug real ya visto: "(red abierta)" quedaba
             # oculto detras del BLOQUE DE PRUEBA cuando habia respaldo).
-            ax.text(xc - 14, bt_y - 2.8, lbl_otros, ha="right", va="top",
+            # con gabinete el recinto llega a xc-15,4: el rotulo debe quedar FUERA (antes lo cruzaba)
+            ax.text(xc - (27 if caja_ancha else 17.5 if gabinete else 14),
+                    bt_y - 2.8, lbl_otros, ha="right", va="top",
                     fontsize=6.8, color="#8a4b00", style="italic", fontweight="bold")
 
             # Espacio explicito antes de la conexion propia de ESTE usuario,
@@ -2545,7 +2555,8 @@ def draw_unifilar_generico(cfg, out_path):
             _u_meter(ax, xc, y_mid, r=r, lw=1.7, label_below="MEDIDOR",
                      label_dx=1.2, label_ha="left")
             if es_compartido:
-                ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid), xytext=(xc + r + 8, y_mid),
+                ax.annotate("ESTE MEDIDOR", xy=(xc + r, y_mid),
+                            xytext=(xc + (17.5 if gabinete else r + 8), y_mid),
                             ha="left", va="center", fontsize=7, color="#8a4b00", fontweight="bold",
                             arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
                 if gabinete and bt_y is not None:
@@ -2597,7 +2608,7 @@ def draw_unifilar_generico(cfg, out_path):
                             arrowprops=dict(arrowstyle="-|>", color="#8a4b00", lw=1.3))
                 if gabinete and bt_y is not None:
                     # Encierra barraje BT + ambos medidores -- NUNCA el trafo.
-                    gx0, gx1 = xc + dxs[0] - 3, xc + dxs[1] + 3
+                    gx0, gx1 = xc - 25, xc + 25            # (antes dxs +- 3: cortaba los circulos de los medidores)
                     gy1, gy0 = bt_y + 2, out_y - 2
                     ax.add_patch(FancyBboxPatch((gx0, gy0), gx1 - gx0, gy1 - gy0,
                                  boxstyle="round,pad=0.4,rounding_size=1.5",
