@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re, asyncio, json, time, base64
+import os, tempfile, logging, re, asyncio, json, time, base64, unicodedata
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
@@ -3547,8 +3547,17 @@ def _cfg_desde_pdf(item):
     if tipo == "indirecta" and not cfg["rel_tp"]:                  criticos.append("relación del TP")
     if inst == "trafo" and not cfg.get("trafo_kva") and not cfg.get("trafo_kva_list"):
         criticos.append("potencia del trafo (kVA)")
-    vistos = {f.lower() for f in faltantes}
-    faltantes = [c for c in criticos if c.lower() not in vistos] + faltantes
+    # Los criticos se calculan aqui (nombre propio, siempre igual); lo que el modelo dijo sobre
+    # el MISMO dato ("relacion del TC", "rel_tc", "TC"...) se descarta para no repetirlo.
+    claves = {"relación del TC": ("tc", "rel_tc", "transformador de corriente"),
+              "relación del TP": ("tp", "rel_tp", "transformador de potencial"),
+              "potencia del trafo (kVA)": ("kva", "potencia del trafo", "potencia del transformador")}
+    def _norm(t):
+        return "".join(ch for ch in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(ch) != "Mn")
+    def _repite(f):
+        n = _norm(f)
+        return any(re.search(r"\b" + re.escape(k) + r"\b", n) for c in criticos for k in claves[c])
+    faltantes = criticos + [f for f in faltantes if not _repite(f)]
     return cfg, faltantes[:8], supuestos[:6], avisos
 
 

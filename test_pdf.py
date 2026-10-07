@@ -157,6 +157,11 @@ async def main():
         chk(len(m.fotos) == 1 and any("No aparece en el PDF" in t and "relación del TC" in t for t in m.textos),
             "faltante: semidirecta sin TC -> dibuja y avisa 'relacion del TC'")
 
+        # el modelo dice "relacion del TC" (sin tilde) y el bot calcula "relación del TC": no se repite
+        cfg_f, falt_f, _, _ = bot._cfg_desde_pdf(medida(tipo="semidirecta", faltantes=["relacion del TC", "rel_tc", "calibre del conductor"]))
+        chk(falt_f.count("relación del TC") == 1 and not any(f.lower().startswith("rel") and f != "relación del TC" for f in falt_f)
+            and "calibre del conductor" in falt_f, f"faltante: sin duplicados entre lo calculado y lo que dijo el modelo -> {falt_f}")
+
         # ---- 5) el PDF no es de una medida ----
         m, c = await enviar([ok(respuesta([], es_medida=False))])
         chk(not m.fotos and any("No encontré datos" in t for t in m.textos), "no-medida: avisa y no dibuja nada")
