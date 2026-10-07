@@ -280,7 +280,7 @@ Detalles tecnicos de la migracion:
 - Cliente: `_claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)`,
   mismo patron que `_genai_client` (`None` si no hay `ANTHROPIC_API_KEY`,
   cada funcion chequea esto primero y responde con un mensaje claro).
-- Modelo: `CLAUDE_MODEL = "claude-sonnet-5"`.
+- Modelo: `CLAUDE_MODEL = "claude-sonnet-5"` (PDF); dialogo y foto usan Haiku 5.5 desde oct/2026 (ver "Costo, 2a pasada").
 - `system_instruction` de Gemini → parametro `system=` de
   `client.messages.create()`. `contents=` → `messages=[{"role":"user",
   "content": ...}]`.
@@ -376,6 +376,40 @@ tokens ±25 %): `PROMPT_DIAGRAMA` ~2.700 tokens, un dialogo de ~4 llamadas.
   llamar a la IA una vez solo si falta algo.
 - `test_claude_sdk.py` cubre: cache_control, thinking apagado, conservarlos en el
   reintento, y el log de uso/costo.
+
+### Costo, 2a pasada: modelo por ruta y filtrado de paginas (oct/2026)
+Pedido: "hazlo mas barato". Se siguio `cost-optimize` (claude-api): tarifas de
+https://platform.claude.com/docs/en/about-claude/pricing (consultada 7/oct/2026): Sonnet 5 $2/$10 por M
+(entrada/salida), lectura de cache $0,20; **Haiku 5.5 $0,10/$0,50** (prompts <= 100K tokens; mas largos
+$0,50/$2,50), lectura de cache $0,01, escritura 5 min $0,125. Sin API key ni eval no se pudo MEDIR la calidad:
+los "free wins" (cache del dialogo, thinking apagado, topes, brevedad) ya estaban; lo que queda son
+COMPROMISOS de calidad, y el usuario acepto solo estos (la IA no los aplica sola):
+- **Dialogo y foto -> Haiku 5.5** (`CLAUDE_MODEL_DIALOGO`, `CLAUDE_MODEL_FOTO`; env var con el mismo nombre para
+  cambiarlos en Render sin deploy, p. ej. `CLAUDE_MODEL_FOTO=claude-sonnet-5` si da por bueno un cableado
+  incorrecto). Estimado por diagrama: dialogo ~US$0,0007 (antes ~0,008-0,013), foto ~US$0,0007 (antes ~0,015),
+  ~-95 %. El PDF sigue en Sonnet 5 (`CLAUDE_MODEL_PDF`). Riesgo asumido: preguntas menos finas / dato mal llenado
+  en el dialogo (el usuario lo ve en el caption y corrige con /ultimo -> Editar) y peor juicio visual en la foto.
+  Detalles de Haiku 5.5: `thinking {"type":"disabled"}` vale con effort <= high (el default es `medium`);
+  `_thinking_apagado(modelo)` da `between_tools` en claude-sonnet-5-5 (alli `disabled` es 400); piensa por
+  defecto y ese razonamiento sale del MISMO `max_tokens` -> `CLAUDE_FOTO_MAX_TOKENS=4096` (es un tope, no un
+  gasto); NO acepta `temperature`/`top_p`/`top_k` ni prefill ni `fallbacks` (no se usan); un `stop_reason ==
+  "refusal"` llega como respuesta vacia y cae en el mensaje "No pude generar una respuesta".
+- **PDF > 12 paginas con capa de texto -> solo las paginas de la medida** (`_filtrar_paginas_pdf`, `pypdf` en
+  requirements.txt): se queda con las que mencionan medidor/contador/transformador/trafo/kVA/frontera/celda/
+  bloque de pruebas/unifilar/acta (o 2 terminos debiles: TC, TP, medida, acometida, barraje, fusible,
+  seccionador, planta) + la portada + las vecinas (+-1), y AVISA "leí solo las N (págs. 1, 14-17)". Va completo
+  si: <= 12 paginas, escaneado (< 60 % de paginas con texto), cifrado, ninguna coincidencia, ahorro < 20 %,
+  `pypdf` ausente o cualquier error, o el comentario dice "completo". Corre en `run_in_executor` (CPU) con tope
+  de 25 s. Riesgo asumido: omitir una pagina sin esas palabras (por eso el aviso y la palabra "completo").
+- `CLAUDE_PDF_EFFORT` (low|medium|high|xhigh|max; vacio = no se envia) existe pero NO se activo: recortar el
+  razonamiento del PDF no fue aceptado. Mas palancas NO aplicadas: Haiku en el PDF (-95 %, riesgo en planos
+  densos: probar antes con 2-3 PDF reales), recortar `PROMPT_DIAGRAMA` (~2.900 tokens, -10 % del dialogo,
+  requiere eval), cachear el sistema del PDF (no se amortiza: pocos PDF por cada 5 min).
+- `_log_uso_claude` ahora escribe el MODELO y estima con la tarifa del que respondio (`CLAUDE_PRECIOS`): si cambias
+  de modelo, agrega su fila ahi. **Mide, no estimes**: pide a Render el log `claude[dialogo|foto|pdf] <modelo> in=
+  cache_leido= cache_escrito= out= ~US$` tras unos dias.
+- `test_claude_sdk.py` (modelo/thinking por ruta, tarifa por modelo, tope de la foto) y `test_pdf.py` (9 casos del
+  filtro con PDF reales: filtra, avisa, no filtra chicos/escaneados/"completo"/danados).
 
 ### PDF -> unifilar (oct/2026)
 Pedido: "con solo enviarle un PDF puedas leerlo y sacar el unifilar". `on_document`

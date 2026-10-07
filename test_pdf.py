@@ -14,6 +14,24 @@ import bot
 from test_claude_sdk import cliente, ok, error, PETICIONES   # SDK real + MockTransport
 
 
+def pdf_paginas(textos, rects=False):
+    """PDF real con una pagina por texto (fuente TrueType, para que el texto sea EXTRAIBLE);
+    con rects=True las paginas son solo graficos (sin texto: como un escaneado)."""
+    import matplotlib
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    bio = io.BytesIO()
+    with PdfPages(bio) as pp:
+        for t in textos:
+            fig = plt.figure(figsize=(4, 3))
+            if rects: fig.add_artist(plt.Rectangle((0.1, 0.1), 0.8, 0.8, fill=False))
+            else:     fig.text(0.05, 0.5, t, fontsize=8)
+            pp.savefig(fig); plt.close(fig)
+    return bio.getvalue()
+
+def n_paginas(pdf_b64):
+    from pypdf import PdfReader
+    return len(PdfReader(io.BytesIO(base64.b64decode(pdf_b64))).pages)
+
 def pdf_real(texto="Memoria de calculo - medida indirecta 700 kVA"):
     bio = io.BytesIO()
     with PdfPages(bio) as pp:
@@ -275,6 +293,57 @@ async def main():
         cfg3, notas3 = bot._verificar_coherencia(bot._cfg_desde_pdf(medida(**ACTA))[0])
         chk(cfg3["trafo_uso"] == "compartido" and not any("EXCLUSIVO" in n or "subestación" in n for n in notas3),
             f"coherencia: 2 trafos del acta con uno compartido -> sin avisos de subestacion multi-celda {notas3}")
+
+        # ---- 9c) costo: modelo y esfuerzo del PDF configurables (por defecto, igual que antes) ----
+        m, c = await enviar([ok(respuesta([M_IND]))])
+        chk(PETICIONES[0]["model"] == bot.CLAUDE_MODEL and "effort" not in PETICIONES[0]["output_config"]
+            and PETICIONES[0]["output_config"]["format"]["type"] == "json_schema",
+            "costo: por defecto el PDF va con CLAUDE_MODEL, sin 'effort' y con el esquema estricto")
+        prev_m, prev_e = bot.CLAUDE_MODEL_PDF, bot.CLAUDE_PDF_EFFORT
+        try:
+            bot.CLAUDE_MODEL_PDF, bot.CLAUDE_PDF_EFFORT = "claude-haiku-5-5", "low"
+            m, c = await enviar([ok(respuesta([M_IND]))])
+            oc = PETICIONES[0]["output_config"]
+            chk(PETICIONES[0]["model"] == "claude-haiku-5-5" and oc.get("effort") == "low" and oc["format"]["schema"] == bot.PDF_ESQUEMA
+                and len(m.fotos) == 1,
+                "costo: CLAUDE_MODEL_PDF y CLAUDE_PDF_EFFORT llegan a la peticion (el SDK real las acepta) y se genera el unifilar")
+        finally:
+            bot.CLAUDE_MODEL_PDF, bot.CLAUDE_PDF_EFFORT = prev_m, prev_e
+
+        # ---- 9d) costo: PDF grande con texto -> solo las paginas de la medida (y se avisa) ----
+        def doc_enviado():
+            return PETICIONES[0]["messages"][0]["content"][0]["source"]["data"]
+        relleno = [f"Capitulo {i}: cronograma de obra civil, excavaciones y presupuesto de materiales" for i in range(30)]
+        relleno[14] = "Datos de la medida: medidor trifasico, TC 200/5, transformador de 300 kVA"
+        relleno[15] = "Unifilar de la subestacion: celda de medida AE319"
+        grande = pdf_paginas(relleno)
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(grande)), datos=grande)
+        usadas = n_paginas(doc_enviado())
+        txt = "\n".join(m.textos)
+        chk(usadas == 5 and len(m.fotos) == 1,
+            f"filtro: 30 paginas con la medida en 2 -> se envian {usadas} (portada + 14-17: las 2 relevantes y sus vecinas), no 30")
+        chk("leí solo las 5" in txt and "págs. 1, 14-17" in txt and "completo" in txt,
+            f"filtro: el usuario ve cuantas paginas y cuales se leyeron -> {txt[txt.find('📑'):txt.find('📑')+120]!r}")
+        chk(len(base64.b64decode(doc_enviado())) < len(grande), "filtro: el PDF enviado pesa menos que el original")
+        # no filtra: pocas paginas / todo relevante / escaneado / el usuario pide "completo" / PDF danado
+        chico = pdf_paginas(relleno[:10])
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(chico)), datos=chico)
+        chk(n_paginas(doc_enviado()) == 10 and "leí solo" not in "\n".join(m.textos), "filtro: hasta 12 paginas se envia completo")
+        todo = pdf_paginas(["Datos del medidor y del transformador de 300 kVA"] * 20)
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(todo)), datos=todo)
+        chk(n_paginas(doc_enviado()) == 20, "filtro: si casi todo es relevante no se filtra (no hay ahorro)")
+        escaneado = pdf_paginas([""] * 20, rects=True)
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(escaneado)), datos=escaneado)
+        chk(n_paginas(doc_enviado()) == 20, "filtro: un PDF sin capa de texto (escaneado) va completo")
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(grande)), datos=grande, caption="lee el PDF completo por favor")
+        chk(n_paginas(doc_enviado()) == 30 and "leí solo" not in "\n".join(m.textos), "filtro: 'completo' en el comentario desactiva el filtro")
+        sin_medida = pdf_paginas([f"Capitulo {i}: obra civil y presupuesto" for i in range(20)])
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(sin_medida)), datos=sin_medida)
+        chk(n_paginas(doc_enviado()) == 20, "filtro: si ninguna pagina menciona la medida se envia completo (que decida el modelo)")
+        roto = b"%PDF-1.4\n" + b"basura no pdf " * 200
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=len(roto)), datos=roto)
+        chk(len(PETICIONES) == 1 and base64.b64decode(doc_enviado()) == roto, "filtro: un PDF que pypdf no entiende NO rompe nada: se envia tal cual")
+        chk(bot._rango_paginas([1, 3, 4, 5, 9, 10]) == "1, 3-5, 9-10" and bot._rango_paginas([]) == "", "filtro: formato del rango de paginas")
 
         # ---- 10) conexion con el resto del bot ----
         fuente = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.py"), encoding="utf-8").read()

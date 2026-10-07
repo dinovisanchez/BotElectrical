@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, tempfile, logging, re, asyncio, json, time, base64, unicodedata
+import os, io, tempfile, logging, re, asyncio, json, time, base64, unicodedata
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
@@ -71,9 +71,50 @@ CLAUDE_DIALOGO_MAX_TOKENS = 500
 # {"type": "disabled"} da 400 (alli se usa {"type": "between_tools"}).
 # _analizar_foto_cx NO lo apaga: validar un cableado si se beneficia de razonar.
 CLAUDE_DIALOGO_THINKING = {"type": "disabled"}
-# USD por 1M de tokens (Sonnet 5; revisar si cambia CLAUDE_MODEL). Solo para
-# ESTIMAR el costo en el log (_log_uso_claude); la factura real manda.
-CLAUDE_PRECIO = {"in": 2.00, "out": 10.00, "cache_read": 0.20, "cache_write": 2.50}
+
+# Modelo POR RUTA (variable de entorno para cambiarlo sin tocar el codigo). Es la palanca de
+# costo mas grande: Haiku 5.5 vale $0,10/$0,50 por M de tokens (entrada/salida) contra $2/$10
+# de Sonnet 5 -- 20 veces menos -- pero es un compromiso de CALIDAD que no se pudo medir (no
+# hay API key ni eval). El usuario acepto (oct/2026) bajar SOLO el dialogo y la foto:
+#   dialogo -> Haiku 5.5 (el resultado es verificable a simple vista: diagrama + resumen, y
+#              se corrige con /ultimo -> Editar)
+#   foto    -> Haiku 5.5 (el usuario lo pidio expresamente aunque es la ruta de mas juicio
+#              visual: si da por bueno un cableado incorrecto, vuelve a Sonnet con
+#              CLAUDE_MODEL_FOTO=claude-sonnet-5 en Render, sin deploy)
+#   pdf     -> sigue en CLAUDE_MODEL (Sonnet 5): leer planos densos es lo mas exigente.
+CLAUDE_MODEL_HAIKU   = "claude-haiku-5-5"
+CLAUDE_MODEL_DIALOGO = os.environ.get("CLAUDE_MODEL_DIALOGO") or CLAUDE_MODEL_HAIKU
+CLAUDE_MODEL_PDF     = os.environ.get("CLAUDE_MODEL_PDF") or CLAUDE_MODEL
+CLAUDE_MODEL_FOTO    = os.environ.get("CLAUDE_MODEL_FOTO") or CLAUDE_MODEL_HAIKU
+# Haiku 5.5 razona por defecto (adaptativo) y ese razonamiento sale del MISMO max_tokens que la
+# respuesta: con 1.400 una foto dificil podia agotarlo pensando y devolver texto vacio. Es solo
+# un TOPE (se paga lo que se usa), asi que se deja holgado.
+CLAUDE_FOTO_MAX_TOKENS = 4096
+# Esfuerzo de razonamiento del PDF (low|medium|high|xhigh|max). Vacio = no se envia (lo
+# decide el modelo, como hasta ahora). El razonamiento es la parte mas variable de la salida
+# del PDF ($10/M en Sonnet 5): "low" lo recorta, a costa de leer menos a fondo un plano dificil.
+CLAUDE_PDF_EFFORT = (os.environ.get("CLAUDE_PDF_EFFORT") or "").strip().lower()
+if CLAUDE_PDF_EFFORT not in ("low", "medium", "high", "xhigh", "max"):
+    CLAUDE_PDF_EFFORT = ""
+
+
+def _thinking_apagado(modelo: str) -> dict:
+    """Config de `thinking` para NO pagar razonamiento oculto, segun el modelo:
+    claude-sonnet-5-5 rechaza {"type": "disabled"} (400) y usa "between_tools"; Sonnet 5 y
+    Haiku 5.5 aceptan "disabled" (Haiku 5.5 solo con effort <= high, que es su default)."""
+    return {"type": "between_tools"} if modelo == "claude-sonnet-5-5" else {"type": "disabled"}
+
+
+# USD por 1M de tokens (lista oficial, https://platform.claude.com/docs/en/about-claude/pricing,
+# consultada oct/2026). Solo para ESTIMAR el costo en el log (_log_uso_claude); la factura real
+# manda. Haiku 5.5: tarifa para prompts <= 100K tokens (por encima: $0,50 / $2,50).
+CLAUDE_PRECIOS = {
+    "claude-sonnet-5":   {"in": 2.00, "out": 10.00, "cache_read": 0.20,  "cache_write": 2.50},
+    "claude-sonnet-5-5": {"in": 2.00, "out": 10.00, "cache_read": 0.10,  "cache_write": 2.50},
+    "claude-haiku-5-5":  {"in": 0.10, "out": 0.50,  "cache_read": 0.01,  "cache_write": 0.125},
+    "claude-haiku-4-5":  {"in": 1.00, "out": 5.00,  "cache_read": 0.10,  "cache_write": 1.25},
+}
+CLAUDE_PRECIO = CLAUDE_PRECIOS.get(CLAUDE_MODEL, CLAUDE_PRECIOS["claude-sonnet-5"])
 _claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
 
 
@@ -85,10 +126,11 @@ def _log_uso_claude(tag: str, response) -> None:
         i, o = u.input_tokens or 0, u.output_tokens or 0
         cr = getattr(u, "cache_read_input_tokens", 0) or 0
         cw = getattr(u, "cache_creation_input_tokens", 0) or 0
-        p = CLAUDE_PRECIO
+        modelo = str(getattr(response, "model", "") or "")
+        p = next((v for k, v in CLAUDE_PRECIOS.items() if modelo.startswith(k)), CLAUDE_PRECIO)
         usd = (i * p["in"] + o * p["out"] + cr * p["cache_read"] + cw * p["cache_write"]) / 1e6
-        log.info("claude[%s] in=%s cache_leido=%s cache_escrito=%s out=%s ~US$%.4f",
-                 tag, i, cr, cw, o, usd)
+        log.info("claude[%s] %s in=%s cache_leido=%s cache_escrito=%s out=%s ~US$%.4f",
+                 tag, modelo or "?", i, cr, cw, o, usd)
     except Exception:
         pass
 
@@ -1525,8 +1567,8 @@ async def _analizar_foto_cx(image_bytes: bytes, tipo: str, norma: str) -> str:
     try:
         response = await asyncio.wait_for(
             _claude_client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=CLAUDE_MAX_TOKENS,
+                model=CLAUDE_MODEL_FOTO,
+                max_tokens=CLAUDE_FOTO_MAX_TOKENS,
                 # SIN temperature/top_p/top_k: el SDK anthropic 1.x ya no los acepta
                 # (TypeError: create() got an unexpected keyword argument) y la API
                 # los rechaza en los modelos Sonnet 5 / Opus 4.7+.
@@ -1820,7 +1862,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         # test_claude_sdk.py, que usa el SDK REAL (un cliente falso lo habia ocultado).
         resp = await asyncio.wait_for(
             _claude_client.messages.create(
-                model=CLAUDE_MODEL,
+                model=CLAUDE_MODEL_DIALOGO,
                 max_tokens=max_tok,
                 # El prompt (~2.700 tokens) es identico para todos los usuarios y se
                 # reenvia en CADA turno: con cache_control se paga a $0,20/M en vez
@@ -1828,7 +1870,7 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 # estable: nada de fechas/ids dentro de PROMPT_DIAGRAMA.
                 system=[{"type": "text", "text": PROMPT_DIAGRAMA,
                          "cache_control": {"type": "ephemeral"}}],
-                thinking=CLAUDE_DIALOGO_THINKING,
+                thinking=_thinking_apagado(CLAUDE_MODEL_DIALOGO),
                 messages=[{"role": "user", "content": conv}],
             ),
             timeout=CLAUDE_TIMEOUT_S,
@@ -3760,6 +3802,83 @@ def _msg_error_claude(err):
     return f"⚠️ Error con el servicio IA ({type(err).__name__}).\nIntenta de nuevo o usa /menu."
 
 
+# ── Filtrado de paginas (PDF grandes) ─────────────────────────────────────────────────
+# El costo de leer un PDF lo manda el numero de paginas (~1.500-3.000 tokens c/u, texto + imagen).
+# En una memoria de 40 paginas casi todo es obra civil / cronograma / presupuesto: solo unas
+# pocas hablan de la medida. Aceptado por el usuario (oct/2026): con mas de PDF_FILTRO_MIN_PAGINAS
+# paginas y CON capa de texto, se envian solo las paginas que mencionan la medida (+ la portada y
+# las vecinas, donde suele estar el plano o la tabla) y SE AVISA cuales. Un PDF escaneado (sin
+# texto) no se puede filtrar y va completo; el usuario puede pedir "completo" en el comentario.
+PDF_FILTRO_MIN_PAGINAS = 12      # hasta aqui se envia completo
+PDF_FILTRO_MAX_SEG = 25          # presupuesto de CPU para leer el texto de las paginas
+_PDF_FUERTES = re.compile(r"\b(medidor(?:es)?|contador(?:es)?|transformador(?:es)?|trafo|kva|frontera|celda|"
+                          r"bloque\s+de\s+prueba|unifilar|acta)\b")
+_PDF_DEBILES = re.compile(r"\b(tc|tp|rtc|rtp|medida|medicion|acometida|barraje|fusible|seccionador|planta)\b")
+
+def _sin_acentos(t: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFD", str(t).lower()) if unicodedata.category(ch) != "Mn")
+
+def _rango_paginas(paginas) -> str:
+    """[3,4,5,9] -> '3-5, 9'."""
+    out, ini, ant = [], None, None
+    for p in paginas:
+        if ini is None: ini = ant = p
+        elif p == ant + 1: ant = p
+        else: out.append((ini, ant)); ini = ant = p
+    if ini is not None: out.append((ini, ant))
+    return ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in out)
+
+def _filtrar_paginas_pdf(pdf_bytes: bytes, comentario: str = ""):
+    """(pdf_a_enviar, info). info = {total, usadas (1-based), filtrado}. NUNCA lanza: ante la
+    menor duda (cifrado, escaneado, sin coincidencias, poco ahorro, pypdf ausente) devuelve el
+    PDF original. Es CPU sincrono: llamarlo con run_in_executor."""
+    info = {"total": 0, "usadas": [], "filtrado": False}
+    try:
+        if re.search(r"\b(complet[oa]s?|todas?\s+las\s+paginas|todo\s+el\s+pdf)\b", _sin_acentos(comentario)):
+            return pdf_bytes, info
+        from pypdf import PdfReader, PdfWriter
+        r = PdfReader(io.BytesIO(pdf_bytes))
+        if r.is_encrypted:
+            return pdf_bytes, info
+        n = len(r.pages); info["total"] = n
+        if n <= PDF_FILTRO_MIN_PAGINAS:
+            return pdf_bytes, info
+        t0, textos = time.monotonic(), []
+        for pg in r.pages:
+            if time.monotonic() - t0 > PDF_FILTRO_MAX_SEG:
+                return pdf_bytes, info
+            try: textos.append(_sin_acentos(pg.extract_text() or ""))
+            except Exception: textos.append("")
+        if sum(1 for t in textos if len(t.strip()) >= 40) < 0.6 * n:
+            return pdf_bytes, info                       # escaneado: sin texto no se puede elegir
+        rel = {i for i, t in enumerate(textos)
+               if _PDF_FUERTES.search(t) or len(_PDF_DEBILES.findall(t)) >= 2}
+        if not rel:
+            return pdf_bytes, info
+        usar = {0}                                       # portada: identifica el proyecto
+        for i in rel: usar |= {i - 1, i, i + 1}
+        usar = sorted(i for i in usar if 0 <= i < n)
+        if len(usar) >= 0.8 * n:
+            return pdf_bytes, info                       # casi todo es relevante: no vale la pena
+        w = PdfWriter()
+        for i in usar: w.add_page(r.pages[i])
+        out = io.BytesIO(); w.write(out)
+        info.update(usadas=[i + 1 for i in usar], filtrado=True)
+        log.info("pdf: filtrado %s -> %s paginas (%s -> %s bytes)", n, len(usar), len(pdf_bytes), out.tell())
+        return out.getvalue(), info
+    except Exception as e:
+        log.warning("pdf: no se pudo filtrar paginas (%s: %s); se envia completo", type(e).__name__, e)
+        return pdf_bytes, {"total": 0, "usadas": [], "filtrado": False}
+
+
+def _output_config_pdf() -> dict:
+    """Salida estructurada del PDF + (si CLAUDE_PDF_EFFORT esta definido) el esfuerzo."""
+    cfg = {"format": {"type": "json_schema", "schema": PDF_ESQUEMA}}
+    if CLAUDE_PDF_EFFORT:
+        cfg["effort"] = CLAUDE_PDF_EFFORT
+    return cfg
+
+
 async def _extraer_medidas_pdf(pdf_bytes, comentario=""):
     """Claude lee el PDF. Devuelve (datos | None, texto_de_error | None)."""
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
@@ -3776,11 +3895,11 @@ async def _extraer_medidas_pdf(pdf_bytes, comentario=""):
     async def _llamar(max_tok):
         resp = await asyncio.wait_for(
             _claude_client.messages.create(
-                model=CLAUDE_MODEL,
+                model=CLAUDE_MODEL_PDF,
                 max_tokens=max_tok,
                 system=PROMPT_PDF,
                 messages=[{"role": "user", "content": contenido}],
-                output_config={"format": {"type": "json_schema", "schema": PDF_ESQUEMA}},
+                output_config=_output_config_pdf(),
             ),
             timeout=_timeout_pdf(len(pdf_bytes)),
         )
@@ -3866,7 +3985,9 @@ async def _procesar_pdf(update, ctx, pdf_bytes, comentario=""):
     """Lee el PDF con Claude y envia el unifilar de cada punto de medida."""
     msg = update.message
     try:
-        datos, err = await _extraer_medidas_pdf(pdf_bytes, comentario)
+        pdf_envio, filtro = await asyncio.get_running_loop().run_in_executor(
+            None, _filtrar_paginas_pdf, pdf_bytes, comentario)
+        datos, err = await _extraer_medidas_pdf(pdf_envio, comentario)
         if err:
             await msg.reply_text(err)
             return
@@ -3885,6 +4006,10 @@ async def _procesar_pdf(update, ctx, pdf_bytes, comentario=""):
                    for i, (c, f, s, a) in enumerate(cfgs, 1)]
         if total > len(cfgs):
             bloques.append(f"ℹ️ El PDF tiene {total} puntos de medida; dibujé los primeros {len(cfgs)}.")
+        if filtro.get("filtrado"):
+            bloques.insert(0, f"📑 Tu PDF tiene {filtro['total']} páginas: leí solo las {len(filtro['usadas'])} que "
+                              f"hablan de la medida (págs. {_rango_paginas(filtro['usadas'])}). Si falta algo, "
+                              "reenvíalo con la palabra \"completo\" en el comentario.")
         await msg.reply_text(cabeza + "\n\n" + "\n\n".join(bloques) + "\n\nDibujando el unifilar…")
         ok = 0
         for i, (cfg, *_) in enumerate(cfgs, 1):

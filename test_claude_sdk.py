@@ -79,7 +79,7 @@ async def main():
         m = await dialogo([ok("¿Tipo de medida: directa, semidirecta o indirecta?")])
         chk(len(PETICIONES) == 1 and "temperature" not in PETICIONES[0], "dialogo: el SDK real acepta la peticion (sin temperature)")
         chk(m.textos and "Tipo de medida" in m.textos[0] and "Error con el servicio" not in m.textos[0], "dialogo: el usuario recibe la pregunta, no 'Error con el servicio IA'")
-        chk(PETICIONES[0]["max_tokens"] == bot.CLAUDE_DIALOGO_MAX_TOKENS and PETICIONES[0]["model"] == bot.CLAUDE_MODEL, "dialogo: modelo y max_tokens esperados")
+        chk(PETICIONES[0]["max_tokens"] == bot.CLAUDE_DIALOGO_MAX_TOKENS and PETICIONES[0]["model"] == bot.CLAUDE_MODEL_DIALOGO, "dialogo: modelo y max_tokens esperados")
 
         # 1b) costo: el prompt va como bloque con cache_control y el thinking del dialogo esta apagado
         sysb = PETICIONES[0].get("system")
@@ -107,6 +107,42 @@ async def main():
             chk(r is None, "costo: _log_uso_claude no lanza si la respuesta no trae usage")
         except Exception as e:
             chk(False, f"costo: _log_uso_claude lanzo {type(e).__name__}")
+
+        # 1d) costo: el modelo se elige POR RUTA (default sin cambios) y el thinking apagado depende del modelo
+        chk(bot.CLAUDE_MODEL_DIALOGO == "claude-haiku-5-5" and bot.CLAUDE_MODEL_FOTO == "claude-haiku-5-5"
+            and bot.CLAUDE_MODEL_PDF == bot.CLAUDE_MODEL,
+            "modelo por ruta: dialogo y foto en Haiku 5.5 (1/20 del precio), el PDF sigue en Sonnet 5")
+        prev = bot.CLAUDE_MODEL_DIALOGO
+        try:
+            for modelo, esperado in (("claude-haiku-5-5", {"type": "disabled"}), ("claude-sonnet-5-5", {"type": "between_tools"}),
+                                     ("claude-sonnet-5", {"type": "disabled"})):
+                bot.CLAUDE_MODEL_DIALOGO = modelo
+                await dialogo([ok("¿Tipo de medida?")])
+                chk(PETICIONES[0]["model"] == modelo and PETICIONES[0].get("thinking") == esperado,
+                    f"modelo por ruta: dialogo en {modelo} -> thinking {esperado} (Sonnet 5.5 da 400 con 'disabled')")
+        finally:
+            bot.CLAUDE_MODEL_DIALOGO = prev
+        prevf = bot.CLAUDE_MODEL_FOTO
+        try:
+            bot.CLAUDE_MODEL_FOTO = "claude-haiku-5-5"
+            PETICIONES.clear(); bot._claude_client = cliente([ok("🔍 DIAGNÓSTICO\nEstado: ✅")])
+            await bot._analizar_foto_cx(b"\xff\xd8\xff\xe0fakejpeg", "indirecta", "CENS")
+            chk(PETICIONES[0]["model"] == "claude-haiku-5-5", "modelo por ruta: la foto usa CLAUDE_MODEL_FOTO")
+        finally:
+            bot.CLAUDE_MODEL_FOTO = prevf
+        # el log estima el costo con la tarifa del modelo que RESPONDIO (Haiku 5.5 = 1/20 de Sonnet 5)
+        class _R:  # respuesta minima con .usage y .model
+            def __init__(self, modelo): self.model = modelo; self.usage = type("U", (), dict(
+                input_tokens=1000, output_tokens=1000, cache_read_input_tokens=0, cache_creation_input_tokens=0))()
+        reg = Registros(); bot.log.addHandler(reg); prev_lvl = bot.log.level; bot.log.setLevel(logging.INFO)
+        logging.disable(logging.NOTSET)
+        try:
+            bot._log_uso_claude("t", _R("claude-sonnet-5")); bot._log_uso_claude("t", _R("claude-haiku-5-5"))
+        finally:
+            logging.disable(logging.CRITICAL); bot.log.removeHandler(reg); bot.log.setLevel(prev_lvl)
+        l_s, l_h = (next((l for l in reg.lineas if l.startswith("claude[t]") and m in l), "") for m in ("sonnet-5", "haiku-5-5"))
+        # Sonnet 5: (1000*2 + 1000*10)/1e6 = 0.0120 ; Haiku 5.5: (1000*0.10 + 1000*0.50)/1e6 = 0.0006
+        chk("US$0.0120" in l_s and "US$0.0006" in l_h, f"costo: el log usa la tarifa de cada modelo -> {l_s!r} / {l_h!r}")
 
         # 2) flujo completo: DIAGRAMA_LISTO -> se GENERA y se ENVIA el unifilar
         m = await dialogo([ok(JSON_LISTO)])
@@ -144,6 +180,8 @@ async def main():
         chk("DIAGNÓSTICO" in txt and any(b["type"] == "image" for b in bloques) and "temperature" not in PETICIONES[0],
             "foto: el SDK real acepta la peticion con imagen (sin temperature) y devuelve el diagnostico")
         chk("thinking" not in PETICIONES[0], "foto: NO se desactiva el razonamiento (validar cableado si lo aprovecha)")
+        chk(PETICIONES[0]["model"] == bot.CLAUDE_MODEL_FOTO and PETICIONES[0]["max_tokens"] == bot.CLAUDE_FOTO_MAX_TOKENS >= 4096,
+            "foto: modelo por ruta y tope holgado (el razonamiento de Haiku 5.5 sale del mismo max_tokens)")
     finally:
         asyncio.sleep = sleep_orig
 
