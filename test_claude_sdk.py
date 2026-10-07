@@ -32,10 +32,15 @@ def cliente(respuestas):
     return anthropic.AsyncAnthropic(api_key="sk-test", max_retries=0,
                                     http_client=H.AsyncClient(transport=H.MockTransport(handler)))
 
-def ok(texto, stop="end_turn"):
+def ok(texto, stop="end_turn", usage=None):
     return (200, {"id": "msg_1", "type": "message", "role": "assistant", "model": bot.CLAUDE_MODEL,
                   "content": [{"type": "text", "text": texto}], "stop_reason": stop, "stop_sequence": None,
-                  "usage": {"input_tokens": 10, "output_tokens": 10}})
+                  "usage": usage or {"input_tokens": 10, "output_tokens": 10}})
+
+class Registros(logging.Handler):
+    """Captura lo que el bot escribe en su logger (el resto del test lo tiene silenciado)."""
+    def __init__(self): super().__init__(); self.lineas = []
+    def emit(self, r): self.lineas.append(r.getMessage())
 
 def error(status, tipo, msg):
     return (status, {"type": "error", "error": {"type": tipo, "message": msg}})
@@ -76,6 +81,33 @@ async def main():
         chk(m.textos and "Tipo de medida" in m.textos[0] and "Error con el servicio" not in m.textos[0], "dialogo: el usuario recibe la pregunta, no 'Error con el servicio IA'")
         chk(PETICIONES[0]["max_tokens"] == bot.CLAUDE_DIALOGO_MAX_TOKENS and PETICIONES[0]["model"] == bot.CLAUDE_MODEL, "dialogo: modelo y max_tokens esperados")
 
+        # 1b) costo: el prompt va como bloque con cache_control y el thinking del dialogo esta apagado
+        sysb = PETICIONES[0].get("system")
+        chk(isinstance(sysb, list) and len(sysb) == 1 and sysb[0].get("text") == bot.PROMPT_DIAGRAMA
+            and sysb[0].get("cache_control") == {"type": "ephemeral"},
+            "costo: PROMPT_DIAGRAMA viaja como bloque con cache_control ephemeral (se cobra a precio de cache)")
+        chk(PETICIONES[0].get("thinking") == {"type": "disabled"},
+            "costo: el dialogo va con thinking desactivado (no se paga razonamiento oculto)")
+
+        # 1c) el log de uso trae tokens, tokens de cache y costo estimado (US$)
+        reg = Registros(); bot.log.addHandler(reg); prev = bot.log.level; bot.log.setLevel(logging.INFO)
+        logging.disable(logging.NOTSET)
+        try:
+            await dialogo([ok("¿Tipo de medida?", usage={"input_tokens": 100, "output_tokens": 50,
+                                                          "cache_read_input_tokens": 2700,
+                                                          "cache_creation_input_tokens": 0})])
+        finally:
+            logging.disable(logging.CRITICAL); bot.log.removeHandler(reg); bot.log.setLevel(prev)
+        linea = next((l for l in reg.lineas if l.startswith("claude[dialogo]")), "")
+        # (100*2 + 50*10 + 2700*0.2) / 1e6 = US$0.00124
+        chk("in=100" in linea and "cache_leido=2700" in linea and "out=50" in linea and "US$0.0012" in linea,
+            f"costo: el log registra tokens, cache y costo estimado -> {linea!r}")
+        try:
+            r = bot._log_uso_claude("x", object())          # respuesta sin .usage: nunca debe lanzar
+            chk(r is None, "costo: _log_uso_claude no lanza si la respuesta no trae usage")
+        except Exception as e:
+            chk(False, f"costo: _log_uso_claude lanzo {type(e).__name__}")
+
         # 2) flujo completo: DIAGRAMA_LISTO -> se GENERA y se ENVIA el unifilar
         m = await dialogo([ok(JSON_LISTO)])
         chk(len(m.fotos) == 1, "dialogo: DIAGRAMA_LISTO genera y envia el unifilar")
@@ -85,6 +117,8 @@ async def main():
         m = await dialogo([ok("Para el unifilar necesito", stop="max_tokens"), ok(JSON_LISTO)])
         chk(len(PETICIONES) == 2 and PETICIONES[1]["max_tokens"] == bot.CLAUDE_MAX_TOKENS, "dialogo: max_tokens agotado -> reintenta con CLAUDE_MAX_TOKENS")
         chk(len(m.fotos) == 1, "dialogo: tras el reintento si se genera el diagrama")
+        chk(PETICIONES[1].get("thinking") == {"type": "disabled"} and PETICIONES[1]["system"][0].get("cache_control"),
+            "costo: el reintento por max_tokens conserva cache_control y thinking apagado")
 
         # 4) respuesta vacia (p.ej. todo el limite se fue en razonamiento) -> mensaje, no silencio
         m = await dialogo([ok("", stop="max_tokens"), ok("", stop="max_tokens")])
@@ -109,6 +143,7 @@ async def main():
         bloques = PETICIONES[0]["messages"][0]["content"]
         chk("DIAGNÓSTICO" in txt and any(b["type"] == "image" for b in bloques) and "temperature" not in PETICIONES[0],
             "foto: el SDK real acepta la peticion con imagen (sin temperature) y devuelve el diagnostico")
+        chk("thinking" not in PETICIONES[0], "foto: NO se desactiva el razonamiento (validar cableado si lo aprovecha)")
     finally:
         asyncio.sleep = sleep_orig
 

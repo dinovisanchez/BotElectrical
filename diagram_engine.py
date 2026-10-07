@@ -124,14 +124,29 @@ def _ct(ax, x, y, color, label):
     ax.add_patch(Circle((x-0.85,y+1.35),0.28,fc=color,ec=color,zorder=6))  # polaridad
     ax.text(x,y+2.9,label,ha="center",va="bottom",fontsize=8.5,color=color,fontweight="bold")
 
-def _pt(ax, x, ytop, ybot, color, label):
-    """Transformador de tension entre fase y neutro (dos circulos verticales)."""
-    ym=(ytop+ybot)/2
-    ax.plot([x,x],[ytop,ym+2.2],color=color,lw=1.7,zorder=4)
-    ax.plot([x,x],[ym-2.2,ybot],color=color,lw=1.7,zorder=4)
-    ax.add_patch(Circle((x,ym+1.0),1.25,fill=False,ec=color,lw=1.8,zorder=5))
-    ax.add_patch(Circle((x,ym-1.0),1.25,fill=False,ec=color,lw=1.8,zorder=5))
-    ax.text(x+1.9,ym,label,ha="left",va="center",fontsize=7.5,color=color,fontweight="bold")
+def _pt(ax, x, y_fase, y_ret, color, label, y_bus):
+    """TP del diagrama de conexiones. Cuelga justo DEBAJO de su linea de fase, dentro de
+    su propia franja (antes los circulos caian sobre la linea de la fase de abajo):
+      - arriba el devanado PRIMARIO: baja desde la fase y VUELVE por la izquierda a la
+        linea `y_ret` (neutro; en el TP de 2 elementos, la fase S). Los puntos negros son
+        los empalmes reales: un cruce SIN punto no es conexion;
+      - abajo el SECUNDARIO con sus dos terminales: 'a' a la derecha (hacia el medidor) y
+        'b' hacia abajo (comun de los secundarios, barra BN en `y_bus`).
+    Antes el cable de tension del medidor salia de la linea PRIMARIA, como si el TP no
+    estuviera en el circuito. Devuelve ((x_a, y_a), (x_b, y_b))."""
+    r = 1.25
+    yp, ys = y_fase - 3.0, y_fase - 5.0
+    xr = x - 2.0
+    ax.plot([x, x], [y_fase, yp + r], color=color, lw=1.7, zorder=4)
+    ax.add_patch(Circle((x, yp), r, fill=False, ec=color, lw=1.8, zorder=5))
+    ax.add_patch(Circle((x, ys), r, fill=False, ec=color, lw=1.8, zorder=5))
+    ax.plot([x - r, xr, xr], [yp, yp, y_ret], color=color, lw=1.7, zorder=4)   # retorno del primario
+    for px, py in ((x, y_fase), (xr, y_ret)):
+        ax.add_patch(Circle((px, py), 0.45, fc=color, ec=color, zorder=6))
+    ax.plot([x, x], [ys - r, y_bus], color=COL["N"], lw=1.7, ls=(0, (6, 3)), zorder=3)   # 'b'
+    ax.plot([x + r, x + 2.3], [ys, ys], color=color, lw=1.7, zorder=4)                  # 'a'
+    ax.text(x + 1.7, yp, label, ha="left", va="center", fontsize=7.5, color=color, fontweight="bold")
+    return (x + 2.3, ys), (x, y_bus)
 
 def _ground(ax, x, y, s=1.0):
     ax.plot([x,x],[y,y-1.2*s],color=COL["G"],lw=1.4)
@@ -348,8 +363,9 @@ def _draw_directa_retie(cfg, out_path):
         ax.text(bx[i], BORN_Y, str(i+1),
                 ha="center", va="center", fontsize=6.5, fontweight="bold",
                 color="#222", zorder=6)
-        ax.text(bx[i], BORN_Y - BORN_R - 1.5, lbl,
-                ha="center", va="top", fontsize=5.5, color=c, zorder=5)
+        # a la derecha del cable que baja del borne: centrado, el conductor lo tachaba
+        ax.text(bx[i] + 1.0, BORN_Y - BORN_R - 2.6, lbl,
+                ha="left", va="top", fontsize=5.5, color=c, zorder=5)
 
     # ── Lanes de conductores (debajo del medidor) ──────────────────────────
     LANE_Y_TOP = BORN_Y - BORN_R - 10  # primera lane justo bajo la bornera
@@ -359,6 +375,11 @@ def _draw_directa_retie(cfg, out_path):
 
     X_ACO = 8    # x inicio lineas acometida
     X_CAR = W-8  # x fin lineas carga
+    lane_y_out = {}
+    for cond in conductores:
+        ei_, si_ = ent_idx.get(cond), sal_idx.get(cond)
+        cruza = ei_ is not None and si_ is not None and si_ < ei_
+        lane_y_out[cond] = lane_y[cond] + (4 if cruza else 0)
 
     for cond in conductores:
         c  = COL.get(cond, "#333")
@@ -370,7 +391,8 @@ def _draw_directa_retie(cfg, out_path):
         # Etiquetas
         ax.text(X_ACO - 1, ly, lbl, ha="right", va="center",
                 fontsize=8.5, fontweight="bold", color=c)
-        ax.text(X_CAR + 1, ly, lbl, ha="left", va="center",
+        ly_out = lane_y_out[cond]
+        ax.text(X_CAR + 1, ly_out, lbl, ha="left", va="center",
                 fontsize=8.5, fontweight="bold", color=c)
 
         ei = ent_idx.get(cond)
@@ -385,23 +407,25 @@ def _draw_directa_retie(cfg, out_path):
 
         # Borne salida → carga
         if sx is not None:
-            ax.plot([sx, sx],    [BORN_Y - BORN_R, ly], color=c, lw=lw, ls=ls, zorder=2)
-            ax.plot([sx, X_CAR], [ly, ly], color=c, lw=lw, ls=ls, zorder=2)
+            ax.plot([sx, sx],    [BORN_Y - BORN_R, ly_out], color=c, lw=lw, ls=ls, zorder=2)
+            ax.plot([sx, X_CAR], [ly_out, ly_out], color=c, lw=lw, ls=ls, zorder=2)
 
     # Buses verticales acometida y carga
-    ys_all = list(lane_y.values())
+    ys_all = list(lane_y.values()) + list(lane_y_out.values())
     bus_top = max(ys_all) + 2; bus_bot = min(ys_all) - 2
     ax.plot([X_ACO, X_ACO], [bus_bot, bus_top], color="#AAA", lw=0.7, zorder=1)
     ax.plot([X_CAR, X_CAR], [bus_bot, bus_top], color="#AAA", lw=0.7, zorder=1)
-    ax.text(X_ACO-1, (bus_top+bus_bot)/2, "ACOMETIDA",
-            ha="right", va="center", fontsize=7, color="#555", rotation=90)
-    ax.text(X_CAR+1, (bus_top+bus_bot)/2, "CARGA",
-            ha="left", va="center", fontsize=7, color="#555", rotation=90)
+    # Rotulos ARRIBA de cada barra (no girados a su lado: compartian x con los rotulos de
+    # fase/neutro y, al bajar la linea de carga del neutro, se pisaban)
+    ax.text(X_ACO, bus_top+1.0, "ACOMETIDA", ha="center", va="bottom", fontsize=7, color="#555")
+    ax.text(X_CAR, bus_top+1.0, "CARGA",     ha="center", va="bottom", fontsize=7, color="#555")
 
     # ── Bobinas I — una por fase, apiladas verticalmente ────────────────────
     COIL_R = 6.5
-    coil_zone_bot = BORN_Y + BORN_R + COIL_R + 4   # coil bottom clears bornera top
-    coil_zone_top = MY1 - 3
+    # el borde de cada bobina queda DENTRO de la caja (antes la de arriba cruzaba el
+    # borde punteado) y por encima del rotulo "V+" de la derivacion de tension
+    coil_zone_bot = BORN_Y + BORN_R + COIL_R + 8
+    coil_zone_top = MY1 - 3 - COIL_R
     coil_zone_h   = coil_zone_top - coil_zone_bot
 
     coil_conds = [c for c in conductores if c != "N"]
@@ -447,9 +471,9 @@ def _draw_directa_retie(cfg, out_path):
         # Tap de tension V+
         tap_bx = ex_b if conexion == "simetrica" else sx_b
         tap_y  = BORN_Y + BORN_R + 3
+        # (antes habia aqui una linea punteada hasta la bobina: iba EXACTAMENTE encima del
+        # cable de fase, asi que no se veia y solo duplicaba el trazo; basta el punto "V+")
         ax.add_patch(Circle((tap_bx, tap_y), 1.6, fc=c, ec=c, zorder=7))
-        ax.plot([tap_bx, tap_bx], [tap_y + 1.6, cy - COIL_R],
-                color=c, lw=0.9, ls=(0,(3,2)), zorder=2)
         ax.text(tap_bx + 2, tap_y + 1.5, "V+", ha="left", va="bottom",
                 fontsize=5, color=c)
 
@@ -531,7 +555,7 @@ def _draw_semi_indirecta_retie(cfg, out_path):
 
     # ---------- PRIMARIO (ACOMETIDA) ----------
     base_y = 149 if respaldo else 104
-    x0,x1=6,40; dy=8
+    x0,x1=6,47; dy=8
     y_ph={ph:base_y-i*dy for i,ph in enumerate(all_ph)}
     y_N=base_y-len(all_ph)*dy
     show_N=sistema in ("mono","bifasico","tri4h")
@@ -543,21 +567,53 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     if show_N:
         ax.plot([x0,x1],[y_N]*2,color=COL["N"],lw=2.0,ls=(0,(6,3)),zorder=2)
         ax.text(x0-1.5,y_N,"N",ha="right",va="center",fontsize=12,fontweight="bold",color=COL["N"])
+    y_low = y_N if show_N else min(y_ph.values())
+    y_bus = y_low - 3.2          # barra BN (comun de los secundarios de TP) y de ahi los rieles
 
-    # TC en serie (con la linea de fase, hacia la carga)
+    # TC en serie (con la linea de fase, hacia la carga).
+    # Sus dos salidas del secundario -- S1 izquierda ("cierre"), S2 derecha ("in") -- salen
+    # por ABAJO del circulo y bajan por una columna PROPIA. Antes las tres fases compartian
+    # x=tc_x+-1: los conductores se montaban unos sobre otros y parecian empalmados entre
+    # fases. La fase de arriba toma la columna mas exterior, asi los codos no se cruzan.
     tc_x=14
+    tc_pre, tc_xs = {}, {}
     if has_tc:
-        for ph in cur_ph: _ct(ax,tc_x,y_ph[ph],COL[ph],f"TC-{ph}")
-    # TP en paralelo (fase->neutro)
-    # G4: Aron (tri3h) usa solo 2 TP (fases R y T), no 3.
-    # CREG 038/2014: medida 2 elementos = 2 TC + 2 TP.
-    tp_phases = current_phases(sistema) if sistema == "tri3h" else all_ph
-    tp_c={}
+        nI = len(cur_ph)
+        for k, ph in enumerate(cur_ph):
+            y = y_ph[ph]
+            _ct(ax, tc_x, y, COL[ph], f"TC-{ph}")
+            for lado, dx, xs in (("cierre", -0.85, 8.0 + 1.5*k), ("in", 0.85, 17.0 + 1.2*(nI-1-k))):
+                tc_pre[(ph, lado)] = [(tc_x+dx, y-1.35), (tc_x+dx, y-2.7)]
+                tc_xs[(ph, lado)] = xs
+                ax.add_patch(Circle((tc_x+dx, y-1.35), 0.3, fc=COL[ph], ec=COL[ph], zorder=6))
+
+    # TP en paralelo (fase->neutro).
+    # G4: Aron (tri3h) usa solo 2 TP, y en conexion V (linea-linea: R-S y T-S): no hay
+    # neutro. CREG 038/2014: medida 2 elementos = 2 TC + 2 TP.
+    tp_a, tp_b = {}, {}
+    x_ground, x_ntap = 22.6, 24.8
     if has_tp:
-        for i,ph in enumerate(tp_phases):
-            cx=22+i*6.5; tp_c[ph]=cx
-            yref=y_N if show_N else min(y_ph.values())-5
-            _pt(ax,cx,y_ph[ph],yref,COL[ph],f"TP-{ph}")
+        tp_phases = current_phases(sistema) if sistema == "tri3h" else all_ph
+        tp_x = {ph: 27 + 7.5*k for k, ph in enumerate(reversed(tp_phases))}   # la de arriba, a la derecha
+        for ph in tp_phases:
+            if sistema == "tri3h":
+                y_fase, y_ret = (y_ph["R"], y_ph["S"]) if ph == "R" else (y_ph["S"], y_ph["T"])
+            else:
+                y_fase, y_ret = y_ph[ph], y_N
+            tp_a[ph], tp_b[ph] = _pt(ax, tp_x[ph], y_fase, y_ret, COL[ph], f"TP-{ph}", y_bus)
+        # Barra BN: une los 'b' de los secundarios; va a tierra y de ella sale la referencia
+        # (neutro; en el Aron, la fase S) al medidor. Antes ese cable nacia de la linea primaria.
+        xs_b = sorted(b_[0] for b_ in tp_b.values())
+        ax.plot([x_ground, xs_b[-1]], [y_bus, y_bus], color=COL["N"], lw=1.7, ls=(0,(6,3)), zorder=3)
+        for xb in xs_b + [x_ntap]:
+            ax.add_patch(Circle((xb, y_bus), 0.45, fc=COL["N"], ec=COL["N"], zorder=6))
+        ax.plot([x_ground, x_ground], [y_bus, y_bus-0.8], color=COL["G"], lw=1.4)
+        _ground(ax, x_ground, y_bus-0.8, 0.7)
+    else:
+        # Semidirecta: la tension se toma directo de la linea (sin TP), en una derivacion
+        # propia por conductor con punto de empalme. N a la izquierda, R a la derecha.
+        lineas = (["N"] if show_N else []) + list(reversed(all_ph))
+        v_tap = {c: 24.0 + 6.5*k for k, c in enumerate(lineas)}
 
     # ---------- BLOQUE DE PRUEBA ----------
     bx0,bx1=76,104
@@ -696,57 +752,50 @@ def _draw_semi_indirecta_retie(cfg, out_path):
     #               -> se conecta al borne DERECHO del bloque (xR)
     #   "cierre"  : viene del BORNE IZQUIERDO del TC (entrada de corriente)
     #               -> se conecta al borne IZQUIERDO del bloque (xL)
-    #   "cierre_aron": bornera 4 del Aron recibe los 2 cierres (TC-R y TC-T)
-    #   tension V : viene del secundario del TP correspondiente
-    #   neutro N  : viene del secundario b/n de los TPs -> BN
+    #   tension V : viene del terminal 'a' del secundario del TP (semidirecta: de una
+    #               derivacion de la linea)
+    #   neutro N  : viene de la barra BN (comun de los secundarios de los TP)
     #   "puente"  : se puentea internamente en el medidor, NO recibe cable propio
-    src={}
+    # Cada cable: terminal -> columna vertical PROPIA -> riel horizontal -> columna del
+    # bloque -> fila del bloque. Los rieles van DEBAJO del neutro (antes algunos corrian a
+    # 1 unidad de la linea de fase S y se leian como parte de ella).
+    src={}     # tlbl -> (puntos previos, x de la columna vertical)
     for (tlbl,rot,kind,ph,io) in terms:
         if io == "puente":
             continue   # bornera puenteada internamente, sin cable al bloque
-        if kind=="I" and io=="in" and has_tc:
-            # Corriente: borne derecho del TC (salida) -> borne derecho del bloque
-            sx=tc_x+1.0
-            src[tlbl]=(sx, y_ph[ph]+1.3)
-        elif kind=="I" and io=="cierre" and has_tc:
-            # Cierre: borne izquierdo del TC (entrada) -> borne izquierdo del bloque
-            sx=tc_x-1.0
-            src[tlbl]=(sx, y_ph[ph]-1.3)
-        elif kind=="I" and io=="cierre_aron" and has_tc:
-            # Aron bornera 4: recibe los 2 cierres (TC-R y TC-T)
-            # Se traza desde ambos TCs al mismo punto de la bornera
-            src[tlbl]=(tc_x-1.0, y_ph["R"]-1.3)   # principal desde TC-R
-            src[tlbl+"_T"]=(tc_x-1.0, y_ph["T"]-1.3)  # segundo desde TC-T
-        elif kind=="I":
-            src[tlbl]=(tc_x, y_ph.get(ph, list(y_ph.values())[0]))
-        elif kind=="V" and ph=="N":
-            src[tlbl]=(20, y_N if show_N else min(y_ph.values())-5)
-        elif kind=="V" and has_tp and ph in tp_c:
-            cx=tp_c[ph]; yref=y_N if show_N else min(y_ph.values())-5
-            src[tlbl]=(cx,(y_ph[ph]+yref)/2)
-        else:
-            src[tlbl]=(tc_x+(1.0 if has_tc else 0), y_ph.get(ph, list(y_ph.values())[0]))
+        if kind=="I" and io in ("in","cierre") and has_tc:
+            src[tlbl]=(tc_pre[(ph,io)], tc_xs[(ph,io)])
+        elif kind=="V" and has_tp and ph=="N":
+            src[tlbl]=([(x_ntap, y_bus)], x_ntap)
+        elif kind=="V" and has_tp and ph in tp_a:
+            xa, ya = tp_a[ph]
+            src[tlbl]=([(xa, ya)], xa)
+        elif kind=="V" and not has_tp:
+            linea = "S" if (ph=="N" and not show_N) else ph       # Aron: la referencia es la fase S
+            xt = v_tap[linea]; yt = y_N if linea=="N" else y_ph[linea]
+            ax.add_patch(Circle((xt, yt), 0.5, fc=COL[linea], ec=COL[linea], zorder=6))
+            src[tlbl]=([(xt, yt)], xt)
+    if sistema == "tri3h" and has_tc and ("T","cierre") in tc_pre:
+        # S1 del TC-T al borne C2 del bloque: sin este cable el secundario del TC-T quedaba abierto
+        src["6"]=(tc_pre[("T","cierre")], tc_xs[("T","cierre")])
 
     order=[t[0] for t in terms if t[4] not in ("puente","puente_3")]
-    lane_x=dict(zip(order,np.linspace(46,68,len(order))))
-    rail_y=dict(zip(order,np.linspace(by1-3,by0+3,len(order))))
-    for tlbl in order:
+    order_src=[t[0] for t in terms if t[4] not in ("puente","puente_3") or (t[0]=="6" and "6" in src)]
+    lane_x=dict(zip(order_src,np.linspace(58,71,len(order_src))))
+    rail_y=dict(zip(order_src,np.linspace(y_bus-3,by0+3,len(order_src))))
+    for tlbl in order_src:
         if tlbl not in src:
             continue
-        sx,sy=src[tlbl]; lx=lane_x[tlbl]; ry=rail_y[tlbl]
+        pre, xs = src[tlbl]
+        lx=lane_x[tlbl]; ry=rail_y[tlbl]
         by=row[tlbl][0]; ph=row[tlbl][1]; c=COL[ph]
         io=row[tlbl][4]
         ls=(0,(6,3)) if ph=="N" else "-"
         w=2.3 if row[tlbl][2]=="I" else 1.7
-        # Corriente "in" sale del borne DERECHO del bloque (xR)
-        # Cierre sale del borne IZQUIERDO del bloque (xL)
+        # Corriente "in" sale del borne DERECHO del bloque (xR); el resto, del IZQUIERDO (xL)
         bx = xR if io=="in" else xL
-        ax.plot([sx,sx],[sy,ry],color=c,lw=w,ls=ls)
-        ax.plot([sx,lx],[ry,ry],color=c,lw=w,ls=ls)
-        ax.plot([lx,lx],[ry,by],color=c,lw=w,ls=ls)
-        ax.plot([lx,bx],[by,by],color=c,lw=w,ls=ls)
-        # Aron: segundo cierre (TC-T) también llega al borne 4 vía el puente de bornera
-        # No se traza cable separado — el puente C1-C2 en la bornera lo une
+        pts = list(pre) + [(xs, pre[-1][1]), (xs, ry), (lx, ry), (lx, by), (bx, by)]
+        ax.plot([q[0] for q in pts],[q[1] for q in pts],color=c,lw=w,ls=ls,solid_joinstyle="round")
 
     # ---------- BLOQUE -> MEDIDOR(ES) ----------
     # Cada borne N del bloque -> mismo borne N del medidor.
