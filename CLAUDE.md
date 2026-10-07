@@ -31,6 +31,8 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
 - `test_menu_walk.py` — recorre el menú de botones REAL (`on_button`/`on_text`
   con objetos de Telegram simulados) por todos los tipo × salida y falla si
   algún camino queda sin respuesta. `--draw` además dibuja cada diagrama.
+- `test_conexiones.py` — geometria del diagrama de conexiones (sin solapes, reglas in/cierre,
+  barra BN). `test_pdf.py` — PDF -> unifilar. `test_claude_sdk.py` — llamadas a Claude con el SDK real.
 - `requirements.txt`, `README.md`.
 
 ## Velocidad y timeouts en las llamadas a Gemini
@@ -749,6 +751,56 @@ Las 3 debilidades de la v1 (y su arreglo en v2):
 - `test_validacion_indirecta.py` (valores calculados a mano), `test_seccionador.py` y `test_menu_opciones.py`.
 - Herramientas: NUNCA uses `pkill -f <patrón>` con un patrón que aparezca en tu
   propio comando de shell (se mata a sí mismo y no ejecuta nada).
+
+## Diagrama de CONEXIONES: auditoria de oct/2026
+El usuario dijo "el diagrama de conexiones no lo estas haciendo bien" (sin detalle). Se
+renderizaron y revisaron a mano los casos principales; errores REALES encontrados y corregidos
+(todos visuales/de topologia, ninguno cambia colores ni la numeracion de bornes):
+- **Semi/indirecta**: los secundarios de los 3 TC bajaban por las MISMAS dos columnas
+  (`tc_x±1`): conductores de R, S y T uno encima de otro, parecian empalmados entre fases; en
+  semidirecta el cable de tension VA nacia SOBRE el de corriente IA (un cortocircuito dibujado).
+  Ahora cada salida del secundario (S1 izq. "cierre", S2 der. "in") sale por abajo del circulo y
+  toma una columna PROPIA (`tc_xs`; la fase de arriba, la mas exterior -> los codos no se cruzan).
+- **Indirecta**: el cable de tension salia de la linea PRIMARIA del TP (como si el TP no
+  estuviera en el circuito) y el neutro del medidor, de la linea N primaria. `_pt()` ahora dibuja
+  primario (baja de la fase y vuelve por la izquierda a N, con puntos de empalme) y secundario con
+  terminales 'a' (-> medidor) y 'b' (-> barra BN, comun, **a tierra**). Cada TP cuelga DENTRO de su
+  franja (antes TP-S caia sobre la linea de la fase T).
+- **Aron (tri3h)**: habia un cable de neutro que nacia en el aire y el TP iba a un punto flotante.
+  Ahora 2 TP en conexion **V** (R-S y T-S, sin neutro; cierra el pendiente "2 TP linea-linea"),
+  la referencia (borne 5) sale de la barra BN, y se agrego el cable que faltaba del S1 del TC-T al
+  borne C2 del bloque (el secundario del TC-T tenia una salida abierta). **Confirmar con el usuario**
+  que ese cable es lo correcto en su esquema Aron.
+- **Rieles**: algunos corrian a 1 unidad de la linea de fase S y se leian como parte de ella; ahora
+  todos van DEBAJO de la barra BN (`y_bus - 3`). Semidirecta: la tension se toma de una derivacion
+  con punto de empalme por conductor (N a la izquierda, R a la derecha: cero cruces entre ellas).
+- **Directa**: en monofasica simetrica la linea de neutro de acometida y la de carga compartian y
+  entre los bornes 2 y 3 -> parecia un puente continuo que se salta el medidor. Si la salida queda a
+  la izquierda de la entrada (`si_ < ei_`) la linea de carga baja a otra altura (`lane_y_out`).
+  Ademas: bobinas dentro de la caja del medidor, rotulos de borne al lado del cable (no tachados),
+  rotulos ACOMETIDA/CARGA arriba de su barra, y se quito una linea punteada de "tap V+" que iba
+  exactamente encima del cable de fase.
+- **Regla**: un cruce SIN punto no es conexion; un empalme lleva punto. Toda nueva derivacion debe
+  llevar punto y su PROPIA columna vertical -- nunca compartir x con otro conductor.
+- `test_conexiones.py` recoge las lineas dibujadas y comprueba: ningun par de conductores distintos
+  comparte un tramo colineal (panel izquierdo en semi/indirecta; TODO el dibujo en directa), "in" ->
+  borne derecho / "cierre" -> izquierdo con el numero esperado de secundarios conectados, y barra BN
+  con tierra de la que arranca la referencia. Se verifico que FALLA contra el codigo anterior
+  (copia en el historial de git: commit previo a esta seccion).
+**PENDIENTE -- NO tocado, necesita confirmacion del usuario** (son convenciones, no errores obvios):
+1. **RA8**: `meter_terminals(sistema, norma)` ignora `norma`; con RA8 el neutro se dibuja como
+   borne **11** (CENS), pero la convencion fija de este archivo dice **10 para RA8**; y el bloque se
+   rotula "(B1-B26)" con numeracion tipo CENS. (Tambien el pendiente "numeracion exacta B1-B26".)
+2. **Con respaldo (semi/indirecta)**: el tramo bloque -> medidores sigue enredado (cables de retorno
+   punteados rodeando el bloque como cajas, rotulos "3->9" ilegibles, haz de cables cruzados). El
+   panel izquierdo SI se limpio. Rehacer ese canal es un cambio mayor.
+3. **Directa con respaldo**: solo cambia el subtitulo ("PRINCIPAL + RESPALDO"); NO dibuja el segundo medidor.
+4. Los cables "in" llegan al borne DERECHO del bloque pasando POR DETRAS del borne izquierdo y de la
+   barra (regla confirmada, pero visualmente parecen terminar en el izquierdo).
+5. Los cortocircuitadores de corriente se dibujan como barra gruesa continua (= cerrados); en medida
+   normal deberian estar abiertos -- confirmar que se quiere mostrar el estado de servicio.
+6. `bornes_medidor_colombia.py` (referencia, no la importa nadie) pone S=amarillo y T=azul, al reves
+   de la convencion de colores de este archivo (S azul, T amarillo).
 
 ## Convenciones fijas (no cambiar sin pedir)
 - Colores por fase: **R rojo (#D32F2F), S azul (#1565C0), T amarillo (#F9A825), N gris, tierra verde**.
