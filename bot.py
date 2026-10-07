@@ -3,6 +3,8 @@ import os, tempfile, logging, re, asyncio, json, time, base64, unicodedata
 import httpx
 from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup,
                       ReplyKeyboardMarkup, KeyboardButton)
+from telegram.constants import FileSizeLimit
+from telegram.error import BadRequest as TgBadRequest
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
 import diagram_engine
@@ -3333,9 +3335,14 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # siempre valido, sin regex). Lo que sale del PDF es entrada NO confiable: antes de
 # tocar el motor, _cfg_desde_pdf() valida enums, numeros y largos.
 # Solo se dibuja el UNIFILAR (salida fija): el diagrama de conexiones no se pide aqui.
-PDF_MAX_BYTES = 10 * 1024 * 1024    # mas de eso cuesta mucho y rara vez es solo la medida
+PDF_MAX_BYTES = int(FileSizeLimit.FILESIZE_DOWNLOAD)   # 20e6: Telegram NO deja que un bot descargue mas
+# (limite del Bot API, no nuestro: un PDF de 20,7 MB ni siquiera llega al bot). Cuesta por pagina
+# (~1.500-3.000 tokens c/u a $2/M) y el cuerpo en base64 (x1,33) sigue bajo los 32 MB de la API.
 PDF_MAX_MEDIDAS = 3                 # puntos de medida por PDF (tope de costo y de spam)
-CLAUDE_PDF_TIMEOUT_S = 120          # leer un PDF tarda mas que un turno de dialogo
+CLAUDE_PDF_TIMEOUT_S = 120          # base: leer un PDF tarda mas que un turno de dialogo
+def _timeout_pdf(n_bytes):
+    """Un PDF de 20 MB (decenas de paginas) tarda bastante mas que uno de 1 MB: 120 s .. 240 s."""
+    return int(max(CLAUDE_PDF_TIMEOUT_S, min(240, 60 + 8 * n_bytes / 1e6)))
 CLAUDE_PDF_MAX_TOKENS = 4096        # incluye el thinking (queda ACTIVO: leer un plano si lo aprovecha)
 
 PROMPT_PDF = (
@@ -3601,7 +3608,7 @@ async def _extraer_medidas_pdf(pdf_bytes, comentario=""):
                 messages=[{"role": "user", "content": contenido}],
                 output_config={"format": {"type": "json_schema", "schema": PDF_ESQUEMA}},
             ),
-            timeout=CLAUDE_PDF_TIMEOUT_S,
+            timeout=_timeout_pdf(len(pdf_bytes)),
         )
         _log_uso_claude("pdf", resp)
         return resp
@@ -3612,7 +3619,7 @@ async def _extraer_medidas_pdf(pdf_bytes, comentario=""):
             response = await _llamar(CLAUDE_PDF_MAX_TOKENS)
             break
         except asyncio.TimeoutError:
-            last_err = TimeoutError(f"Claude no respondio en {CLAUDE_PDF_TIMEOUT_S}s")
+            last_err = TimeoutError(f"Claude no respondio en {_timeout_pdf(len(pdf_bytes))}s")
         except (anthropic.APITimeoutError, anthropic.OverloadedError,
                 anthropic.RateLimitError, anthropic.InternalServerError) as e:
             last_err = e
@@ -3710,6 +3717,15 @@ async def _procesar_pdf(update, ctx, pdf_bytes, comentario=""):
         ctx.user_data.pop("pdf_en_curso", None)
 
 
+_MSG_PDF_GRANDE = (
+    "⚠️ El PDF pesa {mb:.1f} MB y Telegram no deja que los bots descarguen archivos de más de "
+    "{max} MB, así que no puedo recibirlo.\n\n"
+    "Opciones:\n"
+    "• Comprímelo (por ejemplo ilovepdf.com → Comprimir PDF) y reenvíalo.\n"
+    "• O envía solo las páginas de la medida (unifilar, cuadro de cargas, datos del medidor): "
+    "es más rápido y más barato."
+)
+
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Un PDF -> unifilar. Otros archivos: se avisa que solo se leen PDF."""
     if not await _access_ok(update, ctx): return
@@ -3725,10 +3741,7 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
     if doc.file_size and doc.file_size > PDF_MAX_BYTES:
-        await update.message.reply_text(
-            f"⚠️ El PDF pesa {doc.file_size / 1048576:.1f} MB (máximo {PDF_MAX_BYTES // 1048576} MB). "
-            "Envía solo las páginas de la medida."
-        )
+        await update.message.reply_text(_MSG_PDF_GRANDE.format(mb=doc.file_size / 1e6, max=PDF_MAX_BYTES // 1_000_000))
         return
     if ctx.user_data.get("pdf_en_curso"):
         await update.message.reply_text("⏳ Todavía estoy leyendo tu PDF anterior. Espera a que termine.")
@@ -3739,7 +3752,9 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lanzado = False
     try:
         await update.message.reply_chat_action("typing")
-        await update.message.reply_text("📄 Leyendo el PDF… puede tardar hasta un minuto.")
+        grande = bool(doc.file_size) and doc.file_size > 8_000_000
+        await update.message.reply_text("📄 Leyendo el PDF… puede tardar hasta " +
+                                        ("4 minutos (es grande)." if grande else "un minuto."))
         tg_file = await ctx.bot.get_file(doc.file_id)
         import io
         bio = io.BytesIO()
@@ -3756,6 +3771,13 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             app.create_task(tarea, update=update)
         else:
             await tarea
+    except TgBadRequest as e:
+        log.error(f"Error recibiendo PDF [BadRequest]: {e}")
+        if "too big" in str(e).lower():       # el tamano que reporta Telegram no siempre coincide
+            await update.message.reply_text(_MSG_PDF_GRANDE.format(
+                mb=(doc.file_size or PDF_MAX_BYTES) / 1e6, max=PDF_MAX_BYTES // 1_000_000))
+        else:
+            await update.message.reply_text("⚠️ No pude descargar el PDF. Intenta de nuevo.")
     except Exception as e:
         log.error(f"Error recibiendo PDF: {type(e).__name__}: {e}")
         await update.message.reply_text("⚠️ No pude descargar el PDF. Intenta de nuevo.")

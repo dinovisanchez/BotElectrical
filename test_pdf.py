@@ -168,7 +168,23 @@ async def main():
 
         # ---- 6) entradas que no deben gastar ni una llamada a la API ----
         m, c = await enviar([], doc=Doc(size=bot.PDF_MAX_BYTES + 1))
-        chk(not PETICIONES and any("máximo" in t for t in m.textos), "limite: PDF de mas de 10 MB -> rechazado sin llamar a la API")
+        chk(not PETICIONES and any("Telegram no deja" in t and "20 MB" in t and "Comprimir" in t for t in m.textos),
+            "limite: mas de 20 MB (tope de Telegram para bots) -> explica el limite y que hacer, sin llamar a la API")
+        m, c = await enviar([], doc=Doc(size=int(20.7 * 1048576)))        # el caso real del usuario: 20,7 MB
+        chk(not PETICIONES and any("21.7 MB" in t for t in m.textos), "limite: el PDF de 20,7 MiB se reporta en MB decimales (21.7), como mide Telegram")
+        m, c = await enviar([ok(respuesta([M_IND]))], doc=Doc(size=19_900_000))
+        chk(len(PETICIONES) == 1 and len(m.fotos) == 1 and any("4 minutos" in t for t in m.textos),
+            "limite: un PDF de 19,9 MB (antes rechazado por el tope de 10 MB) ahora SI se lee, avisando que tarda mas")
+        # Telegram puede negarse aunque file_size diga lo contrario: "file is too big"
+        PETICIONES.clear(); bot._claude_client = cliente([]); u, c = Upd(Doc()), Ctx()
+        async def get_file_grande(fid): raise bot.TgBadRequest("File is too big")
+        c.bot.get_file = get_file_grande
+        await bot.on_document(u, c)
+        chk(not PETICIONES and any("Telegram no deja" in t for t in u.message.textos) and "pdf_en_curso" not in c.user_data,
+            "telegram: 'file is too big' -> mensaje claro y candado liberado")
+        chk(bot._timeout_pdf(1_000_000) == 120 and bot._timeout_pdf(10_000_000) == 140
+            and bot._timeout_pdf(20_000_000) == 220 and bot._timeout_pdf(80_000_000) == 240,
+            "tiempo: 120 s para PDF chicos, crece con el tamano (220 s a 20 MB) y se topa en 240 s")
         m, c = await enviar([], doc=Doc("memoria.docx", "application/msword"))
         chk(not PETICIONES and any("solo leo archivos PDF" in t for t in m.textos), "tipo: un .docx -> avisa que solo lee PDF")
         m, c = await enviar([], datos=b"<html>no soy un pdf</html>")

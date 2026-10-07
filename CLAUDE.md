@@ -394,16 +394,26 @@ Claude y dibuja el unifilar de cada punto de medida. **Solo unifilar**
   Se dibuja igual con lo que hay (el motor tolera cfg incompletos) y el usuario corrige
   con `/ultimo` -> ✏️ Editar. NO se pregunta nada: era el pedido ("solo enviarle un PDF").
 - Hasta `PDF_MAX_MEDIDAS` (3) puntos de medida por PDF (una subestacion con varios trafos
-  detras de UN medidor es UN punto: `n_trafos` + `trafo_kva_list`). PDF <= 10 MB.
+  detras de UN medidor es UN punto: `n_trafos` + `trafo_kva_list`).
+- **Tamano: tope = 20 MB, el limite de Telegram para bots** (`FileSizeLimit.FILESIZE_DOWNLOAD` =
+  20e6 bytes, MB DECIMALES). No es una decision nuestra: un PDF de 21,7 MB (el caso real que el
+  usuario intento) ni siquiera se puede descargar con el Bot API (`get_file` -> BadRequest "file is
+  too big", tambien manejado). Antes habia un tope propio de 10 MB que rechazaba PDF de 10-20 MB
+  sin necesidad. El mensaje (`_MSG_PDF_GRANDE`) explica el limite y que hacer (comprimir con
+  ilovepdf.com o enviar solo las paginas de la medida: mas rapido y barato). Para aceptar mas de 20 MB
+  habria que correr un servidor Bot API propio o recibir un enlace (Drive) -- no se hizo.
+- Tiempo proporcional al tamano (`_timeout_pdf`: 120 s a 240 s; ~220 s a 20 MB) y aviso
+  "hasta 4 minutos" si pesa > 8 MB. El cuerpo en base64 de un PDF de 20 MB (~27 MB) queda bajo los
+  32 MB de la API de Claude; el costo lo manda el numero de paginas, no los MB.
 - **Corre en segundo plano** (`ctx.application.create_task`): leer un PDF tarda hasta ~1
-  min (`CLAUDE_PDF_TIMEOUT_S=120`) y PTB procesa los updates en serie; sin esto un PDF
+  min (`CLAUDE_PDF_TIMEOUT_S=120` base, ver tamano) y PTB procesa los updates en serie; sin esto un PDF
   bloqueaba a todos los demas usuarios. `ctx.user_data['pdf_en_curso']` impide dos PDF a
   la vez del mismo usuario (control de costo); se libera en el `finally`.
 - Thinking ACTIVO aqui (a diferencia del dialogo): leer un plano si lo aprovecha. Comparte
   `max_tokens` (4096) -> si `stop_reason == 'max_tokens'` reintenta con 16000. Costo: lo
   manda el numero de paginas (~1.500-3.000 tokens por pagina a $2/M) -> un PDF de 10
   paginas ~ $0,03-0,06; se registra con `_log_uso_claude("pdf", ...)`.
-- `test_pdf.py` (36 comprobaciones, SDK real + `MockTransport`, PDF real generado con
+- `test_pdf.py` (41 comprobaciones, SDK real + `MockTransport`, PDF real generado con
   matplotlib): peticion (bloque document, json_schema, caption), valores hostiles, varios
   puntos, faltantes, errores 400/401/404/529, max_tokens, segundo plano, candado.
 - No verificado en vivo (sin API key): que el modelo extraiga bien de PDFs reales, y que la
