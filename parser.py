@@ -150,6 +150,81 @@ def _extraer_acta(t, text, cfg, entendido):
         entendido.append("Celda de medida" + (f" {tipo}" if tipo else "") + (f", estado {estado}" if estado else ""))
 
 
+def _extraer_gabinete(t, text, cfg, entendido, tipo_count):
+    """Datos del plano de GABINETE COMPARTIDO (medida directa con otros usuarios): cuantos
+    medidores/usuarios comparten el punto, interior/red abierta, ubicacion del trafo, totalizador
+    (antes/despues del medidor), tension BT, bajante MT y clase del medidor. Solo rellena lo que el
+    texto dice; nada se inventa."""
+    comparte = bool(re.search(r"compartid|gabinete|varios\s+usuarios|otros\s+usuarios", t))
+    # --- cuantos otros usuarios / medidores ---
+    if comparte and not cfg.get("trafo_n_usuarios"):
+        otros = None
+        m = (re.search(r"(\d+)\s+(?:usuarios?|medidores?|clientes?|suscriptores?)\s+(?:mas|adicionales|extra|otros)\b", t)
+             or re.search(r"\bcon\s+(\d+)\s+(?:mas|otros|otras|adicionales)\b", t)
+             or re.search(r"(\d+)\s+(?:otros|otras|demas)\s+(?:usuarios?|medidores?|clientes?)", t))
+        if m:
+            otros = int(m.group(1))
+        else:
+            m = re.search(r"\b(\d+)\s+medidores?\b(?!\s*(?:principal|de\s+respaldo|de\s+chequeo))", t)
+            if m and int(m.group(1)) >= 2:
+                otros = int(m.group(1)) - 1               # el total incluye ESTE medidor
+        if otros is not None and 0 < otros <= 99:
+            cfg["trafo_n_usuarios"] = str(otros)
+            if cfg.get("trafo_uso") != "compartido":
+                cfg["trafo_uso"] = "compartido"
+            entendido.append(f"Punto compartido: {otros} otros usuarios ({otros + 1} medidores en total)")
+    if cfg.get("trafo_uso") == "compartido" and tipo_count == 0 and cfg.get("tipo") != "directa":
+        cfg["tipo"] = "directa"
+        entendido.append("Punto compartido -> tipo DIRECTA (cada usuario con medidor propio)")
+    # --- gabinete interior / red abierta ---
+    if cfg.get("trafo_uso") == "compartido" and cfg.get("trafo_gabinete") is None:
+        if re.search(r"gabinete|cuarto\s+de\s+medidor|cuarto\s+electrico|encerrado|\binterior\b|interna|interno", t):
+            cfg["trafo_gabinete"] = True
+        elif re.search(r"red\s+abierta|intemperie|\bposte\b|aerea|aereo", t):
+            cfg["trafo_gabinete"] = False
+    # --- ubicacion del transformador ---
+    if re.search(r"(?:subestacion|transformador|trafo)\s+(?:interior|interna|interno)|(?:interior|interna|interno)\s+en\s+subestacion|cuarto\s+de\s+transformador", t):
+        cfg["ubicacion_trafo"] = "interior"
+    elif re.search(r"(?:transformador|trafo)\s+(?:en|de)\s+poste|poste\s+(?:con|de)\s+transformador|(?:transformador|trafo)\s+aereo", t):
+        cfg["ubicacion_trafo"] = "poste"
+    elif re.search(r"subestacion\s+(?:exterior|externa|intemperie|capsulada|pedestal)|(?:transformador|trafo)\s+(?:tipo\s+)?pedestal", t):
+        cfg["ubicacion_trafo"] = "exterior"
+    elif re.search(r"camara\s+(?:subterranea|de\s+transformador)|subestacion\s+subterranea", t):
+        cfg["ubicacion_trafo"] = "camara"
+    if cfg.get("ubicacion_trafo"):
+        entendido.append("Ubicacion del trafo: " + cfg["ubicacion_trafo"])
+        if cfg.get("trafo_uso") == "compartido" and not cfg.get("instalacion"):
+            cfg["instalacion"] = "trafo"
+    # --- totalizador (interruptor general del ramal) respecto al medidor ---
+    if re.search(r"totalizador", t):
+        if re.search(r"totalizador[^.;]{0,40}?(?:antes|anterior|aguas\s+arriba|previo)", t):
+            cfg["totalizador"] = "antes"
+        else:
+            cfg["totalizador"] = "despues"        # "posterior al medidor", "despues", o sin posicion (lo habitual)
+        entendido.append("Totalizador " + ("antes" if cfg["totalizador"] == "antes" else "despues") + " del medidor")
+        ma = re.search(r"totalizador[^.;]{0,40}?(\d+)\s*a(?:mp|mps|mperios)?\b", t)
+        if ma:
+            cfg["proteccion_antes" if cfg["totalizador"] == "antes" else "proteccion_despues"] = ma.group(1) + " A"
+        mp = re.search(r"totalizador[^.;]{0,40}?\b([1-4])\s*(?:p\b|polos)", t)
+        if mp: cfg["interruptor_polos"] = mp.group(1)
+        if re.search(r"totalizador[^.;]{0,40}?caja\s+moldeada", t): cfg["interruptor_tipo"] = "caja moldeada"
+        elif re.search(r"totalizador[^.;]{0,40}?termomagnetic", t): cfg["interruptor_tipo"] = "termomagnetico"
+    # --- tension BT (ej. 220 V, 208/120 V); no confundir con 13200/120 (TP) ni con kV ---
+    mb = re.search(r"(?<![/\d.,])(\d{3}(?:\s*/\s*\d{2,3})?)\s*(?:v|voltios?)\b(?!a)", t)
+    if mb and not cfg.get("tension_bt"):
+        cfg["tension_bt"] = re.sub(r"\s+", "", mb.group(1))
+        entendido.append(f"Tension BT {cfg['tension_bt']} V")
+    # --- bajante MT y clase del medidor ---
+    mj = re.search(r"\bbajante\s*(?:en|de)?\s*([^,;\n.]{3,45})", text, re.IGNORECASE)
+    if mj:
+        cfg["bajante_mt"] = mj.group(1).strip()
+        entendido.append("Bajante MT: " + cfg["bajante_mt"])
+    mc = re.search(r"\bclase\s*(\d+(?:[.,]\d+)?\s*s?)\b", t)
+    if mc and ("medidor" in t or "medida" in t):
+        cfg["clase_medidor"] = mc.group(1).replace(" ", "").replace(".", ",").upper()
+        entendido.append("Clase del medidor " + cfg["clase_medidor"])
+
+
 def parse_spec(text):
     """
     Devuelve (cfg, entendido:list[str], faltante:list[str]).
@@ -222,7 +297,11 @@ def parse_spec(text):
     t = _extraer_planta(t, cfg, entendido)
 
     # --- RESPALDO ---
-    if any(x in t for x in ["respaldo", "chequeo", "principal", "2 medidor", "dos medidor"]):
+    # (antes: "principal" a secas y "2 medidor" -- que tambien estaba dentro de "12 medidores" -- activaban el
+    #  segundo medidor sin que nadie lo pidiera: "totalizador principal", "gabinete de 12 medidores")
+    if (any(x in t for x in ["respaldo", "chequeo"])
+            or re.search(r"medidor\s+principal|principal\s+y\s+(?:de\s+)?(?:respaldo|chequeo)", t)
+            or (re.search(r"(?<!\d)(?:2|dos)\s+medidores", t) and not re.search(r"gabinete|compartid|usuarios", t))):
         cfg["respaldo"] = True
         entendido.append("Con respaldo (principal + respaldo)")
 
@@ -370,6 +449,7 @@ def parse_spec(text):
     faltante_acta = []
     _extraer_trafos(t, cfg, entendido, faltante_acta)
     _extraer_acta(t, text, cfg, entendido)
+    _extraer_gabinete(t, text, cfg, entendido, tipo_count)
 
     # --- SECCIONADOR: posicion respecto al TRAFO (lo unico que dibuja el motor) ---
     # "antes"   = entre el punto de medida y el trafo (lado MT)
