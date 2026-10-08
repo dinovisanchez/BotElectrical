@@ -6,6 +6,8 @@ transformador interno en subestacion, gabinete interior compartido con 4 medidor
 totalizador posterior al medidor, 220 V" y el bot devolvio solo "barraje 220 V -> medidor -> carga";
 luego escribio "no mostro el cuadro de lo compartido con 4 mas" y esa correccion cayo en la consulta
 normativa (timeout de Gemini). Cubre:
+  0. FIDELIDAD con el script de Claude Chat que el usuario pidio "tal cual": con los mismos datos el plano trae EXACTAMENTE
+     los mismos textos (titulo, subtitulo, bajante, seccionador, trafo, barraje, otros usuarios, medidor, totalizador, notas);
   1. el dibujo (17 variantes) sin textos/cables/recuadros superpuestos (detector de test_frontera);
   2. el despacho a draw_unifilar_gabinete solo para directa + punto compartido;
   3. el parser (texto libre) y la red de seguridad _completar_con_parser;
@@ -31,6 +33,77 @@ def chk(cond, msg):
     global MALOS
     MALOS += not cond
     print("OK  " if cond else "MAL ", msg)
+
+# ── 0) fidelidad con el script del ejemplo ───────────────────────────────────
+# Textos que dibuja el script del usuario (DATOS por defecto: 13,2 kV, bajante monopolar, seccionador RA8, trafo sin kVA,
+# 208-120 V, 5 medidores, medida 1, interior, totalizador despues del medidor, sin clase ni amperaje).
+TEXTOS_EJEMPLO = [
+    "DIAGRAMA UNIFILAR – MEDIDA DIRECTA INTERIOR EN GABINETE COMPARTIDO (5 MEDIDORES)",
+    "Red MT 13,2 kV  |  Transformador interno  |  Barraje común con totalizador posterior al medidor",
+    "RED DE DISTRIBUCIÓN MT\n13,2 kV – 3F", "Bajante en cable\nmonopolar (3 × 1/C)\n13,2 kV", "SUBESTACIÓN INTERIOR",
+    "Seccionador MT\n(según norma RA8)\n13,2 kV – 3P",
+    "Transformador trifásico\n___ kVA  (por definir)\n13,2 kV / 208-120 V\n(verificar tensión BT)",
+    "SPT neutro BT y masas", "GABINETE DE MEDIDA – 5 MEDIDORES (INTERIOR)", "Acometida BT 3F + N + PE", "Barraje BT\n(3F + N)",
+    "Medida\n2", "otro\nusuario", "Medida\n3", "otro\nusuario", "Medida\n4", "otro\nusuario", "Medida\n5", "otro\nusuario",
+    "kWh\nkVArh", "Medidor trifásico\ndirecto (sin TC)\nclase ___", "Totalizador termomagnético 3P\n___ A  (por definir)",
+    "CARGA DEL USUARIO", "Medida objeto del unifilar",
+]
+NOTAS_EJEMPLO = [
+    "NOTAS:",
+    "1. Valores marcados con ___ pendientes de confirmar en campo: kVA del transformador, clase del medidor, amperaje del totalizador 3P.",
+    "2. Tensión BT asumida; verificar en placa del transformador.",
+    "3. Totalizador termomagnético ubicado después del medidor, en el mismo ramal del barraje.",
+    "4. Seccionador MT antes del transformador conforme a norma RA8 del operador de red.",
+]
+
+def textos_de(cfg):
+    c, _ = bot._verificar_coherencia(dict(DEFAULT, **dict({"salida": "unifilar"}, **cfg)))
+    fig = tf.capturar(c)
+    t = [x.get_text() for x in fig.axes[0].texts]
+    mal = tf.defectos(fig); plt.close(fig)
+    return t, mal
+
+def prueba_fidelidad():
+    cfg = dict(sistema="tri4h", tipo="directa", norma="RA8", instalacion="trafo", trafo_uso="compartido", trafo_n_usuarios="4",
+               trafo_gabinete=True, v_mt="13.2 kV", seccionador="antes", totalizador="despues", ubicacion_trafo="interior",
+               bajante_mt="monopolar")
+    t, mal = textos_de(cfg)
+    chk(sorted(x for x in t if not x.startswith(("NOTAS", "1.", "2.", "3.", "4."))) == sorted(TEXTOS_EJEMPLO),
+        "fidelidad: mismos datos que el script del ejemplo -> los MISMOS textos del plano")
+    chk([x for x in t if x.startswith(("NOTAS", "1.", "2.", "3.", "4."))] == NOTAS_EJEMPLO, "fidelidad: las 4 notas son las del ejemplo")
+    chk(not mal, f"fidelidad: ese plano no tiene superposiciones {mal[:3] if mal else ''}")
+    # con la tension dada por el usuario ya no es "asumida": desaparecen el aviso y la nota 2 (es lo logico)
+    t2, _m = textos_de(dict(cfg, tension_bt="220"))
+    chk(any("220-127 V" in x for x in t2) and not any("verificar tensión BT" in x for x in t2)
+        and not any(x.startswith("2. Tensión BT asumida") for x in t2), "fidelidad: con 220 V dado -> '220-127 V' y sin aviso de tension asumida")
+    # tripolar y rotulos libres del bajante
+    chk(de._bajante_lineas("tripolar") == ["Bajante en cable", "tripolar (1 × 3/C)"], "bajante: 'tripolar' -> (1 × 3/C)")
+    chk(de._bajante_lineas("cable monopolar (3 × 1/C)") == ["Bajante en cable", "monopolar (3 × 1/C)"], "bajante: no repite 'cable'")
+    chk(de._bajante_lineas("") == ["Bajante MT"] and de._bajante_lineas("aislado XLPE") == ["Bajante: aislado XLPE"],
+        "bajante: sin dato no se inventa la formacion del cable")
+
+def prueba_posicion():
+    # ESTE medidor en la 3.a posicion de 5: las otras quedan numeradas 1, 2, 4 y 5 y el barraje las une
+    cfg = dict(BASE, trafo_n_usuarios="4", posicion_medida="3")
+    c, _ = bot._verificar_coherencia(dict(cfg))
+    fig = tf.capturar(c); ax = fig.axes[0]
+    textos = [t.get_text() for t in ax.texts]
+    chk(sorted(x for x in textos if x.startswith("Medida\n")) == ["Medida\n1", "Medida\n2", "Medida\n4", "Medida\n5"],
+        "posicion 3 de 5: los otros usuarios son 1, 2, 4 y 5")
+    xm = next(t.get_position()[0] for t in ax.texts if t.get_text().startswith("kWh"))
+    x2 = next(t.get_position()[0] for t in ax.texts if t.get_text() == "Medida\n2")
+    x4 = next(t.get_position()[0] for t in ax.texts if t.get_text() == "Medida\n4")
+    chk(x2 < xm < x4, "posicion 3 de 5: el medidor propio queda entre la 2 y la 4")
+    mal = tf.defectos(fig); plt.close(fig)
+    chk(not mal, f"posicion 3 de 5: sin superposiciones {mal[:3] if mal else ''}")
+    for malo in ("9", "0", "x", ""):
+        t, _m = textos_de(dict(cfg, posicion_medida=malo))
+        chk(sorted(x for x in t if x.startswith("Medida\n")) == ["Medida\n2", "Medida\n3", "Medida\n4", "Medida\n5"],
+            f"posicion invalida {malo!r}: se ignora y queda de primero")
+    c, _ = parse_spec("directa trifasica RA8 gabinete compartido con 4 medidores mas, mi medida es la 3")[0:2]
+    chk(c.get("posicion_medida") == "3" and c.get("trafo_n_usuarios") == "4", "parser: 'mi medida es la 3' -> posicion_medida=3")
+    chk("posicion_medida" not in parse_spec("directa trifasica RA8 trafo exclusivo 150 kVA posicion 2")[0],
+        "parser: sin punto compartido no inventa posicion")
 
 # ── 1) dibujo ────────────────────────────────────────────────────────────────
 BASE = dict(DEFAULT, salida="unifilar", sistema="tri4h", tipo="directa", norma="RA8", instalacion="trafo",
@@ -301,6 +374,8 @@ async def prueba_correccion():
         bot._consulta_retie = orig_retie
 
 def main():
+    prueba_fidelidad()
+    prueba_posicion()
     prueba_dibujo()
     prueba_despacho()
     prueba_parser()

@@ -209,6 +209,14 @@ def _extraer_gabinete(t, text, cfg, entendido, tipo_count):
         if mp: cfg["interruptor_polos"] = mp.group(1)
         if re.search(r"totalizador[^.;]{0,40}?caja\s+moldeada", t): cfg["interruptor_tipo"] = "caja moldeada"
         elif re.search(r"totalizador[^.;]{0,40}?termomagnetic", t): cfg["interruptor_tipo"] = "termomagnetico"
+    # --- posicion de ESTE medidor en el gabinete, de izquierda a derecha ("mi medida es la 3", "posicion 3") ---
+    if comparte:
+        mp_ = (re.search(r"\bposicion\s*(?:n[o°º.]?\s*)?(\d{1,2})\b", t)
+               or re.search(r"\b(?:mi\s+(?:medida|medidor)|este\s+medidor|la\s+medida\s+objeto)\s+(?:es|esta\s+en|va\s+en)\s+"
+                            r"(?:la\s+|el\s+)?(?:posicion\s+)?(?:n[o°º.]?\s*)?(\d{1,2})\b", t))
+        if mp_ and 1 <= int(mp_.group(1)) <= 99:
+            cfg["posicion_medida"] = mp_.group(1)
+            entendido.append(f"Posicion de este medidor en el gabinete: {mp_.group(1)} (de izquierda a derecha)")
     # --- tension BT (ej. 220 V, 208/120 V); no confundir con 13200/120 (TP) ni con kV ---
     mb = re.search(r"(?<![/\d.,])(\d{3}(?:\s*/\s*\d{2,3})?)\s*(?:v|voltios?)\b(?!a)", t)
     if mb and not cfg.get("tension_bt"):

@@ -951,6 +951,8 @@ PROMPT_DIAGRAMA = (
     "- Si menciona transformador, subestacion, red o tension de media (MT/13.2 kV...): "
     "instalacion='trafo' (NUNCA 'barraje') y v_mt con esa tension.\n"
     "- Gabinete/cuarto/interior -> trafo_gabinete=true; red abierta/poste -> false.\n"
+    "- posicion_medida: en que posicion del gabinete (de izquierda a derecha) esta ESTE medidor "
+    "(solo si el usuario lo dijo; si no, omitelo y queda de primero).\n"
     "- ubicacion_trafo: 'interior' | 'poste' | 'exterior' | 'camara' (solo si lo dijo).\n"
     "- Tension del secundario (ej. 220 V, 208/120 V) -> tension_bt, SIEMPRE, tambien con trafo.\n"
     "- Totalizador/interruptor general del ramal: totalizador='antes' o 'despues' del medidor "
@@ -1026,6 +1028,8 @@ PROMPT_DIAGRAMA = (
     "solo si el usuario la dio)\n"
     'ubicacion_trafo: "interior" | "poste" | "exterior" | "camara" (solo si el usuario lo dijo)\n'
     'totalizador: "antes" | "despues" (interruptor general respecto al medidor; solo si lo dijo)\n'
+    "posicion_medida: string ej '3' (lugar de ESTE medidor en el gabinete, de izquierda a derecha; "
+    "solo si el usuario lo dijo)\n"
     "clase_medidor: string ej '0.5S' o '1' (solo si el usuario la dio)\n"
     "bajante_mt: string ej 'tuberia metalica 4\"' (solo si el usuario lo describio)\n"
     "circuito: string ej 'Magdalena' o '5' (identificacion del circuito, "
@@ -1899,7 +1903,7 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
 # Campos del plano de GABINETE COMPARTIDO que el parser (regex, determinista) sabe leer del texto.
 _CAMPOS_GABINETE = ("trafo_n_usuarios", "trafo_gabinete", "ubicacion_trafo", "totalizador", "v_mt",
                     "tension_bt", "bajante_mt", "clase_medidor", "proteccion_antes",
-                    "proteccion_despues", "interruptor_polos", "interruptor_tipo", "seccionador")
+                    "proteccion_despues", "interruptor_polos", "interruptor_tipo", "seccionador", "posicion_medida")
 
 def _completar_con_parser(ia_cfg, textos, sobrescribir=False):
     """Red de seguridad del dialogo IA. Un modelo chico (Haiku) puede dejar fuera del JSON algo que

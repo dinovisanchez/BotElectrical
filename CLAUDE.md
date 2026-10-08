@@ -35,9 +35,9 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
   algún camino queda sin respuesta. `--draw` además dibuja cada diagrama.
 - `test_conexiones.py` — geometria del diagrama de conexiones (sin solapes, reglas in/cierre,
   barra BN). `test_pdf.py` — PDF -> unifilar. `test_claude_sdk.py` — llamadas a Claude con el SDK real.
-- `test_gabinete.py` — plano de gabinete compartido de punta a punta: 17 variantes dibujadas sin textos superpuestos (detector de
-  `test_frontera`; `GAB_OUT=<dir>` guarda los PNG), despacho, parser, `_completar_con_parser`, diálogo IA con el SDK real y
-  correcciones después de un diagrama.
+- `test_gabinete.py` — plano de gabinete compartido de punta a punta: FIDELIDAD textual con el script del ejemplo, posición del medidor,
+  17 variantes dibujadas sin textos superpuestos (detector de `test_frontera`; `GAB_OUT=<dir>` guarda los PNG), despacho, parser,
+  `_completar_con_parser`, diálogo IA con el SDK real y correcciones después de un diagrama.
 - `test_frontera.py` — campos de acta (varios transformadores, planta de respaldo, celda de medida,
   ubicacion de la medida): helpers, escenarios e–p (`FRONTERA_OUT=<dir>` guarda los PNG) y un
   detector de textos superpuestos (texto/texto, texto/cable, texto/borde de recuadro).
@@ -932,18 +932,32 @@ compartido con 4 medidores mas, totalizador posterior al medidor, 220 V" y el bo
 Claude Chat, con el mismo texto, armo un plano horizontal completo (`unifilar_medida_directa.pdf`) y dijo "asi lo quiero". Dos causas:
 (1) el renderer no tenia ese plano (el generico dibuja una rama vertical corta), (2) la IA (Haiku) dejo fuera del JSON lo que el usuario
 SI dijo. Ademas la correccion "no mostro el cuadro de lo compartido con 4 mas" caia en la consulta normativa (Gemini, timeout).
-- **`draw_unifilar_gabinete`** (200x120 u = 15x9 in; `t` = distancia desde arriba). Se despacha desde `draw_unifilar_generico`
+- **Segunda ronda (mismo dia): "no me genero el Unifilar tal cual como envie en la foto" + el codigo del ejemplo.** Se corrio el script
+  del usuario y se comparo con el bot: la estructura era la misma pero habia diferencias reales (texto del bajante "Bajante en cable /
+  monopolar (3 × 1/C)", subtitulo sin "Sistema ... hilos", "(verificar tensión BT)", nota 2, rotulo del totalizador en 2 lineas, guion
+  de "13,2 kV – 3F" perdido, proporciones, `posicion_medida`). `draw_unifilar_gabinete` se REESCRIBIO sobre las coordenadas del script
+  (barraje en y=62, trafo en (30, 52,5/47,5), gabinete desde x=76, otros usuarios 17 u de ancho, ESTE medidor en la posicion
+  `posicion_medida`...). **Escala: ~12,9 u por pulgada** (`_GAB_UPI`), NO 10: el script usa `subplots` con margenes por defecto +
+  `bbox_inches="tight"`, asi que su figura de 20,6 in muestra los datos en ~16 in; con 10 u/in el texto salia mas chico que en la foto.
+  `test_gabinete.prueba_fidelidad` guarda los textos del script (`TEXTOS_EJEMPLO`, `NOTAS_EJEMPLO`) y exige que con los mismos datos
+  (sin `tension_bt` -> 208-120 V asumida, bajante 'monopolar') el plano traiga EXACTAMENTE los mismos. **Unicos retoques respecto al
+  ejemplo** (defectos del original): "SUBESTACION INTERIOR" y "SPT neutro BT y masas" ya no los cruza una linea; los rotulos del medidor
+  y del totalizador van FUERA del recuadro azul (alli cruzaban su borde; el recuadro mide 22 u = igual que la carga); el hueco de 1 u
+  entre el medidor y el totalizador se cerro. Con `tension_bt` dado por el usuario NO se rotula "asumida" ni "(verificar tensión BT)"
+  (el script lo hacia siempre). Si el usuario pide "tal cual", NO cambies posiciones/tamanos/textos: compara contra el script primero.
+- **`draw_unifilar_gabinete`** (coordenadas del ejemplo, ver arriba; `y` hacia arriba, 110 u de alto + notas). Se despacha desde `draw_unifilar_generico`
   (orden: frontera -> gabinete -> indirecta "pro" -> detallado) cuando `_gabinete_compartido(cfg)`: `tipo=='directa'` y
   (`trafo_uso=='compartido'` o `trafo_n_usuarios > 0`). Semidirecta/indirecta compartidas siguen con el renderer de siempre.
   Dibuja: barra de RED MT -> bajante -> [seccionador MT] -> trafo (con SPT del neutro) -> acometida BT -> gabinete con barraje BT, ESTE
-  medidor en recuadro azul (medidor -> totalizador -> carga) y los demas usuarios punteados. Recuadro "SUBESTACION" / "GABINETE DE MEDIDA
-  - N MEDIDORES (INTERIOR)" segun `trafo_gabinete`/`ubicacion_trafo`; sin `instalacion='trafo'` se omite la subestacion.
+  medidor en recuadro azul (medidor -> totalizador -> carga) y los demas usuarios punteados. Recuadro "SUBESTACION" solo con `ubicacion_trafo` 'interior' o sin dato (poste/exterior/camara: sin recuadro, como el "externo" del ejemplo) /
+  "GABINETE DE MEDIDA - N MEDIDORES (INTERIOR)" segun `trafo_gabinete`; sin `instalacion='trafo'` se omite la subestacion.
 - **Regla "no inventar"**: lo que no se sabe (kVA del trafo, amperaje del totalizador, clase del medidor) se rotula `___ (por definir)`
   y se lista en NOTAS. NO se dibuja seccionador salvo `seccionador` explicito, ni pararrayos/CC fusibles (el ejemplo no los tenia y el
   usuario pidio "tal cual"; `dps_cantidad` solo sale como nota). Totalizador solo con `totalizador` o con proteccion dada.
   Tension BT: `_bt_texto` (`tension_bt`/`v_bt`; sin dato se asume una habitual y se avisa en una nota).
 - Campos nuevos del cfg (todos opcionales): `ubicacion_trafo` ('interior'|'poste'|'exterior'|'camara'), `totalizador` ('antes'|'despues'),
-  `clase_medidor`, `bajante_mt`; `trafo_n_usuarios` = OTROS medidores (el total es N+1); con 6+ otros se dibujan 5 posiciones y la
+  `clase_medidor`, `bajante_mt` ('monopolar'/'tripolar' -> "Bajante en cable / monopolar (3 × 1/C)"; sin dato NO se inventa la formacion),
+  `posicion_medida` (1..N, lugar de ESTE medidor de izquierda a derecha; invalida o con 6+ medidores -> primero); `trafo_n_usuarios` = OTROS medidores (el total es N+1); con 6+ otros se dibujan 5 posiciones y la
   ultima dice "+N medidores mas"; sin cantidad se dibujan 2 de ejemplo y una nota lo dice. Parser: `_extraer_gabinete`.
   `respaldo` dibuja dos medidores en el recuadro azul.
 - **Red de seguridad `_completar_con_parser(ia_cfg, textos_del_usuario, sobrescribir=False)`** (bot.py): se llama en `_dialogo_diagrama`
