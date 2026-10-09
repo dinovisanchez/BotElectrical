@@ -105,6 +105,55 @@ def prueba_posicion():
     chk("posicion_medida" not in parse_spec("directa trifasica RA8 trafo exclusivo 150 kVA posicion 2")[0],
         "parser: sin punto compartido no inventa posicion")
 
+# ── 0b) "compartido con 8" y tension MT en cualquier formato ─────────────────
+def prueba_conteo_y_mt():
+    base = "medida directa trifasica RA8 "
+    casos = {"compartido con 8": "8", "trafo compartido con 8 usuarios": "8", "gabinete compartido con 8 mas": "8",
+             "compartido con 8 medidores": "8", "compartido entre 9 usuarios": "8", "compartido con otros 8": "8",
+             "compartido, 8 usuarios": "8", "gabinete compartido somos 9": "8", "gabinete de 5 medidores": "4",
+             "gabinete con 12 medidores": "11", "5 medidores en total, compartido": "4", "compartido con 4 medidores mas": "4"}
+    for frase, otros in casos.items():
+        c = parse_spec(base + frase)[0]
+        chk(c.get("trafo_n_usuarios") == otros and c.get("trafo_uso") == "compartido", f"conteo: '{frase}' -> {otros} otros")
+    for frase in ("compartido con 4 hilos", "compartido con 100 A", "trafo exclusivo 150 kVA"):
+        chk(not parse_spec(base + frase)[0].get("trafo_n_usuarios"), f"conteo: '{frase}' NO es una cantidad de usuarios")
+    mt = {"MT 13.2 kV": "13.2 kV", "media tension 13.2kv": "13.2 kV", "en MT 13200 V": "13.2 kV", "MT 13.200 voltios": "13.2 kV",
+          "media tension de 34,5 KV": "34.5 kV", "tension media 13,2": "13.2 kV", "MT 13200": "13.2 kV", "MT de 13.2": "13.2 kV",
+          "alimentado en media tension (13.2 kV)": "13.2 kV", "red MT a 11.4 kV": "11.4 kV"}
+    for frase, esperado in mt.items():
+        c = parse_spec(base + "gabinete compartido con 4 mas, " + frase)[0]
+        chk(c.get("v_mt") == esperado, f"tension MT: '{frase}' -> {esperado} (v_mt={c.get('v_mt')!r})")
+    for frase in ("220 V", "tension 208/120 V", "75 kVA", "TP 13200/120"):
+        chk(not parse_spec(base + "gabinete compartido con 4 mas, " + frase)[0].get("v_mt"), f"tension MT: '{frase}' NO es MT")
+    c = parse_spec(base + "compartido con 8, media tension 13200 V, 220 V")[0]
+    chk(c.get("instalacion") == "trafo" and c.get("tension_bt") == "220", "MT dada en punto compartido -> hay transformador; 220 V es la BT")
+    for v, esperado in (("13.2 kV", 13.2), ("13200 V", 13.2), ("13.200 V", 13.2), ("13200", 13.2), ("13.2", 13.2), ("34.5kV", 34.5),
+                        ("220 V", None), ("220", None), ("", None), (None, None)):
+        chk(de._kv_de(v) == esperado, f"_kv_de({v!r}) = {esperado}")
+
+def prueba_ocho_usuarios():
+    # coherencia: MT dada + punto compartido -> red MT y trafo (antes se descartaba la MT)
+    c, notas = bot._verificar_coherencia(dict(DEFAULT, tipo="directa", instalacion="barraje", trafo_uso="compartido",
+                                              trafo_n_usuarios="8", trafo_gabinete=True, v_mt="13200 V"))
+    chk(c["instalacion"] == "trafo" and c["v_mt"] == "13.2 kV" and any("media tensión (13,2 kV)" in n for n in notas),
+        "coherencia: v_mt + punto compartido -> instalacion=trafo, v_mt normalizada y aviso")
+    c, notas = bot._verificar_coherencia(dict(DEFAULT, tipo="semidirecta", rel_tc="200/5", instalacion="barraje", v_mt="13.2 kV"))
+    chk("v_mt" not in c, "coherencia: semidirecta sin trafo sigue descartando v_mt (sin cambios)")
+    # dibujo: se muestran TODOS los otros usuarios y la tension MT
+    for otros, extra in ((8, {}), (11, {}), (8, dict(respaldo=True, posicion_medida="5"))):
+        t, mal = textos_de(dict(BASE, trafo_n_usuarios=str(otros), **extra))
+        pos = int(extra.get("posicion_medida", 1))
+        esperados = sorted(f"Medida\n{i}" for i in range(1, otros + 2) if i != pos)
+        chk(sorted(x for x in t if x.startswith("Medida\n")) == esperados and not any("por definir: se muestran" in x for x in t),
+            f"{otros} otros usuarios{' (respaldo, pos 5)' if extra else ''}: se dibujan TODAS las posiciones")
+        chk(any(x.startswith("RED DE DISTRIBUCIÓN MT") and "13,2 kV" in x for x in t) and any("13,2 kV / 220-127 V" in x for x in t),
+            f"{otros} otros usuarios: el plano rotula la media tension 13,2 kV")
+        chk(not mal, f"{otros} otros usuarios: sin superposiciones {mal[:3] if mal else ''}")
+    t, mal = textos_de(dict(BASE, trafo_n_usuarios="20"))
+    chk(sum(x.startswith("Medida\n") for x in t) == 11 and any(x.startswith("+9\nmedidores") for x in t) and not mal,
+        f"20 otros usuarios: 11 posiciones + '+9 medidores más' sin superposiciones {mal[:3] if mal else ''}")
+    chk(any("El gabinete tiene 21 medidores" in x for x in t), "20 otros usuarios: la nota explica el resumen")
+
 # ── 1) dibujo ────────────────────────────────────────────────────────────────
 BASE = dict(DEFAULT, salida="unifilar", sistema="tri4h", tipo="directa", norma="RA8", instalacion="trafo",
             trafo_uso="compartido", trafo_n_usuarios="4", trafo_gabinete=True, v_mt="13.2 kV", tension_bt="220",
@@ -131,6 +180,9 @@ VARIANTES = {
     "o_sin_seccionador": dict(seccionador=""),
     "p_1_usuario": dict(trafo_n_usuarios="1"),
     "q_sin_totalizador": dict(totalizador=""),
+    "r_8_usuarios": dict(trafo_n_usuarios="8"),
+    "s_12_usuarios_respaldo_pos4": dict(trafo_n_usuarios="12", respaldo=True, posicion_medida="4", totalizador="antes", proteccion_antes="100 A"),
+    "t_20_usuarios": dict(trafo_n_usuarios="20"),
 }
 
 def prueba_dibujo():
@@ -286,6 +338,24 @@ async def prueba_dialogo():
             "dialogo: el prompt lleva las reglas del gabinete compartido y de correccion")
         chk(p["messages"][0]["content"].count("gabinete interior compartido") == 1, "dialogo: el mensaje del usuario viaja a la IA")
 
+        # a2) la IA pregunta "¿cuantos usuarios comparten?", el usuario responde "8" y el JSON sale SIN la cantidad
+        llamadas.clear(); PETICIONES.clear()
+        sin_n = ('DIAGRAMA_LISTO\n```json\n{"sistema":"tri4h","tipo":"directa","salida":"unifilar","norma":"RA8",'
+                 '"instalacion":"trafo","trafo_uso":"compartido","trafo_gabinete":true,"v_mt":"13200 V","tension_bt":"220"}\n```')
+        bot._claude_client = cliente([ok("¿Cuántos otros usuarios comparten el punto?"), ok(sin_n)])
+        u, c = Upd(), Ctx(modo_diagrama_ia=True)
+        await bot._dialogo_diagrama(u, c, "directa trifasica RA8 gabinete compartido, MT 13200 V, 220 V")
+        await bot._dialogo_diagrama(u, c, "8")
+        cfg = llamadas[0] if llamadas else {}
+        chk(len(u.message.fotos) == 1 and cfg.get("trafo_n_usuarios") == "8" and cfg.get("v_mt") == "13.2 kV",
+            f"dialogo: la respuesta '8' a la pregunta de la IA llega como 8 otros usuarios y MT 13,2 kV ({cfg.get('trafo_n_usuarios')!r}, {cfg.get('v_mt')!r})")
+        chk(u.message.fotos and "9 medidores (8 más)" in u.message.fotos[0] and "13.2 kV" in u.message.fotos[0],
+            "dialogo: el caption dice 9 medidores (8 más) y 13.2 kV")
+        ra = bot._otros_desde_respuesta([{"role": "model", "text": "¿Cuántos usuarios comparten?"}, {"role": "user", "text": "en total 9"}])
+        chk(ra == 8, "respuesta 'en total 9' -> 8 otros")
+        chk(bot._otros_desde_respuesta([{"role": "model", "text": "¿Qué amperaje tiene el totalizador?"}, {"role": "user", "text": "100"}]) is None,
+            "un numero que responde a OTRA pregunta no se toma como cantidad de usuarios")
+
         # b) JSON incompleto + usuario SIN punto compartido: nada se inventa
         llamadas.clear(); PETICIONES.clear()
         bot._claude_client = cliente([ok(JSON_BASICO)])
@@ -376,6 +446,8 @@ async def prueba_correccion():
 def main():
     prueba_fidelidad()
     prueba_posicion()
+    prueba_conteo_y_mt()
+    prueba_ocho_usuarios()
     prueba_dibujo()
     prueba_despacho()
     prueba_parser()

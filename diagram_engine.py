@@ -1045,9 +1045,23 @@ _SIS_PRO = {   # sistema -> (adjetivo MAYUS, adjetivo, fases, n_elem, polos, tex
 }
 
 def _kv_de(v_mt):
-    """'13.2 kV' / '13,2kV' -> 13.2 (float) o None."""
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*kv", str(v_mt or "").lower())
-    return float(m.group(1).replace(",", ".")) if m else None
+    """Tension MT en kV (float) o None. '13.2 kV' / '13,2kV' -> 13.2; tambien '13200 V', '13.200 V', '13200' (->13.2)
+    y '13.2' sin unidad. Una tension de BT ('220 V') NO es MT -> None."""
+    s = str(v_mt or "").lower().strip()
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:kv|kilovoltios?|kilovolts?)", s)
+    if m:
+        return float(m.group(1).replace(",", "."))
+    m = re.fullmatch(r"(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)\s*(v|voltios?|volts?)?", s)
+    if not m:
+        return None
+    txt, unidad = m.group(1), m.group(2)
+    if re.fullmatch(r"\d{1,3}(?:[.,\s]\d{3})+", txt):
+        v = float(re.sub(r"[.,\s]", "", txt))
+    else:
+        v = float(txt.replace(",", "."))
+    if v >= 1000:
+        return v / 1000.0
+    return v if (unidad is None and 1.0 < v <= 69.0) else None      # sin unidad solo vale un valor de MT (13.2, 34.5...)
 
 # Tensiones normalizadas MT/AT (kV) para deducir la red cuando solo se conoce el TP
 _STD_KV = (4.16, 6.6, 11.4, 13.2, 13.8, 22.0, 33.0, 34.5, 44.0, 66.0, 110.0, 115.0, 230.0)
@@ -1903,7 +1917,7 @@ def draw_unifilar_frontera(cfg, out_path):
 #  (plano pedido por el usuario con un ejemplo: subestacion -> acometida BT ->
 #   gabinete con varios medidores -> ESTE medidor resaltado -> totalizador -> carga)
 # ============================================================
-_GAB_MAX_OTROS = 5       # posiciones "otro usuario" dibujadas (si hay mas: "+N medidores mas")
+_GAB_MAX_OTROS = 12      # posiciones "otro usuario" dibujadas (si hay mas: "+N medidores mas")
 _GRIS_G = "#808080"
 _AZUL_G = "#5E93CF"
 
@@ -2051,14 +2065,15 @@ def draw_unifilar_gabinete(cfg, out_path):
     lab_acom = "Acometida BT " + f_txt + (f"  –  {calibre}" if calibre else "")
     CX0 = 76.0 if con_trafo else 2.0 + _ancho_u(lab_acom, 9) + 6.0     # borde izquierdo del gabinete
     hw = 16.0 if respaldo else 11.0                # semiancho del recuadro azul (ESTE medidor)
+    w_oth = 17.0 if (n_draw - 1) <= 6 else 14.5     # con muchos usuarios las posiciones se juntan un poco
     slots, x = [], CX0 + 12.0
     for i in range(1, n_draw + 1):
-        w = (2 * hw + 1.2 + lab_w + 3.5) if i == pos else 17.0
+        w = (2 * hw + 0.5 + 1.2 + lab_w + 3.0) if i == pos else w_oth
         w = max(w, 42.0) if i == pos else w
         slots.append((i, x, w)); x += w
     CX1 = x + 4.0
     W = max(CX1 + 4.0, 150.0 if con_trafo else 100.0)
-    xs = {i: sx + ((hw - 1.0) if i == pos else sw / 2) for i, sx, sw in slots}
+    xs = {i: sx + ((hw + 0.5) if i == pos else sw / 2) for i, sx, sw in slots}     # el recuadro azul deja margen a las vecinas
     x0 = xs[pos]                                   # eje del ramal de ESTE usuario
     bx0, bx1 = x0 - hw, x0 + hw
     lab_x = bx1 + 1.2                              # rotulos del ramal: FUERA del recuadro azul
