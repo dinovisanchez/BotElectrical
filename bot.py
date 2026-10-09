@@ -947,9 +947,11 @@ PROMPT_DIAGRAMA = (
     "usuarios'), el diagrama es el plano de GABINETE COMPARTIDO y TODO lo que dijo debe quedar "
     "en el JSON -- no lo reduzcas a 'barraje -> medidor -> carga':\n"
     "- trafo_uso='compartido' y trafo_n_usuarios = cuantos OTROS medidores hay (ESTE no cuenta: "
-    "'4 medidores mas' -> '4'; '5 medidores en total' -> '4').\n"
+    "'4 medidores mas' -> '4'; 'compartido con 8' -> '8'; '5 medidores en total' / 'compartido entre 9' -> "
+    "'4' / '8'). Si el usuario responde solo un numero a '¿cuantos usuarios comparten?', es ese numero.\n"
     "- Si menciona transformador, subestacion, red o tension de media (MT/13.2 kV...): "
-    "instalacion='trafo' (NUNCA 'barraje') y v_mt con esa tension.\n"
+    "instalacion='trafo' (NUNCA 'barraje') y v_mt con esa tension SIEMPRE en el formato '13.2 kV' "
+    "(si dice 13200 V, escribe '13.2 kV'); no omitas v_mt si la dio.\n"
     "- Gabinete/cuarto/interior -> trafo_gabinete=true; red abierta/poste -> false.\n"
     "- posicion_medida: en que posicion del gabinete (de izquierda a derecha) esta ESTE medidor "
     "(solo si el usuario lo dijo; si no, omitelo y queda de primero).\n"
@@ -1267,6 +1269,20 @@ def _verificar_coherencia(cfg):
         notas_usuario.append(
             f"La medida {tipo} se hace en baja tensión: ignoré la ubicación \"MT\" "
             "(para medir en MT la medida debe ser indirecta)."
+        )
+
+    if cfg.get("v_mt"):
+        # normaliza "13200 V" / "13,2" -> "13.2 kV" (el dibujo y el resumen leen siempre ese formato)
+        kv_ = diagram_engine._kv_de(cfg["v_mt"])
+        if kv_:
+            cfg["v_mt"] = f"{kv_:g} kV"
+    if (diagram_engine._gabinete_compartido(cfg) and not es_frontera and cfg.get("v_mt") and inst != "trafo"):
+        # Un punto compartido alimentado en media tension tiene red MT + transformador: antes se descartaba
+        # la MT ("sin trafo no hay tramo de MT") y el plano salia sin ella aunque el usuario la dio.
+        cfg["instalacion"] = inst = "trafo"
+        notas_usuario.append(
+            f"Indicaste media tensión ({str(cfg['v_mt']).replace('.', ',')}): dibujé la red MT y el "
+            "transformador que alimenta el punto compartido."
         )
 
     if tipo in ("directa", "semidirecta") and inst != "trafo" and cfg.get("v_mt"):
@@ -2024,6 +2040,28 @@ async def _corregir_diagrama(update, ctx, texto):
     await _dialogo_diagrama(update, ctx, texto)
 
 
+def _otros_desde_respuesta(historial):
+    """Cantidad de OTROS usuarios que el usuario dio como RESPUESTA a la pregunta de la IA ("¿cuántos usuarios
+    comparten el punto?" -> "8"). Red de seguridad: si la IA deja trafo_n_usuarios vacio en el JSON, el numero
+    suelto de esa respuesta no lo entiende parse_spec (solo ve el texto, no la pregunta)."""
+    n = None
+    for prev, cur in zip(historial, historial[1:]):
+        if prev.get("role") != "model" or cur.get("role") != "user" or cur.get("sembrado"):
+            continue
+        q = _sin_tildes(prev.get("text", ""))
+        if not (re.search(r"cuant", q) and re.search(r"usuarios|medidores|comparten|compartid", q)):
+            continue
+        a = _sin_tildes(cur.get("text", ""))
+        m = re.search(r"(?<![\d./,])(\d{1,2})(?![\d./,]|\s*(?:kva|kv|v\b|a\b|amp))", a)
+        if m and len(a) <= 60:
+            v = int(m.group(1))
+            if v >= 2 and re.search(r"en\s+total|total|somos|entre", a):
+                v -= 1                                  # el total incluye ESTE medidor
+            if 0 < v <= 99:
+                n = v
+    return n
+
+
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
     """Conversacion guiada por Claude. Historial = lista de {"role":"user"|"model","text":"..."}"""
     if not _claude_client:
@@ -2152,6 +2190,12 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                 # (gabinete compartido, MT, totalizador...) se recupera con el parser.
                 textos_u = [m["text"] for m in historial if m["role"] == "user" and not m.get("sembrado")]
                 ia_cfg, recuperados = _completar_con_parser(ia_cfg, textos_u, sobrescribir=bool(corrigiendo))
+                if (ia_cfg.get("trafo_uso") == "compartido" or ia_cfg.get("trafo_gabinete") is not None) \
+                        and not ia_cfg.get("trafo_n_usuarios"):
+                    n_resp = _otros_desde_respuesta(historial)
+                    if n_resp:
+                        ia_cfg["trafo_n_usuarios"] = str(n_resp)
+                        recuperados.append("trafo_n_usuarios(respuesta)")
                 if recuperados:
                     log.info("dialogo_diagrama: campos completados con el parser: %s", ", ".join(recuperados))
                 cfg = dict(DEFAULT)

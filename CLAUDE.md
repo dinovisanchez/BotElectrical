@@ -945,6 +945,17 @@ SI dijo. Ademas la correccion "no mostro el cuadro de lo compartido con 4 mas" c
   y del totalizador van FUERA del recuadro azul (alli cruzaban su borde; el recuadro mide 22 u = igual que la carga); el hueco de 1 u
   entre el medidor y el totalizador se cerro. Con `tension_bt` dado por el usuario NO se rotula "asumida" ni "(verificar tensión BT)"
   (el script lo hacia siempre). Si el usuario pide "tal cual", NO cambies posiciones/tamanos/textos: compara contra el script primero.
+- **Tercera ronda: "compartido con 8 solo dibuja 2" y "no indicas la media tension".** Causas reales (reproducidas):
+  (1) `parse_spec` no entendia "compartido con 8" a secas (ni "entre 9", "somos 9", "otros 8", ", 8 usuarios") -> cantidad vacia ->
+  2 posiciones de EJEMPLO; ahora `_extraer_gabinete` cubre esas formas (con N => OTROS N; "entre/por N", "somos N", "N en total",
+  "gabinete de N medidores" => total, N-1) sin confundir "con 4 hilos" / "con 100 A"; y si la IA deja `trafo_n_usuarios` vacio, el
+  numero suelto con que el usuario respondio "¿cuantos usuarios comparten?" se toma de la conversacion (`_otros_desde_respuesta`).
+  (2) el motor DIBUJA todas las posiciones hasta 12 otros usuarios (`_GAB_MAX_OTROS`; con >6 las posiciones se juntan a 14,5 u) y solo
+  resume el resto en "+N medidores mas" (antes el tope era 5). (3) la MT se perdia: `_extraer_vmt` entiende "13200 V", "13.200 voltios",
+  "tension media 13,2", "MT 13200" (no confunde 220 V, kVA ni "13200/120"); `_kv_de` acepta esos formatos (un valor sin unidad solo
+  vale entre 1 y 69 kV); y `_verificar_coherencia` ya NO descarta `v_mt` en un punto compartido: si hay MT dada e `instalacion != 'trafo'`
+  la pasa a 'trafo' (red MT + trafo) y lo avisa. `v_mt` se normaliza a "13.2 kV". El recuadro azul deja ahora 1,5-3 u de margen a las
+  posiciones vecinas (con `posicion_medida` en medio quedaba pegado).
 - **`draw_unifilar_gabinete`** (coordenadas del ejemplo, ver arriba; `y` hacia arriba, 110 u de alto + notas). Se despacha desde `draw_unifilar_generico`
   (orden: frontera -> gabinete -> indirecta "pro" -> detallado) cuando `_gabinete_compartido(cfg)`: `tipo=='directa'` y
   (`trafo_uso=='compartido'` o `trafo_n_usuarios > 0`). Semidirecta/indirecta compartidas siguen con el renderer de siempre.
@@ -957,7 +968,7 @@ SI dijo. Ademas la correccion "no mostro el cuadro de lo compartido con 4 mas" c
   Tension BT: `_bt_texto` (`tension_bt`/`v_bt`; sin dato se asume una habitual y se avisa en una nota).
 - Campos nuevos del cfg (todos opcionales): `ubicacion_trafo` ('interior'|'poste'|'exterior'|'camara'), `totalizador` ('antes'|'despues'),
   `clase_medidor`, `bajante_mt` ('monopolar'/'tripolar' -> "Bajante en cable / monopolar (3 × 1/C)"; sin dato NO se inventa la formacion),
-  `posicion_medida` (1..N, lugar de ESTE medidor de izquierda a derecha; invalida o con 6+ medidores -> primero); `trafo_n_usuarios` = OTROS medidores (el total es N+1); con 6+ otros se dibujan 5 posiciones y la
+  `posicion_medida` (1..N, lugar de ESTE medidor de izquierda a derecha; invalida o con mas de 13 medidores -> primero); `trafo_n_usuarios` = OTROS medidores (el total es N+1); con mas de 12 otros se dibujan 12 posiciones y la
   ultima dice "+N medidores mas"; sin cantidad se dibujan 2 de ejemplo y una nota lo dice. Parser: `_extraer_gabinete`.
   `respaldo` dibuja dos medidores en el recuadro azul.
 - **Red de seguridad `_completar_con_parser(ia_cfg, textos_del_usuario, sobrescribir=False)`** (bot.py): se llama en `_dialogo_diagrama`

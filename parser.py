@@ -130,6 +130,37 @@ def _extraer_trafos(t, cfg, entendido, faltante):
         faltante.append("kVA de cada transformador (ej. 300 kVA cada uno)")
 
 
+def _extraer_vmt(t):
+    """Tension de MEDIA TENSION en kV como texto ('13.2', '34.5') o None. `t` va en minusculas y sin tildes.
+    Entiende: '13.2 kV', '13,2kv', '13200 V', '13.200 voltios', '13200 volts', 'media tension 13,2',
+    'tension media de 34.5', 'MT 13200', 'alta tension 13.2'. No toca relaciones de TP ('13200/120') ni
+    tensiones de BT (220 V) ni potencias ('75 kVA')."""
+    def kv(txt):
+        v = float(txt.replace(",", "."))
+        return v
+    def fmt(v):
+        return f"{v:g}"
+    m = re.search(r"(?<![/\d.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:kv|kilovoltios?|kilovolts?)(?!a)\b", t)
+    if m:
+        return m.group(1).replace(",", ".")
+    # 13200 V / 13.200 V / 13 200 V (miles): solo si pasa de 1000 V y no es parte de una relacion X/Y
+    m = re.search(r"(?<![/\d.,])(\d{1,3}(?:[.,\s]\d{3})+|\d{4,6})\s*(?:v\b|voltios?|volts?)(?!\s*[/a])", t)
+    if m and not re.match(r"\s*/", t[m.end():]):
+        v = float(re.sub(r"[.,\s]", "", m.group(1)))
+        if 1000 <= v <= 230000:
+            return fmt(v / 1000)
+    # tras la palabra "media tension" / "MT": 'tension media 13,2', 'MT 13200', 'MT de 34.5'
+    m = re.search(r"(?:media\s+tension|tension\s+media|alta\s+tension|\bmt\b)\s*(?:de|a|en|es|:|=)?\s*"
+                  r"(\d{1,3}(?:[.,]\d{1,2})?|\d{1,3}[.,]\d{3}|\d{4,6})\b(?!\s*(?:/|a\b|amp|hilos?|kva|va\b|medidor|usuario|polos?|p\b|%|mm))", t)
+    if m:
+        txt = m.group(1)
+        v = float(re.sub(r"[.,](?=\d{3}\b)", "", txt).replace(",", ".")) if re.fullmatch(r"\d{1,3}[.,]\d{3}", txt) else kv(txt)
+        if v >= 1000: v /= 1000.0
+        if 1.0 < v <= 69.0:                      # sin unidad solo vale un valor de MT (13.2, 34.5...), no 220
+            return fmt(v)
+    return None
+
+
 def _extraer_acta(t, text, cfg, entendido):
     """Ubicacion de la medida (BT/MT) y celda de medida."""
     m = re.search(r"\b(?:medida|medicion|medidor)\s+(?:en|al|del)\s+(?:el\s+)?(?:lado\s+(?:de\s+)?)?"
@@ -157,17 +188,32 @@ def _extraer_gabinete(t, text, cfg, entendido, tipo_count):
     texto dice; nada se inventa."""
     comparte = bool(re.search(r"compartid|gabinete|varios\s+usuarios|otros\s+usuarios", t))
     # --- cuantos otros usuarios / medidores ---
+    # "otros" = medidores de OTROS usuarios (sin contar el de esta medida); el total es otros + 1.
+    # Frases: "4 medidores mas", "con 8 mas", "otros 8", "compartido con 8" (-> 8 otros), "compartido entre 9" /
+    # "somos 9" / "5 medidores en total" / "gabinete de 5 medidores" (-> total, 1 menos). No se confunde "con 8"
+    # con una unidad ("compartido con 4 hilos", "con 100 A").
     if comparte and not cfg.get("trafo_n_usuarios"):
-        otros = None
-        m = (re.search(r"(\d+)\s+(?:usuarios?|medidores?|clientes?|suscriptores?)\s+(?:mas|adicionales|extra|otros)\b", t)
-             or re.search(r"\bcon\s+(\d+)\s+(?:mas|otros|otras|adicionales)\b", t)
-             or re.search(r"(\d+)\s+(?:otros|otras|demas)\s+(?:usuarios?|medidores?|clientes?)", t))
-        if m:
-            otros = int(m.group(1))
-        else:
-            m = re.search(r"\b(\d+)\s+medidores?\b(?!\s*(?:principal|de\s+respaldo|de\s+chequeo))", t)
-            if m and int(m.group(1)) >= 2:
-                otros = int(m.group(1)) - 1               # el total incluye ESTE medidor
+        otros, de_total = None, False
+        unidad = r"(?!\s*(?:kva|kv|va?\b|a\b|amp|hilos?|polos?|p\b|fases?|f\b|awg|mm))"
+        sust = r"(?:usuarios?|medidores?|clientes?|suscriptores?|apartamentos?|locales?|casas?|unidades?)"
+        for pat, total in (
+                (r"(\d+)\s+" + sust + r"\s+(?:mas|adicionales|extra|otros)\b", False),
+                (r"\bcon\s+(\d+)\s+(?:mas|otros|otras|adicionales)\b", False),
+                (r"(\d+)\s+(?:otros|otras|demas)\s+" + sust, False),
+                (r"\b(?:con\s+)?otros\s+(\d+)\b" + unidad, False),
+                (r"\b(?:somos|son)\s+(\d+)\b" + unidad, True),
+                (r"(\d+)\s+" + sust + r"\s+en\s+total", True),
+                (r"\ben\s+total\s+(\d+)\b" + unidad, True),
+                (r"\bcompartid\w*\s+(?:entre|por)\s+(\d+)\b" + unidad, True),
+                (r"\bcompartid\w*\s+con\s+(\d+)\b" + unidad, False),
+                (r"\bcompart\w+\s+con\s+(\d+)\b" + unidad, False),
+                (r"\b(\d+)\s+usuarios?\b", False),
+                (r"\b(?:gabinete|punto|barraje|cuarto)\s+(?:de|con)\s+(\d+)\s+" + sust + r"\b(?!\s*(?:principal|de\s+respaldo|de\s+chequeo))", True),
+                (r"\b(\d+)\s+medidores?\b(?!\s*(?:principal|de\s+respaldo|de\s+chequeo))", True)):
+            m = re.search(pat, t)
+            if m and int(m.group(1)) >= (2 if total else 1):
+                otros, de_total = int(m.group(1)) - (1 if total else 0), total
+                break
         if otros is not None and 0 < otros <= 99:
             cfg["trafo_n_usuarios"] = str(otros)
             if cfg.get("trafo_uso") != "compartido":
@@ -182,6 +228,10 @@ def _extraer_gabinete(t, text, cfg, entendido, tipo_count):
             cfg["trafo_gabinete"] = True
         elif re.search(r"red\s+abierta|intemperie|\bposte\b|aerea|aereo", t):
             cfg["trafo_gabinete"] = False
+    # --- un punto compartido alimentado "en media tension" / subestacion / trafo tiene transformador ---
+    if cfg.get("trafo_uso") == "compartido" and not cfg.get("instalacion") and (
+            cfg.get("v_mt") or re.search(r"media\s+tension|\bmt\b|subestacion|transformador|\btrafo\b", t)):
+        cfg["instalacion"] = "trafo"
     # --- ubicacion del transformador ---
     if re.search(r"(?:subestacion|transformador|trafo)\s+(?:interior|interna|interno)|(?:interior|interna|interno)\s+en\s+subestacion|cuarto\s+de\s+transformador", t):
         cfg["ubicacion_trafo"] = "interior"
@@ -384,9 +434,8 @@ def parse_spec(text):
         entendido.append("Tendido: subterraneo")
 
     # --- NIVEL DE TENSION MT (ej. 13.2 kV) ---
-    m_vmt = re.search(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*kv\b", t)
-    if m_vmt:
-        valor_mt = m_vmt.group(1).replace(",", ".")
+    valor_mt = _extraer_vmt(t)
+    if valor_mt:
         cfg["v_mt"] = f"{valor_mt} kV"
         entendido.append(f"Tension MT {valor_mt} kV")
 
