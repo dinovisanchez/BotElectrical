@@ -8,7 +8,7 @@ from telegram.error import BadRequest as TgBadRequest
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
 import diagram_engine
-from parser import parse_spec, DEFAULT
+from parser import parse_spec, DEFAULT, fases_dichas
 
 from google import genai
 from google.genai import types
@@ -880,7 +880,7 @@ PROMPT_DIAGRAMA = (
     "\n"
     "=== DATOS CRITICOS (sin estos no se puede generar) ===\n"
     "1. DIAGRAMA: conexiones / unifilar / ambos.\n"
-    "2. SISTEMA: mono / bifasico / tri3h (2 elementos Aron) / tri4h (3 elementos).\n"
+    "2. SISTEMA de la MEDIDA: mono / bifasico / tri3h (2 elementos Aron) / tri4h (3 elementos).\n"
     "3. TIPO DE MEDIDA: directa / semidirecta / indirecta.\n"
     "   Guia rapida: directa < 100 A BT, semidirecta > 100 A BT, indirecta en MT.\n"
     "4. NORMA: RA8 (operador nacional) o CENS (Codensa/Enel).\n"
@@ -961,6 +961,12 @@ PROMPT_DIAGRAMA = (
     "(solo si lo dijo; 'posterior al medidor' = 'despues') y su amperaje en "
     "proteccion_antes/proteccion_despues.\n"
     "- Seccionador de media tension (ej. 'seccionador MT segun RA8'): seccionador='antes'.\n"
+    "- FASES: 'sistema' es el de la MEDIDA de este usuario y 'trafo_tipo' el del TRANSFORMADOR; son "
+    "INDEPENDIENTES. Un transformador trifasico puede alimentar una medida monofasica o bifasica "
+    "('transformador trifasico, medida bifasica' -> sistema='bifasico', trafo_tipo='trifasico'); no copies "
+    "la fase de uno al otro. Un trafo mono/bifasico NO alimenta una medida trifasica. Si la medida es "
+    "mono/bifasica, hay transformador y no dijo la fase del trafo, pregunta UNA vez: "
+    "'¿Transformador monofasico, bifasico o trifasico?'.\n"
     "- NO PREGUNTES kVA del transformador, amperaje del totalizador, clase del medidor, "
     "tension BT ni calibre: si el usuario no los dio, el plano los rotula '___ (por definir)'. "
     "Preguntar eso es lo que hace lento el flujo.\n"
@@ -995,7 +1001,7 @@ PROMPT_DIAGRAMA = (
     "```\n"
     "\n"
     "CAMPOS DEL JSON:\n"
-    'sistema: "mono" | "bifasico" | "tri3h" | "tri4h"\n'
+    'sistema: "mono" | "bifasico" | "tri3h" | "tri4h" (sistema de la MEDIDA de este usuario)\n'
     'tipo: "directa" | "semidirecta" | "indirecta"\n'
     'salida: "conexiones" | "unifilar" | "ambos"\n'
     'norma: "RA8" | "CENS"\n'
@@ -1008,7 +1014,7 @@ PROMPT_DIAGRAMA = (
     "n_trafos: entero >= 1\n"
     "trafo_kva: string ej '225'\n"
     "trafo_kva_list: lista ej ['225','112'] si hay varios trafos\n"
-    'trafo_tipo: "monofasico" | "bifasico" | "trifasico"\n'
+    'trafo_tipo: "monofasico" | "bifasico" | "trifasico" (fase del TRANSFORMADOR; independiente de sistema)\n'
     "proteccion_antes: string ej '200 A' o \"\" (proteccion ANTES del medidor; "
     "NUNCA uses el campo 'interruptor' -- es legacy y queda ambiguo)\n"
     "proteccion_despues: string ej '100 A' o \"\" (proteccion DESPUES del medidor)\n"
@@ -1196,6 +1202,10 @@ def _caption(tipo_diagrama, cfg):
     elif inst == "trafo":
         kva = cfg.get("trafo_kva",""); uso = cfg.get("trafo_uso","")
         partes = [f"{kva} kVA" if kva else "", uso]
+        tt = str(cfg.get("trafo_tipo") or "").lower()
+        fase_medida = {"mono": "monofasico", "bifasico": "bifasico"}.get(cfg.get("sistema", "tri4h"), "trifasico")
+        if tt in ("monofasico", "bifasico", "trifasico") and tt != fase_medida:
+            partes.insert(1, tt.replace("fasico", "fásico"))     # trafo y medida de distinta fase: se ve en el resumen
         if cfg.get("v_mt"): partes.append(str(cfg["v_mt"]))
         lineas.append("🔧 Trafo: " + (" · ".join(x for x in partes if x) or "sin datos"))
     elif inst == "barraje":
@@ -1276,6 +1286,16 @@ def _verificar_coherencia(cfg):
         kv_ = diagram_engine._kv_de(cfg["v_mt"])
         if kv_:
             cfg["v_mt"] = f"{kv_:g} kV"
+    tt_ = str(cfg.get("trafo_tipo") or "").strip().lower()
+    if (inst == "trafo" and not es_frontera and cfg.get("sistema") in ("tri3h", "tri4h")
+            and tt_ in ("monofasico", "bifasico")):
+        # La fase del transformador es independiente de la de la medida (trafo trifasico con medida mono o
+        # bifasica es normal), pero al reves no: un trafo mono/bifasico no alimenta una medida trifasica.
+        cfg["trafo_tipo"] = "trifasico"
+        notas_usuario.append(
+            f"Un transformador {tt_.replace('fasico', 'fásico')} no puede alimentar una medida trifásica: "
+            "dibujé el transformador trifásico. Si la medida es mono o bifásica, corrígelo."
+        )
     if (diagram_engine._gabinete_compartido(cfg) and not es_frontera and cfg.get("v_mt") and inst != "trafo"):
         # Un punto compartido alimentado en media tension tiene red MT + transformador: antes se descartaba
         # la MT ("sin trafo no hay tramo de MT") y el plano salia sin ella aunque el usuario la dio.
@@ -1974,6 +1994,21 @@ def _completar_con_parser(ia_cfg, textos, sobrescribir=False):
         poner("trafo_uso", "compartido")
     if vacio("instalacion") and pcfg.get("instalacion") == "trafo":
         poner("instalacion", "trafo")
+
+    # Fase del TRANSFORMADOR vs sistema de la MEDIDA ("transformador trifasico, medida bifasica"): el modelo
+    # suele confundirlas (pone todo trifasico o todo bifasico). Lo que el usuario DIJO con esas palabras
+    # manda; el ultimo mensaje que lo dice gana (corrige un dato anterior).
+    sis_dicho = tr_dicho = None
+    for t in textos:
+        s_, t_ = fases_dichas(t)
+        if t_:
+            tr_dicho = t_
+            if s_: sis_dicho = s_
+    if tr_dicho:
+        if ia.get("trafo_tipo") != tr_dicho:
+            poner("trafo_tipo", tr_dicho)
+        if sis_dicho and ia.get("sistema") != sis_dicho:
+            poner("sistema", sis_dicho)
 
     for k in _CAMPOS_GABINETE:
         v = pcfg.get(k)
@@ -3723,8 +3758,8 @@ PROMPT_PDF = (
     "\n"
     "=== GUIA DE CAMPOS ===\n"
     "nombre: rotulo corto del punto (ej. 'Subestacion principal').\n"
-    "sistema: mono (1 fase, 2 hilos) | bifasico | tri3h (trifasico 3 hilos, 2 elementos "
-    "Aron) | tri4h (trifasico 4 hilos, 3 elementos).\n"
+    "sistema (el de la MEDIDA, no el del transformador): mono (1 fase, 2 hilos) | bifasico | tri3h "
+    "(trifasico 3 hilos, 2 elementos Aron) | tri4h (trifasico 4 hilos, 3 elementos).\n"
     "tipo: directa (BT, sin TC) | semidirecta (BT con TC, sin TP) | indirecta (con TC y "
     "TP; medida en media tension o corrientes muy altas). Usa lo que diga el documento.\n"
     "norma: SOLO si el documento nombra 'CENS' o 'RA8' (PA-NC-RA8); si no, vacio.\n"
@@ -3740,7 +3775,8 @@ PROMPT_PDF = (
     "cerrado, 'no' si en red abierta o poste, vacio si no lo dice.\n"
     "n_trafos: entero >= 1 (0 si no lo dice). trafo_kva: ej '225'. trafo_kva_list: "
     "['225','112'] solo si hay varios trafos. trafo_tipo: monofasico | bifasico | "
-    "trifasico.\n"
+    "trifasico (fase del TRANSFORMADOR; es independiente de `sistema`: un trafo trifasico "
+    "puede alimentar una medida mono o bifasica).\n"
     "v_mt: tension de MT, ej '13.2 kV'. tension_bt: tension del secundario BT en voltios, "
     "ej '220' (con o sin trafo).\n"
     "proteccion_antes / proteccion_despues: ej '200 A' (proteccion antes / despues del "

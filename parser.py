@@ -55,6 +55,61 @@ def _extraer_planta(t, cfg, entendido):
     return re.sub(r"\btransferencia\s+(?:automatica|manual)\b|\bats\b", " ", t)
 
 
+# Fase del TRANSFORMADOR dicha junto a su nombre ("transformador trifasico", "trafo de 150 kVA trifasico",
+# "el transformador es trifasico"). Es independiente del sistema de la MEDIDA: un transformador trifasico
+# puede alimentar un medidor monofasico o bifasico.
+_FASE_PAL = {"mono": "monofasico", "bi": "bifasico", "tri": "trifasico"}
+_TRAFO_RELLENO = (r"(?:de|tipo|es|sera|seria|interno|interior|externo|exterior|compartido|exclusivo|propio|"
+                  r"privado|seco|nuevo|existente|distribucion|potencia|poste|pedestal|aceite|en|del|usuario|el|la)")
+_RE_FASE_TRAFO = re.compile(
+    r"\b(?:transformador(?:es)?|trafos?|trf)(?:\s+" + _TRAFO_RELLENO + r"){0,3}"
+    r"(?:\s+(?:de\s+)?\d+(?:[.,]\d+)?\s*kva)?(?:\s+es)?\s+(mono|bi|tri)fasic\w*")
+
+def _fase_trafo(t):
+    """(t sin la fase del transformador, 'monofasico'|'bifasico'|'trifasico'|''). La fase dicha junto a
+    'transformador'/'trafo' se saca del texto para que NO cuente como el sistema de la medida
+    ('transformador trifasico, medida bifasica' ya no es un 'Sistema ambiguo')."""
+    fases = []
+    def _quita(m):
+        fases.append(_FASE_PAL[m.group(1)])
+        return m.string[m.start():m.start(1)].rstrip()
+    t2 = _RE_FASE_TRAFO.sub(_quita, t)
+    return t2, (fases[0] if fases else "")
+
+
+def _sistemas_dichos(t):
+    """Sistemas de la MEDIDA que menciona `t` (texto normalizado y SIN la fase del trafo):
+    lista de 'mono' | 'bifasico' | 'tri3h' | 'tri4h' (vacia = no dijo; 2+ = ambiguo)."""
+    # G3: patrones específicos ("3 hilos", "4 hilos", "aron") tienen prioridad
+    # sobre el genérico "trifasic" para evitar ambigüedad en "trifasica 3 hilos".
+    tri3h_especificos = ["2 element", "dos element", "3 hilos", "trifilar", "aron"]
+    tri4h_especificos = ["3 element", "tres element", "4 hilos", "tetrafilar"]
+    # "bifasica 3 hilos" / "monofasica 3 hilos" son sistemas bifasico/monofasico, no trifasico de 3 hilos
+    bi_mono = bool(re.search(r"bifasic|monofasic|\b(?:mono|bi)\b", t)) and "trifasic" not in t
+    tiene_tri3h = any(p in t for p in tri3h_especificos if not (p == "3 hilos" and bi_mono))
+    tiene_tri4h = any(p in t for p in tri4h_especificos) or \
+                  ("trifasic" in t and not tiene_tri3h)
+    dicho = []
+    if "monofasic" in t or re.search(r"\bmono\b", t): dicho.append("mono")
+    if "bifasic" in t or re.search(r"\bbi\b", t):      dicho.append("bifasico")
+    if tiene_tri3h: dicho.append("tri3h")
+    if tiene_tri4h: dicho.append("tri4h")
+    return dicho
+
+
+def fases_dichas(text):
+    """(sistema de la medida | None, fase del transformador | None) tal como el usuario las DIJO en `text`
+    (None = no lo dijo o es ambiguo). Sin excepciones: lo usa el bot para no perder 'trafo trifasico,
+    medida bifasica' cuando el modelo de IA confunde las dos."""
+    try:
+        t, ft = _fase_trafo(_norm(text or ""))
+        dicho = _sistemas_dichos(t)
+        return (dicho[0] if len(dicho) == 1 else None), (ft or None)
+    except Exception:
+        return None, None
+
+
+
 def _extraer_trafos(t, cfg, entendido, faltante):
     """2+ transformadores (cantidad / lista de kVA / 'trafo 1 de 300 kVA, trafo 2 de 150 kVA'),
     configuracion (paralelo / independientes) y cual es el compartido. Solo actua con 2 o mas."""
@@ -327,25 +382,20 @@ def parse_spec(text):
     entendido.append(f"Tipo: {cfg['tipo']}")
 
     # --- SISTEMA ---
-    # G3: patrones específicos ("3 hilos", "4 hilos", "aron") tienen prioridad
-    # sobre el genérico "trifasic" para evitar ambigüedad en "trifasica 3 hilos".
-    tri3h_especificos = ["2 element", "dos element", "3 hilos", "trifilar", "aron"]
-    tri4h_especificos = ["3 element", "tres element", "4 hilos", "tetrafilar"]
-
-    tiene_tri3h = any(p in t for p in tri3h_especificos)
-    tiene_tri4h = any(p in t for p in tri4h_especificos) or \
-                  ("trifasic" in t and not tiene_tri3h)
-
-    detected_sistemas = []
-    if "monofasic" in t or re.search(r"\bmono\b", t): detected_sistemas.append("mono")
-    if "bifasic" in t or re.search(r"\bbi\b", t):      detected_sistemas.append("bifasico")
-    if tiene_tri3h: detected_sistemas.append("tri3h")
-    if tiene_tri4h: detected_sistemas.append("tri4h")
+    # La fase del TRANSFORMADOR no es el sistema de la MEDIDA ("transformador trifasico, medida bifasica"):
+    # se separa antes de buscar el sistema (y por eso queda fuera de t, que es lo que se analiza).
+    t, fase_trafo = _fase_trafo(t)
+    if fase_trafo:
+        cfg["trafo_tipo"] = fase_trafo
+        entendido.append(f"Transformador {fase_trafo}")
+    detected_sistemas = _sistemas_dichos(t)
 
     if len(detected_sistemas) > 1:
         raise ValueError(f"Sistema ambiguo: {detected_sistemas}. Especifica UNO: mono, bifasico, tri3h, tri4h")
     elif detected_sistemas:
         cfg["sistema"] = detected_sistemas[0]
+    elif fase_trafo:                       # solo se dijo la fase del trafo: la medida sigue esa fase
+        cfg["sistema"] = {"monofasico": "mono", "bifasico": "bifasico", "trifasico": "tri4h"}[fase_trafo]
 
     sis_txt = {"mono":"monofasica","bifasico":"bifasica",
                "tri3h":"trifasica 3 hilos (2 elem.)","tri4h":"trifasica 4 hilos (3 elem.)"}
@@ -460,12 +510,13 @@ def parse_spec(text):
         mk = re.search(r"(\d+(?:[.,]\d+)?)\s*kva", t)
         if mk:
             cfg["trafo_kva"] = mk.group(1).replace(",", ".")
-        if "bifasic" in t:
-            cfg["trafo_tipo"] = "bifasico"
-        elif "monofasic" in t:
-            cfg["trafo_tipo"] = "monofasico"
-        elif "trifasic" in t:
-            cfg["trafo_tipo"] = "trifasico"
+        if not cfg.get("trafo_tipo"):              # sin fase propia del trafo: la del sistema que se dijo
+            if "bifasic" in t:
+                cfg["trafo_tipo"] = "bifasico"
+            elif "monofasic" in t:
+                cfg["trafo_tipo"] = "monofasico"
+            elif "trifasic" in t:
+                cfg["trafo_tipo"] = "trifasico"
         mcc = re.search(r"(\d+)\s*cortacircuit", t)
         if mcc: cfg["n_cc"] = int(mcc.group(1))
         mtc = re.search(r"(\d+)\s*tc", t)

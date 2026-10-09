@@ -183,6 +183,13 @@ VARIANTES = {
     "r_8_usuarios": dict(trafo_n_usuarios="8"),
     "s_12_usuarios_respaldo_pos4": dict(trafo_n_usuarios="12", respaldo=True, posicion_medida="4", totalizador="antes", proteccion_antes="100 A"),
     "t_20_usuarios": dict(trafo_n_usuarios="20"),
+    "u_trafo_tri_medida_bif": dict(sistema="bifasico", trafo_tipo="trifasico", tension_bt="208/120", trafo_kva="150"),
+    "v_trafo_tri_medida_mono_respaldo": dict(sistema="mono", trafo_tipo="trifasico", tension_bt="120", respaldo=True,
+                                              totalizador="antes", proteccion_antes="40 A", posicion_medida="3"),
+    "w_trafo_mono_medida_bif": dict(sistema="bifasico", trafo_tipo="monofasico", tension_bt="240"),
+    "x_trafo_bif_medida_mono": dict(sistema="mono", trafo_tipo="bifasico", tension_bt="240"),
+    "y_medida_mono_sin_fase_trafo": dict(sistema="mono", tension_bt="120"),
+    "z_trafo_mono_medida_tri": dict(sistema="tri4h", trafo_tipo="monofasico"),
 }
 
 def prueba_dibujo():
@@ -270,6 +277,130 @@ def prueba_completar():
             nuevo, _t = bot._completar_con_parser(dict(ia), textos); chk(nuevo == ia or True, f"completar: tolera {textos!r}")
         except Exception as e:
             chk(False, f"completar: lanzo {type(e).__name__} con {textos!r}")
+
+# ── 1b) trafo trifasico + medida mono/bifasica (fases independientes) ───────────
+def prueba_fases():
+    # parser: la fase del trafo ya no es el sistema de la medida (antes: "Sistema ambiguo")
+    casos = [
+        ("medida directa bifasica, transformador trifasico de 150 kVA compartido con 4 mas, MT 13,2 kV", "bifasico", "trifasico"),
+        ("transformador trifasico y medida monofasica, gabinete compartido con 3", "mono", "trifasico"),
+        ("medida monofasica directa, trafo trifasico 75 kVA compartido", "mono", "trifasico"),
+        ("trafo trifasico, medida bifasica 3 hilos, compartido con 5", "bifasico", "trifasico"),
+        ("medida bifasica 3 hilos transformador monofasico compartido con 2", "bifasico", "monofasico"),
+        ("transformador de 150 kVA trifasico compartido, medidor monofasico", "mono", "trifasico"),
+        ("medida directa trifasica, transformador trifasico 225 kVA compartido con 4", "tri4h", "trifasico"),
+        ("monofasica directa con trafo 25 kVA exclusivo", "mono", "monofasico"),
+        ("transformador monofasico 25 kVA exclusivo, directa", "mono", "monofasico"),
+        ("trifasica 3 hilos indirecta CENS 200/5 13200/120", "tri3h", None),
+        ("bifasica 3 hilos directa", "bifasico", None),
+    ]
+    for frase, sis, tr in casos:
+        try:
+            c, _e, _f = parse_spec(frase)
+            chk(c["sistema"] == sis and c.get("trafo_tipo") == tr, f"parser: {frase[:62]!r} -> medida {c['sistema']}, trafo {c.get('trafo_tipo')}")
+        except ValueError as e:
+            chk(False, f"parser: {frase[:62]!r} lanzo {e}")
+    from parser import fases_dichas
+    chk(fases_dichas("medida bifasica, transformador trifasico") == ("bifasico", "trifasico")
+        and fases_dichas("trifasica 3 hilos") == ("tri3h", None) and fases_dichas("hola") == (None, None),
+        "fases_dichas: (medida, trafo) tal como se dijeron")
+
+    # dibujo: el trafo/barraje/acometida siguen al TRAFO; el ramal y el medidor, a la MEDIDA
+    base = dict(BASE, tension_bt="208/120", trafo_kva="150")
+    t, mal = textos_de(dict(base, sistema="bifasico", trafo_tipo="trifasico"))
+    chk(not mal, f"trafo trifasico + medida bifasica: sin superposiciones {mal[:3] if mal else ''}")
+    chk(any(x.startswith("Transformador trifásico") and "13,2 kV / 208-120 V" in x for x in t)
+        and "Acometida BT 3F + N + PE" in t and "Barraje BT\n(3F + N)" in t
+        and any(x.startswith("RED DE DISTRIBUCIÓN MT") and "13,2 kV – 3F" in x for x in t),
+        "trafo trifasico + medida bifasica: trafo, acometida y barraje son trifasicos")
+    chk("2F + N" in t and any(x.startswith("Medidor bifásico") for x in t)
+        and any(x.startswith("Totalizador termomagnético 2P") for x in t) and not any(x == "kWh\nkVArh" for x in t),
+        "trafo trifasico + medida bifasica: el ramal es 2F + N, medidor bifasico y totalizador 2P")
+    chk(any("Medida bifásica 3 hilos" in x for x in t) and not any("Sistema bifásica" in x for x in t),
+        "trafo trifasico + medida bifasica: el subtitulo dice 'Medida bifásica 3 hilos'")
+    chk(any(x.startswith("4. Transformador trifásico y medida bifásica") and "3F + N" in x and "2F + N" in x for x in t),
+        "trafo trifasico + medida bifasica: la nota explica la derivacion del barraje")
+    t, mal = textos_de(dict(base, sistema="mono", trafo_tipo="trifasico"))
+    chk("1F + N" in t and any(x.startswith("Medidor monofásico") for x in t) and "Barraje BT\n(3F + N)" in t
+        and any(x.startswith("Totalizador termomagnético 1P") for x in t) and not mal,
+        f"trafo trifasico + medida monofasica: ramal 1F + N, barraje 3F + N {mal[:3] if mal else ''}")
+    # tension dada sola ("120") con trafo trifasico y medida mono -> es la fase-neutro del secundario trifasico
+    t, _m = textos_de(dict(base, sistema="mono", trafo_tipo="trifasico", tension_bt="120"))
+    chk(any("13,2 kV / 208-120 V" in x for x in t) and not any("120-69" in x for x in t), "trafo trifasico + medida mono con '120 V' -> 208-120 V")
+    t, _m = textos_de(dict(base, sistema="mono", trafo_tipo="trifasico", tension_bt="220"))
+    chk(any("13,2 kV / 220-127 V" in x for x in t), "trafo trifasico + medida mono con '220 V' -> 220-127 V")
+    # trafo monofasico + medida bifasica (secundario de punto medio): barraje 2F + N
+    t, mal = textos_de(dict(base, sistema="bifasico", trafo_tipo="monofasico", tension_bt="240"))
+    chk(any(x.startswith("Transformador monofásico") for x in t) and "Barraje BT\n(2F + N)" in t and not mal,
+        "trafo monofasico + medida bifasica: barraje 2F + N")
+    # sin fase del trafo y medida mono: se dibuja segun la medida y se avisa (no se inventa trifasico)
+    t, _m = textos_de(dict(base, sistema="mono"))
+    chk("Barraje BT\n(1F + N)" in t and any(x.startswith("4. Fases del transformador sin indicar") for x in t),
+        "medida mono sin fase de trafo: barraje segun la medida y nota 'fases del transformador sin indicar'")
+    # medida y trafo de la misma fase: nada cambia (sin nota ni etiqueta extra)
+    t, _m = textos_de(dict(base, sistema="tri4h", trafo_tipo="trifasico"))
+    chk("2F + N" not in t and not any("Medida trifásica" in x or "sin indicar" in x for x in t),
+        "medida y trafo trifasicos: sin etiquetas ni notas de fases distintas")
+    # imposible: medida trifasica con trafo monofasico -> coherencia lo corrige (y avisa); el motor tambien
+    c, notas = bot._verificar_coherencia(dict(BASE, sistema="tri4h", trafo_tipo="monofasico"))
+    chk(c["trafo_tipo"] == "trifasico" and any("no puede alimentar una medida trifásica" in n for n in notas),
+        "coherencia: medida trifasica + trafo monofasico -> trafo trifasico y aviso")
+    c, notas = bot._verificar_coherencia(dict(BASE, sistema="bifasico", trafo_tipo="trifasico"))
+    chk(c["trafo_tipo"] == "trifasico" and c["sistema"] == "bifasico" and not any("no puede alimentar" in n for n in notas),
+        "coherencia: trafo trifasico + medida bifasica es valido (no se toca)")
+    fig = tf.capturar(dict(BASE, sistema="tri4h", trafo_tipo="bifasico")); tx = [x.get_text() for x in fig.axes[0].texts]; plt.close(fig)
+    chk(any("no alimenta una medida trifásica" in x for x in tx) and "Barraje BT\n(3F + N)" in tx,
+        "motor: con datos imposibles (sin pasar por coherencia) dibuja trifasico y lo anota")
+    # caption: se ve que trafo y medida son de distinta fase
+    cap = bot._caption("Diagrama Unifilar", dict(BASE, sistema="bifasico", trafo_tipo="trifasico", trafo_kva="150"))
+    chk("Bifásica" in cap and "Trafo: 150 kVA · trifásico" in cap, "caption: trafo trifásico con medida bifásica")
+    cap = bot._caption("Diagrama Unifilar", dict(BASE, sistema="tri4h", trafo_tipo="trifasico", trafo_kva="150"))
+    chk("Trafo: 150 kVA · compartido" in cap, "caption: misma fase -> sin repetir la fase del trafo")
+
+    # red de seguridad del dialogo: la IA confunde las fases (todo trifasico) y el texto del usuario manda
+    ia = {"sistema": "tri4h", "tipo": "directa", "salida": "unifilar", "norma": "RA8", "instalacion": "trafo",
+          "trafo_uso": "compartido", "trafo_n_usuarios": "4", "trafo_gabinete": True, "v_mt": "13.2 kV"}
+    frase = "medida directa bifasica RA8, transformador trifasico de 150 kVA, gabinete interior compartido con 4 mas, MT 13,2 kV"
+    nuevo, tocados = bot._completar_con_parser(ia, [frase])
+    chk(nuevo["sistema"] == "bifasico" and nuevo["trafo_tipo"] == "trifasico" and "trafo_tipo" in tocados,
+        f"completar: 'trafo trifasico, medida bifasica' corrige lo que la IA confundio ({tocados})")
+    nuevo, _t = bot._completar_con_parser(dict(ia, sistema="bifasico", trafo_tipo="trifasico"), [frase, "mejor el transformador es monofasico"])
+    chk(nuevo["trafo_tipo"] == "monofasico" and nuevo["sistema"] == "bifasico", "completar: el ultimo mensaje que dice la fase del trafo gana")
+    nuevo, tocados = bot._completar_con_parser(dict(ia), ["directa trifasica RA8, compartido con 4 mas"])
+    chk(nuevo.get("sistema") == "tri4h" and "sistema" not in tocados, "completar: sin fase de trafo dicha no toca el sistema de la IA")
+    # el prompt de la IA lo explica
+    chk("INDEPENDIENTES" in bot.PROMPT_DIAGRAMA and "trafo_tipo" in bot.PROMPT_DIAGRAMA and "sistema de la MEDIDA" in bot.PROMPT_DIAGRAMA,
+        "prompt: sistema (medida) y trafo_tipo son independientes")
+
+async def prueba_fases_dialogo():
+    llamadas = []
+    orig = de.draw_unifilar_gabinete
+    de.draw_unifilar_gabinete = lambda cfg, p: (llamadas.append(dict(cfg)), orig(cfg, p))[1]
+    try:
+        # la IA devuelve todo trifasico aunque el usuario dijo "medida bifasica, transformador trifasico"
+        confuso = ('DIAGRAMA_LISTO\n```json\n{"sistema":"tri4h","tipo":"directa","salida":"unifilar","norma":"RA8",'
+                   '"instalacion":"trafo","trafo_uso":"compartido","trafo_tipo":"trifasico","trafo_n_usuarios":"4",'
+                   '"trafo_gabinete":true,"v_mt":"13.2 kV"}\n```')
+        PETICIONES.clear(); bot._claude_client = cliente([ok(confuso)])
+        u, c = Upd(), Ctx(modo_diagrama_ia=True)
+        await bot._dialogo_diagrama(u, c, "medida directa bifasica RA8, transformador trifasico de 150 kVA, gabinete interior compartido con 4 mas, MT 13,2 kV")
+        cfg = llamadas[0] if llamadas else {}
+        chk(len(u.message.fotos) == 1 and cfg.get("sistema") == "bifasico" and cfg.get("trafo_tipo") == "trifasico",
+            f"dialogo: medida bifasica + trafo trifasico llegan al motor ({cfg.get('sistema')}, {cfg.get('trafo_tipo')})")
+        chk(u.message.fotos and "Bifásica" in u.message.fotos[0] and "trifásico" in u.message.fotos[0], "dialogo: el caption muestra las dos fases")
+        # el parser tampoco lanza ya "Sistema ambiguo": se recupera ademas todo lo del gabinete aunque la IA lo deje vacio
+        llamadas.clear()
+        pobre = ('DIAGRAMA_LISTO\n```json\n{"sistema":"tri4h","tipo":"directa","salida":"unifilar","norma":"RA8",'
+                 '"instalacion":"barraje","tension_bt":"208/120"}\n```')
+        bot._claude_client = cliente([ok(pobre)])
+        u, c = Upd(), Ctx(modo_diagrama_ia=True)
+        await bot._dialogo_diagrama(u, c, "directa monofasica RA8, transformador trifasico 225 kVA, gabinete compartido con 6 mas, MT 13200 V")
+        cfg = llamadas[0] if llamadas else {}
+        chk(cfg.get("sistema") == "mono" and cfg.get("trafo_tipo") == "trifasico" and cfg.get("trafo_n_usuarios") == "6"
+            and cfg.get("instalacion") == "trafo" and cfg.get("v_mt") == "13.2 kV" and cfg.get("trafo_kva") in ("225", None),
+            f"dialogo: JSON pobre + 'trafo trifasico, medida monofasica' -> se recupera todo ({cfg.get('sistema')}, {cfg.get('trafo_tipo')}, {cfg.get('trafo_n_usuarios')})")
+    finally:
+        de.draw_unifilar_gabinete = orig
 
 # ── 3) coherencia y caption ──────────────────────────────────────────────────
 def prueba_coherencia():
@@ -453,7 +584,9 @@ def main():
     prueba_parser()
     prueba_completar()
     prueba_coherencia()
+    prueba_fases()
     asyncio.run(prueba_dialogo())
+    asyncio.run(prueba_fases_dialogo())
     prueba_deteccion()
     asyncio.run(prueba_correccion())
     print("\nFALLOS:", MALOS)

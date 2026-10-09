@@ -1936,9 +1936,14 @@ def _gabinete_compartido(cfg):
 # tension linea-neutro habitual para cada tension de linea (sistemas trifasicos 4 hilos)
 _LN_STD = {208: 120, 220: 127, 380: 220, 400: 230, 440: 254, 460: 265, 480: 277, 600: 347}
 
-def _bt_texto(cfg, sistema):
+_LL_DE_LN = {120: 208, 127: 220, 230: 400, 254: 440, 265: 460, 277: 480, 347: 600}
+
+def _bt_texto(cfg, sistema, medida=None):
     """(texto de la tension secundaria, asumida): '220-127 V', '208-120 V'... Sin dato se asume
-    una tension habitual del sistema y se marca como asumida (el plano lo avisa en una nota)."""
+    una tension habitual del sistema y se marca como asumida (el plano lo avisa en una nota).
+    `sistema` es el del BARRAJE (lo fija el transformador); `medida` el de la medida si es otro
+    (trafo trifasico + medida mono/bifasica): un valor suelto de 120/127 V es entonces la tension
+    fase-neutro del secundario trifasico ('120' -> '208-120 V')."""
     raw = str(cfg.get("tension_bt") or cfg.get("v_bt") or "").strip()
     if not raw:
         t = str(cfg.get("tension", "") or "")
@@ -1952,6 +1957,8 @@ def _bt_texto(cfg, sistema):
         if len(nums) >= 2:                                     # '208/120', '220/127'
             return f"{ll:g}-{nums[1]:g} V", False
         if tri:
+            if medida and medida not in ("tri3h", "tri4h") and int(round(ll)) in _LL_DE_LN:
+                ll = _LL_DE_LN[int(round(ll))]
             ln = _LN_STD.get(int(round(ll))) or int(round(ll / math.sqrt(3)))
             return (f"{ll:g}-{ln} V" if sistema == "tri4h" else f"{ll:g} V"), False
         if sistema == "bifasico":
@@ -1992,9 +1999,6 @@ def draw_unifilar_gabinete(cfg, out_path):
     sistema = cfg.get("sistema", "tri4h")
     if sistema not in _SIS_PRO: sistema = "tri4h"
     tri = sistema in ("tri3h", "tri4h")
-    nf = {"mono": 1, "bifasico": 2, "tri3h": 3, "tri4h": 3}[sistema]            # marcas de conductores
-    f_txt = {"mono": "1F + N + PE", "bifasico": "2F + N + PE", "tri3h": "3F + PE", "tri4h": "3F + N + PE"}[sistema]
-    bus_txt = {"mono": "(1F + N)", "bifasico": "(2F + N)", "tri3h": "(3F)", "tri4h": "(3F + N)"}[sistema]
     hilos = {"mono": "monofásica 2 hilos", "bifasico": "bifásica 3 hilos", "tri3h": "trifásica 3 hilos",
              "tri4h": "trifásica 4 hilos"}[sistema]
     med_adj = {"mono": "monofásico", "bifasico": "bifásico", "tri3h": "trifásico", "tri4h": "trifásico"}[sistema]
@@ -2002,6 +2006,28 @@ def draw_unifilar_gabinete(cfg, out_path):
     kv = _kv_de(cfg.get("v_mt"))
     kv_es = (f"{kv:g}".replace(".", ",") + " kV") if kv else ""
     con_trafo = cfg.get("instalacion") == "trafo"
+
+    # El TRANSFORMADOR y la MEDIDA tienen fases independientes: un trafo trifasico puede alimentar un medidor
+    # mono o bifasico. `sistema` es el de la medida (ramal de ESTE usuario); `sis_bus` el del barraje BT y de la
+    # acometida, que lo fija el trafo. Sin `trafo_tipo` se asume igual al de la medida (y una nota lo avisa).
+    tt = {"trifasico": "trifasico", "monofasico": "monofasico", "bifasico": "bifasico"}.get(
+        str(cfg.get("trafo_tipo") or "").strip().lower(), "")
+    sis_bus, nota_fases = sistema, []
+    if con_trafo and tt:
+        sis_bus = {"trifasico": "tri3h" if sistema == "tri3h" else "tri4h", "bifasico": "bifasico",
+                   "monofasico": "bifasico" if sistema == "bifasico" else "mono"}[tt]      # mono + punto medio = 2F + N
+        if tri and sis_bus not in ("tri3h", "tri4h"):         # una medida trifasica no sale de un trafo mono/bifasico
+            nota_fases.append(f"Un transformador {tt.replace('fasico', 'fásico')} no alimenta una medida trifásica: se dibujó el transformador trifásico.")
+            sis_bus, tt = sistema, "trifasico"
+    tri_t = sis_bus in ("tri3h", "tri4h")                    # el transformador es trifasico
+    nf = {"mono": 1, "bifasico": 2, "tri3h": 3, "tri4h": 3}[sis_bus]            # marcas de conductores del barraje
+    nf_m = {"mono": 1, "bifasico": 2, "tri3h": 3, "tri4h": 3}[sistema]          # ... y del ramal de la medida
+    nf_mt = {"trifasico": 3, "bifasico": 2, "monofasico": 1}.get(tt, nf)         # ... y del bajante MT
+    f_txt = {"mono": "1F + N + PE", "bifasico": "2F + N + PE", "tri3h": "3F + PE", "tri4h": "3F + N + PE"}[sis_bus]
+    bus_txt = {"mono": "(1F + N)", "bifasico": "(2F + N)", "tri3h": "(3F)", "tri4h": "(3F + N)"}[sis_bus]
+    f_med = {"mono": "1F + N", "bifasico": "2F + N", "tri3h": "3F", "tri4h": "3F + N"}[sistema]
+    fases_dif = con_trafo and bool(tt) and f_med != bus_txt.strip("()")     # el medidor toma solo parte del barraje
+    sis_dif = sis_bus != sistema
     gab = cfg.get("trafo_gabinete")
     gab_si = gab is True
     respaldo = bool(cfg.get("respaldo", False))
@@ -2043,11 +2069,10 @@ def draw_unifilar_gabinete(cfg, out_path):
     tipo_int = str(cfg.get("interruptor_tipo") or "termomagnético").strip() or "termomagnético"
     if tipo_int.lower().startswith("termomagnetico"): tipo_int = "termomagnético"
     clase = _t1(cfg.get("clase_medidor"), 12)
-    bt_txt, bt_asumida = _bt_texto(cfg, sistema)
+    bt_txt, bt_asumida = _bt_texto(cfg, sis_bus, sistema if sis_dif else None)
     kva = _num(cfg.get("trafo_kva"))
     kva_txt = f"{_kva_txt(kva)} kVA" if kva is not None else "___ kVA  (por definir)"
-    tt = str(cfg.get("trafo_tipo") or "").lower()
-    tipo_trafo = {"trifasico": "trifásico", "monofasico": "monofásico", "bifasico": "bifásico"}.get(tt, "trifásico" if tri else "")
+    tipo_trafo = {"trifasico": "trifásico", "monofasico": "monofásico", "bifasico": "bifásico"}.get(tt, "trifásico" if tri_t else "")
     bajante = _t1(cfg.get("bajante_mt"), 50)
     planta = _planta_de(cfg)
     circuito = _t1(cfg.get("circuito"), 30)
@@ -2127,6 +2152,13 @@ def draw_unifilar_gabinete(cfg, out_path):
         notas.append("Seccionador en el lado BT, aguas abajo del transformador.")
     if secc and secc_open and con_trafo:
         notas.append("El seccionador se dibuja ABIERTO (instalación desenergizada).")
+    notas += nota_fases
+    if fases_dif:
+        notas.append(f"Transformador {tipo_trafo} y medida {_SIS_PRO[sistema][1]}: el medidor se deriva del barraje BT "
+                     f"{bus_txt} con {f_med}; fase(s) de conexión por definir en campo.")
+    elif con_trafo and not tt and sistema != "tri4h":
+        notas.append(f"Fases del transformador sin indicar: se dibujó según el sistema de la medida ({_SIS_PRO[sistema][1]}). "
+                     "Si es trifásico, indícalo.")
     if not otros_def:
         notas.append("Cantidad de usuarios del gabinete por definir: se muestran 2 posiciones de ejemplo.")
     elif mas:
@@ -2158,9 +2190,10 @@ def draw_unifilar_gabinete(cfg, out_path):
         ax.plot(xx, yy, color=c, lw=lw, ls=ls, solid_capstyle="butt", zorder=z)
     def T(xx, yy, s, ha="left", va="center", fs=9.0, fw="normal", c=K, st="normal"):
         ax.text(xx, yy, s, ha=ha, va=va, fontsize=fs, fontweight=fw, color=c, style=st, zorder=6)
-    def marcas(xx, yy):                            # marcas de conductores (3 = trifasico) sobre un tramo vertical
-        for k in range(nf):
-            d = (k - (nf - 1) / 2) * 1.6
+    def marcas(xx, yy, n=None):                    # marcas de conductores (3 = trifasico) sobre un tramo vertical
+        n = nf if n is None else n
+        for k in range(n):
+            d = (k - (n - 1) / 2) * 1.6
             ax.plot([xx - 1.2, xx + 1.2], [yy + d - 0.9, yy + d + 0.9], color=K, lw=1.3, zorder=5, solid_capstyle="butt")
     def marcas_h(xx, yy):                          # ... y sobre un tramo horizontal
         for k in range(nf):
@@ -2188,7 +2221,8 @@ def draw_unifilar_gabinete(cfg, out_path):
         titulo = f"DIAGRAMA UNIFILAR – MEDIDA DIRECTA {'INTERIOR ' if gab_si else ''}EN GABINETE COMPARTIDO{cnt}"
     partes = []
     if con_trafo: partes.append(f"Red MT {kv_es}" if kv_es else "Red MT")
-    if sistema != "tri4h": partes.append(f"Sistema {hilos}")
+    if sis_dif: partes.append(f"Medida {hilos}")                     # trafo y medida de distinta fase
+    elif sistema != "tri4h": partes.append(f"Sistema {hilos}")
     if con_trafo and sub_sub: partes.append(sub_sub)
     partes.append("Barraje común" + (" con totalizador posterior al medidor" if tot_pos == "despues" else
                                      " con totalizador previo al medidor" if tot_pos == "antes" else ""))
@@ -2206,17 +2240,17 @@ def draw_unifilar_gabinete(cfg, out_path):
     # ── red MT + subestacion + acometida BT ───────────────────────────────────
     BT_TOP = 80.0                                  # borde superior de subestacion y gabinete
     if con_trafo:
-        T(30, 97, "RED DE DISTRIBUCIÓN MT" + (f"\n{kv_es} – 3F" if kv_es and tri else f"\n{kv_es}" if kv_es else ""),
+        T(30, 97, "RED DE DISTRIBUCIÓN MT" + (f"\n{kv_es} – 3F" if kv_es and tri_t else f"\n{kv_es}" if kv_es else ""),
           ha="center", fs=10, fw="bold")
         L([18, 42], [93, 93], lw=3)
-        marcas(30, 90.5)
+        marcas(30, 90.5, nf_mt)
         T(36, 85, "\n".join(_bajante_lineas(bajante) + ([kv_es] if kv_es else [])), fs=9)
         if sub_caja:
             box(10, y_ac + 4.0, 60, BT_TOP - (y_ac + 4.0))
             T(44, 77.5, sub_titulo, ha="center", fs=9, fw="bold", c="gray")
         if secc == "antes":
             L([30, 30], [93, 72]); switch(30, 68); L([30, 30], [64, 56])
-            T(46, 68, "Seccionador MT" + f"\n(según norma {norma})" + (f"\n{kv_es} – 3P" if kv_es and tri else "")
+            T(46, 68, "Seccionador MT" + f"\n(según norma {norma})" + (f"\n{kv_es} – 3P" if kv_es and tri_t else "")
               + ("\nABIERTO" if secc_open else ""), fs=9)
         else:
             L([30, 30], [93, 56])
@@ -2225,7 +2259,7 @@ def draw_unifilar_gabinete(cfg, out_path):
           + (f"{kv_es} / {bt_txt}" if kv_es else f"MT / {bt_txt}") + ("\n(verificar tensión BT)" if bt_asumida else ""), fs=9)
         if secc == "despues":
             L([30, 30], [43.3, 34.0]); switch(30, 30.0); L([30, 30], [26.0, y_ac])
-            T(46, 30, "Seccionador BT" + ("\n3P" if tri else "") + ("\nABIERTO" if secc_open else ""), fs=9)
+            T(46, 30, "Seccionador BT" + ("\n3P" if tri_t else "") + ("\nABIERTO" if secc_open else ""), fs=9)
             marcas(30, 38.0)
         else:
             L([30, 30], [43.3, y_ac]); marcas(30, 39.5)
@@ -2269,7 +2303,9 @@ def draw_unifilar_gabinete(cfg, out_path):
         switch(x0, yc, h=8.0)
         ax.add_patch(Rectangle((x0 - 1.8, yc - 1), 3.6, 2, fill=False, lw=1, ec=K, zorder=6))
         T(lab_x, yc, tot_lines, fs=9, fw="bold")
-    L([x0, x0], [BY, (yc_ta + 4.0) if yc_ta is not None else (y_n1 if respaldo else y_med_top)]); marcas(x0, BY - 4.0)
+    L([x0, x0], [BY, (yc_ta + 4.0) if yc_ta is not None else (y_n1 if respaldo else y_med_top)]); marcas(x0, BY - 4.0, nf_m)
+    if fases_dif:
+        T(x0 - 2.4, BY - 4.0, f_med, ha="right", fs=7.5, c="#1f6fb2")      # conductores que toma la medida del barraje
     if yc_ta is not None:                          # totalizador ANTES del medidor
         totalizador(yc_ta)
         L([x0, x0], [y_ta_bot, y_n1 if respaldo else y_med_top])
@@ -2293,7 +2329,7 @@ def draw_unifilar_gabinete(cfg, out_path):
         L([x0, x0], [y_sale, yc_td + 4.0]); totalizador(yc_td)
         y_sale = y_td_bot
     L([x0, x0], [y_sale, y_load0])
-    if y_sale - y_load0 >= 6.0: marcas(x0, (y_sale + y_load0) / 2 - 1.0)
+    if y_sale - y_load0 >= 6.0: marcas(x0, (y_sale + y_load0) / 2 - 1.0, nf_m)
     ax.add_patch(Rectangle((bx0, y_load1), bx1 - bx0, y_load0 - y_load1, fc="white", ec=K, lw=2, zorder=4))
     T(x0, (y_load0 + y_load1) / 2, "CARGA DEL USUARIO", ha="center", fs=9, fw="bold")
 
@@ -2866,7 +2902,10 @@ def draw_unifilar_generico(cfg, out_path):
             _ground(ax, xc + 3.5, gnd_y, 0.5)
             trafo_lbl = f"Trafo {trafo_tipo}\n{kva} kVA" if kva else f"Trafo {trafo_tipo}"
 
-        if sistema in ("tri3h", "tri4h") and "mono" not in trafo_tipo.lower():
+        # Dyn11 depende del TRANSFORMADOR (trifasico), no de la medida: un trafo trifasico puede alimentar
+        # un medidor mono o bifasico. Sin fase de trafo dicha se sigue el sistema de la medida.
+        _tt = str(trafo_tipo or "").lower()
+        if _tt.startswith("tri") or (not _tt and sistema in ("tri3h", "tri4h")):
             trafo_lbl += "\nDyn11"
         ax.text(xc - 8, trafo_y, trafo_lbl,
                 ha="right", va="center", fontsize=8.5, color=INK, fontweight="bold")
