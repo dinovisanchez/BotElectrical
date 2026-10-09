@@ -934,11 +934,40 @@ PROMPT_DIAGRAMA = (
     "- SIEMPRE que instalacion=trafo, el campo trafo_uso del JSON debe quedar en "
     "'exclusivo' o 'compartido' (nunca vacio) — el unifilar dibuja el barraje BT y la "
     "derivacion a otros usuarios de forma distinta segun este dato.\n"
-    "- Si trafo_uso='compartido', pregunta ADEMAS (una pregunta a la vez): "
+    "- Si trafo_uso='compartido', pregunta ADEMAS -- SOLO lo que el usuario aun no dijo (una "
+    "pregunta a la vez): "
     "(1) cuantos otros usuarios comparten aprox. (trafo_n_usuarios), y "
     "(2) si el punto de derivacion esta en un gabinete/cuarto cerrado "
     "(trafo_gabinete=true, se dibuja encerrado) o en red abierta / poste "
     "(trafo_gabinete=false, no se encierra).\n"
+    "\n"
+    "=== GABINETE / PUNTO COMPARTIDO (el usuario YA lo describio: NO lo pierdas) ===\n"
+    "Si el usuario describe varios medidores en un mismo gabinete o punto (ej. 'gabinete "
+    "interior compartido con 4 medidores mas', '5 medidores en total', 'trafo compartido con 6 "
+    "usuarios'), el diagrama es el plano de GABINETE COMPARTIDO y TODO lo que dijo debe quedar "
+    "en el JSON -- no lo reduzcas a 'barraje -> medidor -> carga':\n"
+    "- trafo_uso='compartido' y trafo_n_usuarios = cuantos OTROS medidores hay (ESTE no cuenta: "
+    "'4 medidores mas' -> '4'; '5 medidores en total' -> '4').\n"
+    "- Si menciona transformador, subestacion, red o tension de media (MT/13.2 kV...): "
+    "instalacion='trafo' (NUNCA 'barraje') y v_mt con esa tension.\n"
+    "- Gabinete/cuarto/interior -> trafo_gabinete=true; red abierta/poste -> false.\n"
+    "- posicion_medida: en que posicion del gabinete (de izquierda a derecha) esta ESTE medidor "
+    "(solo si el usuario lo dijo; si no, omitelo y queda de primero).\n"
+    "- ubicacion_trafo: 'interior' | 'poste' | 'exterior' | 'camara' (solo si lo dijo).\n"
+    "- Tension del secundario (ej. 220 V, 208/120 V) -> tension_bt, SIEMPRE, tambien con trafo.\n"
+    "- Totalizador/interruptor general del ramal: totalizador='antes' o 'despues' del medidor "
+    "(solo si lo dijo; 'posterior al medidor' = 'despues') y su amperaje en "
+    "proteccion_antes/proteccion_despues.\n"
+    "- Seccionador de media tension (ej. 'seccionador MT segun RA8'): seccionador='antes'.\n"
+    "- NO PREGUNTES kVA del transformador, amperaje del totalizador, clase del medidor, "
+    "tension BT ni calibre: si el usuario no los dio, el plano los rotula '___ (por definir)'. "
+    "Preguntar eso es lo que hace lento el flujo.\n"
+    "\n"
+    "=== CORRECCION DE UN DIAGRAMA YA GENERADO ===\n"
+    "Si la conversacion empieza con 'DIAGRAMA ANTERIOR (JSON)', el usuario esta corrigiendo ese "
+    "diagrama (ej. 'no mostro el cuadro de lo compartido con 4 mas'). Responde de inmediato con "
+    "DIAGRAMA_LISTO y el JSON anterior COMPLETO mas el cambio pedido, sin preguntar nada salvo que "
+    "el cambio sea imposible de entender. No quites campos que el usuario no pidio quitar.\n"
     "\n"
     "=== SENAL DE DIAGRAMA LISTO ===\n"
     "Cuando tengas TODA la informacion critica, responde EXACTAMENTE:\n"
@@ -970,7 +999,8 @@ PROMPT_DIAGRAMA = (
     'norma: "RA8" | "CENS"\n'
     'instalacion: "trafo" | "barraje" | "" (vacio = red sin trafo)\n'
     'trafo_uso: "exclusivo" | "compartido" (obligatorio si instalacion="trafo")\n'
-    "trafo_n_usuarios: string ej '6' (solo si trafo_uso='compartido')\n"
+    "trafo_n_usuarios: string ej '6' = cantidad de OTROS usuarios/medidores (sin contar este; "
+    "solo si trafo_uso='compartido')\n"
     'trafo_gabinete: true | false (solo si trafo_uso=\'compartido\'; '
     "true=gabinete/cuarto cerrado, false=red abierta/poste)\n"
     "n_trafos: entero >= 1\n"
@@ -994,7 +1024,14 @@ PROMPT_DIAGRAMA = (
     "respaldo: true | false\n"
     "v_mt: string ej '13.2 kV' (tension MT -- indirecta, o directa/semidirecta "
     "con instalacion=trafo; en los demas casos se ignora)\n"
-    "tension_bt: string ej '220' (solo si instalacion=barraje)\n"
+    "tension_bt: string ej '220' o '208/120' (tension del secundario BT, con o sin trafo; "
+    "solo si el usuario la dio)\n"
+    'ubicacion_trafo: "interior" | "poste" | "exterior" | "camara" (solo si el usuario lo dijo)\n'
+    'totalizador: "antes" | "despues" (interruptor general respecto al medidor; solo si lo dijo)\n'
+    "posicion_medida: string ej '3' (lugar de ESTE medidor en el gabinete, de izquierda a derecha; "
+    "solo si el usuario lo dijo)\n"
+    "clase_medidor: string ej '0.5S' o '1' (solo si el usuario la dio)\n"
+    "bajante_mt: string ej 'tuberia metalica 4\"' (solo si el usuario lo describio)\n"
     "circuito: string ej 'Magdalena' o '5' (identificacion del circuito, "
     "solo si el usuario la menciono; \"\" si no aplica)\n"
     "interruptor_polos: string ej '3' (solo si ya hay proteccion_antes/despues)\n"
@@ -1156,10 +1193,20 @@ def _caption(tipo_diagrama, cfg):
         lineas.append(f"🔧 Transformadores: {diagram_engine._resumen_trafos(trafos_acta)} · {conf}")
     elif inst == "trafo":
         kva = cfg.get("trafo_kva",""); uso = cfg.get("trafo_uso","")
-        lineas.append(f"🔧 Trafo: {kva} kVA {uso}".strip())
+        partes = [f"{kva} kVA" if kva else "", uso]
+        if cfg.get("v_mt"): partes.append(str(cfg["v_mt"]))
+        lineas.append("🔧 Trafo: " + (" · ".join(x for x in partes if x) or "sin datos"))
     elif inst == "barraje":
         t_bt = cfg.get("tension_bt","")
         lineas.append(f"🏗️ Barraje: {t_bt} V" if t_bt else "🏗️ Barraje BT")
+    if diagram_engine._gabinete_compartido(cfg) and not trafos_acta:
+        try: otros = max(0, int(float(cfg.get("trafo_n_usuarios") or 0)))
+        except (TypeError, ValueError): otros = 0
+        donde = "gabinete cerrado" if cfg.get("trafo_gabinete") is True else "red abierta"
+        lineas.append(f"🗄️ Punto compartido: {otros + 1} medidores ({otros} más) · {donde}" if otros
+                      else f"🗄️ Punto compartido · {donde}")
+        if cfg.get("totalizador") in ("antes", "despues"):
+            lineas.append(f"🔌 Totalizador {'antes' if cfg['totalizador'] == 'antes' else 'después'} del medidor")
     if cfg.get("seccionador"):
         lineas.append(f"🔀 Seccionador: {_SECC_TXT.get(cfg['seccionador'], cfg['seccionador'])}"
                       + ("  ·  ABIERTO" if _estado_secc(cfg) == "abierto" else ""))
@@ -1274,6 +1321,24 @@ def _verificar_coherencia(cfg):
     if tipo == "semidirecta" and not cfg.get("rel_tc"):
         log.warning("[coherencia] semidirecta sin relacion de TC")
 
+    if diagram_engine._gabinete_compartido(cfg) and not es_frontera:
+        # Plano de gabinete compartido (medida directa con otros usuarios). Hay otros usuarios
+        # aunque nadie haya dicho "compartido": el trafo / punto es compartido.
+        if not cfg.get("trafo_uso"):
+            cfg["trafo_uso"] = "compartido"
+        if cfg.get("trafo_gabinete") is None:
+            cfg["trafo_gabinete"] = False
+            notas_usuario.append(
+                "No especificaste si el punto compartido está en gabinete "
+                "cerrado o red abierta: el diagrama asume RED ABIERTA (sin encerrar)."
+            )
+        try: n_otros = int(float(cfg.get("trafo_n_usuarios") or 0))
+        except (TypeError, ValueError): n_otros = 0
+        if n_otros <= 0:
+            notas_usuario.append(
+                "No indicaste cuántos otros usuarios comparten el punto: dibujé 2 posiciones de ejemplo."
+            )
+
     if inst == "trafo":
         if not cfg.get("trafo_kva") and not any(t.get("kva") for t in (cfg.get("transformadores") or []) if isinstance(t, dict)):
             log.warning("[coherencia] instalacion=trafo sin kVA")
@@ -1375,6 +1440,7 @@ async def _enviar_foto(mensaje, cfg, ctx=None):
     # /guardar -- solo si se paso ctx (algunos call sites viejos no lo tenian).
     if ctx is not None:
         ctx.user_data["ultimo_cfg"] = dict(cfg)
+        ctx.user_data["ultimo_ts"] = time.time()
 
 # ── Prompt validación de conexiones (Gemini Vision) ──────────────────────────
 PROMPT_VALIDACION_CX = (
@@ -1834,6 +1900,130 @@ async def _consulta_retie(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto:
             )
 
 
+# Campos del plano de GABINETE COMPARTIDO que el parser (regex, determinista) sabe leer del texto.
+_CAMPOS_GABINETE = ("trafo_n_usuarios", "trafo_gabinete", "ubicacion_trafo", "totalizador", "v_mt",
+                    "tension_bt", "bajante_mt", "clase_medidor", "proteccion_antes",
+                    "proteccion_despues", "interruptor_polos", "interruptor_tipo", "seccionador", "posicion_medida")
+
+def _completar_con_parser(ia_cfg, textos, sobrescribir=False):
+    """Red de seguridad del dialogo IA. Un modelo chico (Haiku) puede dejar fuera del JSON algo que
+    el usuario SI dijo -- el caso real: 'medida directa, MT 13,2 kV, transformador interno, gabinete
+    compartido con 4 medidores mas...' salio como 'barraje 220 V -> medidor -> carga'. Aqui se lee el
+    texto del usuario con parse_spec (determinista, sin IA) y se recupera lo que falte.
+    - Por defecto solo RELLENA campos vacios: si la IA puso un valor, manda la IA.
+    - Excepcion (punto compartido dicho con una cantidad explicita: 'compartido con 4 mas'): el
+      usuario ya dijo que hay otros medidores, asi que trafo_uso='compartido', y con mencion de
+      transformador/subestacion/MT la instalacion es 'trafo' (nunca 'barraje').
+    - sobrescribir=True (correcciones: el mensaje es la ultima palabra del usuario): el valor que
+      el parser lee del texto reemplaza al de la IA en los campos de _CAMPOS_GABINETE.
+    Devuelve (ia_cfg_nuevo, [campos tocados]); nunca lanza: ante cualquier duda deja el JSON igual."""
+    ia = dict(ia_cfg)
+    tocados = []
+    try:
+        base = " . ".join(t for t in textos if t and t.strip())
+        if not base.strip():
+            return ia, tocados
+        try:
+            pcfg, _ent, _falt = parse_spec(base)
+        except ValueError:                       # p.ej. "Norma ambigua": se prueba mensaje por mensaje
+            pcfg = {}
+            for t in textos:
+                try:
+                    pc, _e, _f = parse_spec(t)
+                except ValueError:
+                    continue
+                for k in _CAMPOS_GABINETE + ("trafo_uso", "instalacion"):
+                    if pc.get(k) not in (None, "") and pc.get(k) != DEFAULT.get(k):
+                        pcfg[k] = pc[k]
+    except Exception as e:                       # el parser nunca debe tumbar el dialogo
+        log.warning(f"_completar_con_parser: {e}")
+        return ia, tocados
+
+    def vacio(k):
+        return ia.get(k) in (None, "", [])
+
+    def poner(k, v):
+        ia[k] = v
+        tocados.append(k)
+
+    fuerte = bool(pcfg.get("trafo_n_usuarios")) and pcfg.get("trafo_uso") == "compartido"
+    if fuerte:
+        if ia.get("trafo_uso") != "compartido":
+            poner("trafo_uso", "compartido")
+        if ia.get("instalacion") != "trafo" and pcfg.get("instalacion") == "trafo":
+            poner("instalacion", "trafo")
+        if str(ia.get("tipo") or "").lower() not in ("directa", "semidirecta", "indirecta"):
+            poner("tipo", "directa")
+    elif pcfg.get("trafo_uso") == "compartido" and vacio("trafo_uso"):
+        poner("trafo_uso", "compartido")
+    if vacio("instalacion") and pcfg.get("instalacion") == "trafo":
+        poner("instalacion", "trafo")
+
+    for k in _CAMPOS_GABINETE:
+        v = pcfg.get(k)
+        if v in (None, ""):
+            continue
+        if k == "trafo_gabinete":
+            if v is True or v is False:
+                if ia.get(k) is None or (sobrescribir and ia.get(k) != v):
+                    poner(k, v)
+        elif vacio(k) or (sobrescribir and str(ia.get(k)) != str(v)):
+            poner(k, v)
+    return ia, tocados
+
+
+# Mensaje que corrige/ajusta el ULTIMO diagrama ("no mostro el cuadro de lo compartido con 4 mas",
+# "agrega el totalizador", "cambialo a 220 V"). Solo aplica con un diagrama reciente en la sesion.
+CORRECCION_VENTANA_S = 20 * 60
+def _sin_tildes(t):
+    return "".join(c for c in unicodedata.normalize("NFD", t or "") if unicodedata.category(c) != "Mn").lower()
+
+# Las regex trabajan sobre texto SIN tildes y en minusculas (_sin_tildes).
+_RE_CORR_VERBO = re.compile(
+    r"\b(?:no\s+(?:mostr|muestr|aparec|sale|salio|se\s+ve|dibuj|incluy|tiene|trae|puso|pusiste|hizo|hiciste|"
+    r"esta|era|es\s+asi)\w*|falt\w+|agreg\w+|anad\w+|quit\w+|elimin\w+|borr\w+|cambi\w+|corrig\w+|"
+    r"ponle|ponme|pon\b|incluy\w+|mal\b|equivoc\w+|erroneo|incorrect\w+|asi\s+no|"
+    r"como\s+(?:el\s+)?ejemplo|igual\s+al?\s+ejemplo|mejor\s+(?:ponlo|hazlo|dibuja))")
+_RE_CORR_OBJETO = re.compile(
+    r"\b(?:diagrama|unifilar|plano|imagen|dibujo|cuadro|gabinete|seccionador|totalizador|medidor\w*|"
+    r"transformador\w*|trafo\w*|planta|celda|usuarios?|compartid\w+|bloque|tc|tp|conexion\w*|"
+    r"barraje|tension|kva|amperi\w+|calibre|mt|bt|v|rotulo|etiqueta|simbolo)\b")
+_RE_CORR_NORMATIVA = re.compile(r"\b(?:retie|creg|resoluci\w+|articulo|reglamento|ley|norma\s+tecnica)\b")
+_RE_CORR_CORTES = re.compile(r"^\s*(?:por\s+favor\s*,?\s*)?(?:puedes|podrias|me\s+puedes|me\s+podrias)\b")
+
+def _es_correccion_diagrama(ctx, texto):
+    """True si `texto` parece pedir un cambio al ultimo diagrama generado (y no una consulta normativa)."""
+    ud = ctx.user_data
+    if not ud.get("ultimo_cfg") or not _claude_client:
+        return False
+    if time.time() - float(ud.get("ultimo_ts") or 0) > CORRECCION_VENTANA_S:
+        return False
+    if len(texto or "") > 400:                    # un parrafo largo es una descripcion nueva, no un ajuste
+        return False
+    t = _sin_tildes(texto)
+    if not (_RE_CORR_VERBO.search(t) and _RE_CORR_OBJETO.search(t)):
+        return False
+    if _RE_CORR_NORMATIVA.search(t):
+        return False
+    if "?" in t and not _RE_CORR_CORTES.search(t):  # una pregunta suelta es consulta, no orden
+        return False
+    return True
+
+async def _corregir_diagrama(update, ctx, texto):
+    """Corrige el ultimo diagrama: se siembra el dialogo IA con su JSON y el mensaje del usuario.
+    La IA devuelve el JSON completo con el cambio (o hace UNA pregunta); el resultado se completa
+    con el parser y se redibuja."""
+    cfg = ctx.user_data.get("ultimo_cfg") or {}
+    base = {k: v for k, v in cfg.items() if v not in (None, "", [])}
+    ctx.user_data["historial_retie"] = []
+    ctx.user_data["modo_diagrama_ia"] = True
+    ctx.user_data["historial_diagrama"] = [{
+        "role": "user", "sembrado": True,
+        "text": "DIAGRAMA ANTERIOR (JSON): " + json.dumps(base, ensure_ascii=False, default=str),
+    }]
+    await _dialogo_diagrama(update, ctx, texto)
+
+
 async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
     """Conversacion guiada por Claude. Historial = lista de {"role":"user"|"model","text":"..."}"""
     if not _claude_client:
@@ -1845,6 +2035,8 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
 
     historial: list = ctx.user_data.setdefault("historial_diagrama", [])
     historial.append({"role": "user", "text": texto_usuario})
+    # Corrigiendo un diagrama ya generado: el primer mensaje sembrado lleva su JSON.
+    corrigiendo = bool(historial and historial[0].get("sembrado"))
 
     # Construir conversacion (el prompt del sistema va aparte, en el parametro "system")
     conv = "--- CONVERSACION ---\n"
@@ -1954,6 +2146,14 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
         if json_m:
             try:
                 ia_cfg = json.loads(json_m.group(1))
+                if not isinstance(ia_cfg, dict):
+                    raise ValueError("el JSON no es un objeto")
+                # Red de seguridad: lo que el usuario escribio y la IA dejo fuera del JSON
+                # (gabinete compartido, MT, totalizador...) se recupera con el parser.
+                textos_u = [m["text"] for m in historial if m["role"] == "user" and not m.get("sembrado")]
+                ia_cfg, recuperados = _completar_con_parser(ia_cfg, textos_u, sobrescribir=bool(corrigiendo))
+                if recuperados:
+                    log.info("dialogo_diagrama: campos completados con el parser: %s", ", ".join(recuperados))
                 cfg = dict(DEFAULT)
                 for k, v in ia_cfg.items():
                     if v is not None and v != "":
@@ -1971,8 +2171,8 @@ async def _dialogo_diagrama(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text
                         "⚠️ No pude generar el diagrama.\n\nUsa /menu para configuración guiada."
                     )
                 return
-            except (json.JSONDecodeError, KeyError) as e:
-                log.error(f"JSON malformado de Gemini diagrama: {e}\n{respuesta}")
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                log.error(f"JSON malformado del dialogo de diagrama: {e}\n{respuesta}")
         ctx.user_data["modo_diagrama_ia"] = False
         ctx.user_data["historial_diagrama"] = []
         await update.message.reply_text(
@@ -2018,6 +2218,10 @@ async def _procesar_texto(update, ctx, texto):
             await update.effective_message.reply_text(
                 "⚠️ No pude generar el diagrama.\n\nUsa /menu para configuración guiada."
             )
+    elif _es_correccion_diagrama(ctx, texto):
+        # "no mostro el cuadro de lo compartido con 4 mas": ajuste al diagrama recien hecho. Antes
+        # caia en la consulta normativa (Gemini) y el usuario recibia un error de timeout.
+        await _corregir_diagrama(update, ctx, texto)
     else:
         await _consulta_retie(update, ctx, texto)
 
@@ -2402,7 +2606,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         else:
-            if _genai_client:
+            if _claude_client:
                 ctx.user_data["modo_diagrama_ia"] = True
                 ctx.user_data["historial_diagrama"] = []
                 ctx.user_data["historial_retie"] = []
@@ -3486,13 +3690,15 @@ PROMPT_PDF = (
     "directa sin ninguno de los dos.\n"
     "trafo_uso: 'compartido' si varios usuarios comparten el trafo (edificio, conjunto); "
     "'exclusivo' si es de un solo usuario; vacio si no lo dice.\n"
-    "trafo_n_usuarios: cuantos otros usuarios lo comparten (solo si compartido). "
+    "trafo_n_usuarios: cuantos OTROS usuarios/medidores lo comparten, sin contar el de "
+    "esta medida (solo si compartido; si el plano dice 'gabinete de N medidores', es N-1). "
     "trafo_gabinete: 'si' si los medidores/derivacion estan en gabinete o cuarto "
     "cerrado, 'no' si en red abierta o poste, vacio si no lo dice.\n"
     "n_trafos: entero >= 1 (0 si no lo dice). trafo_kva: ej '225'. trafo_kva_list: "
     "['225','112'] solo si hay varios trafos. trafo_tipo: monofasico | bifasico | "
     "trifasico.\n"
-    "v_mt: tension de MT, ej '13.2 kV'. tension_bt: en voltios, ej '220' (solo barraje).\n"
+    "v_mt: tension de MT, ej '13.2 kV'. tension_bt: tension del secundario BT en voltios, "
+    "ej '220' (con o sin trafo).\n"
     "proteccion_antes / proteccion_despues: ej '200 A' (proteccion antes / despues del "
     "medidor). interruptor_polos: '1' | '2' | '3'. interruptor_tipo: ej "
     "'termomagnetico'.\n"

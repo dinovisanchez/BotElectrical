@@ -1898,6 +1898,397 @@ def draw_unifilar_frontera(cfg, out_path):
     plt.close(fig)
     return out_path
 
+# ============================================================
+#  UNIFILAR HORIZONTAL: MEDIDA DIRECTA EN GABINETE COMPARTIDO
+#  (plano pedido por el usuario con un ejemplo: subestacion -> acometida BT ->
+#   gabinete con varios medidores -> ESTE medidor resaltado -> totalizador -> carga)
+# ============================================================
+_GAB_MAX_OTROS = 5       # posiciones "otro usuario" dibujadas (si hay mas: "+N medidores mas")
+_GRIS_G = "#808080"
+_AZUL_G = "#5E93CF"
+
+def _gabinete_compartido(cfg):
+    """True si el unifilar debe usar el plano horizontal de gabinete compartido: medida DIRECTA
+    cuyo punto de conexion lo comparten varios usuarios (trafo_uso='compartido' o hay otros usuarios)."""
+    if cfg.get("tipo", "directa") != "directa":
+        return False
+    if str(cfg.get("trafo_uso", "") or "").lower() == "compartido":
+        return True
+    try:
+        return int(float(cfg.get("trafo_n_usuarios") or 0)) > 0
+    except (TypeError, ValueError):
+        return False
+
+# tension linea-neutro habitual para cada tension de linea (sistemas trifasicos 4 hilos)
+_LN_STD = {208: 120, 220: 127, 380: 220, 400: 230, 440: 254, 460: 265, 480: 277, 600: 347}
+
+def _bt_texto(cfg, sistema):
+    """(texto de la tension secundaria, asumida): '220-127 V', '208-120 V'... Sin dato se asume
+    una tension habitual del sistema y se marca como asumida (el plano lo avisa en una nota)."""
+    raw = str(cfg.get("tension_bt") or cfg.get("v_bt") or "").strip()
+    if not raw:
+        t = str(cfg.get("tension", "") or "")
+        if t and not re.search(r"kv", t, re.I):
+            raw = t
+    nums = [float(x.replace(",", ".")) for x in re.findall(r"\d+(?:[.,]\d+)?", raw)]
+    nums = [n for n in nums if 50 <= n <= 1000]
+    tri = sistema in ("tri3h", "tri4h")
+    if nums:
+        ll = nums[0]
+        if len(nums) >= 2:                                     # '208/120', '220/127'
+            return f"{ll:g}-{nums[1]:g} V", False
+        if tri:
+            ln = _LN_STD.get(int(round(ll))) or int(round(ll / math.sqrt(3)))
+            return (f"{ll:g}-{ln} V" if sistema == "tri4h" else f"{ll:g} V"), False
+        if sistema == "bifasico":
+            return (f"{ll:g}-{ll / 2:g} V" if int(ll) == 240 else f"{ll:g} V"), False
+        return f"{ll:g} V", False
+    return {"tri4h": "208-120 V", "tri3h": "208 V", "bifasico": "240-120 V", "mono": "120 V"}.get(sistema, "208-120 V"), True
+
+_GAB_UPI = 12.9      # unidades de dibujo por pulgada del ejemplo (ejes por defecto de subplots + bbox tight)
+
+def _ancho_u(txt, fs, bold=False):
+    """Ancho (unidades de dibujo) de la linea mas larga de `txt` a `fs` puntos."""
+    from matplotlib.textpath import TextPath
+    from matplotlib.font_manager import FontProperties
+    fp = FontProperties(weight="bold" if bold else "normal")
+    return max((TextPath((0, 0), ln, size=fs, prop=fp).get_extents().width for ln in txt.split("\n") if ln),
+               default=0.0) / 72.0 * _GAB_UPI
+
+def _bajante_lineas(bajante):
+    """Rotulo del bajante MT. 'monopolar' / 'tripolar' (o con su formacion) -> 'Bajante en cable / monopolar (3 × 1/C)'."""
+    bajante = re.sub(r"^\s*(?:en\s+)?(?:cable\s+)?", "", bajante or "", flags=re.IGNORECASE)
+    low = bajante.lower()
+    if "monopolar" in low:
+        return ["Bajante en cable", bajante if "(" in bajante else "monopolar (3 × 1/C)"]
+    if "tripolar" in low:
+        return ["Bajante en cable", bajante if "(" in bajante else "tripolar (1 × 3/C)"]
+    return [f"Bajante: {bajante}"] if bajante else ["Bajante MT"]
+
+def draw_unifilar_gabinete(cfg, out_path):
+    """Unifilar HORIZONTAL de medida directa en un punto/gabinete COMPARTIDO (el plano del ejemplo
+    "unifilar_medida_directa"): red MT -> [seccionador MT] -> transformador (con SPT) -> acometida BT ->
+    gabinete de medida con barraje BT, ESTE medidor en recuadro azul (medidor -> totalizador -> carga) y
+    las posiciones de los otros usuarios (punteadas). Lo que no se sabe (kVA del trafo, amperaje del
+    totalizador, clase del medidor) se rotula "___ (por definir)" y se lista en NOTAS: nunca se inventa.
+    Sin transformador (instalacion != 'trafo') se omite la subestacion y la acometida BT entra por la
+    izquierda. Mismas coordenadas, tamanos de letra y textos que el script del ejemplo (~12,9 unidades
+    = 1 pulgada), ancho segun el numero de medidores, alto 110 u (mas las notas). Unico retoque respecto al
+    ejemplo: rotulos que ahi cruzaban una linea (SUBESTACION / SPT) o un borde (rotulos del medidor)."""
+    sistema = cfg.get("sistema", "tri4h")
+    if sistema not in _SIS_PRO: sistema = "tri4h"
+    tri = sistema in ("tri3h", "tri4h")
+    nf = {"mono": 1, "bifasico": 2, "tri3h": 3, "tri4h": 3}[sistema]            # marcas de conductores
+    f_txt = {"mono": "1F + N + PE", "bifasico": "2F + N + PE", "tri3h": "3F + PE", "tri4h": "3F + N + PE"}[sistema]
+    bus_txt = {"mono": "(1F + N)", "bifasico": "(2F + N)", "tri3h": "(3F)", "tri4h": "(3F + N)"}[sistema]
+    hilos = {"mono": "monofásica 2 hilos", "bifasico": "bifásica 3 hilos", "tri3h": "trifásica 3 hilos",
+             "tri4h": "trifásica 4 hilos"}[sistema]
+    med_adj = {"mono": "monofásico", "bifasico": "bifásico", "tri3h": "trifásico", "tri4h": "trifásico"}[sistema]
+    norma = cfg.get("norma", "RA8")
+    kv = _kv_de(cfg.get("v_mt"))
+    kv_es = (f"{kv:g}".replace(".", ",") + " kV") if kv else ""
+    con_trafo = cfg.get("instalacion") == "trafo"
+    gab = cfg.get("trafo_gabinete")
+    gab_si = gab is True
+    respaldo = bool(cfg.get("respaldo", False))
+    ubic_t = str(cfg.get("ubicacion_trafo", "") or "").lower()
+    if ubic_t not in ("interior", "poste", "exterior", "camara"):
+        ubic_t = "interior" if gab_si else ""
+    sub_titulo = {"interior": "SUBESTACIÓN INTERIOR"}.get(ubic_t, "SUBESTACIÓN")
+    sub_caja = ubic_t in ("interior", "")          # poste / exterior / camara: sin recuadro de subestacion
+    sub_sub = {"interior": "Transformador interno", "poste": "Transformador en poste",
+               "exterior": "Transformador externo", "camara": "Transformador en cámara"}.get(ubic_t, "")
+
+    # ── datos del punto compartido ────────────────────────────────────────────
+    try: otros = max(0, int(float(cfg.get("trafo_n_usuarios") or 0)))
+    except (TypeError, ValueError): otros = 0
+    otros_def = otros > 0
+    total = otros + 1
+    if otros_def:
+        n_draw = min(total, _GAB_MAX_OTROS + 1)    # posiciones dibujadas (ESTE medidor incluido)
+        mas = total - n_draw                       # medidores que no caben: se resumen en la ultima posicion
+    else:
+        n_draw, mas = 3, 0                         # sin cantidad: ESTE medidor + 2 posiciones de ejemplo
+    try: pos = int(float(cfg.get("posicion_medida") or 1))
+    except (TypeError, ValueError): pos = 1
+    if not otros_def or mas > 0 or not 1 <= pos <= n_draw:
+        pos = 1                                    # posicion de ESTE medidor de izquierda a derecha
+
+    # ── elementos opcionales ──────────────────────────────────────────────────
+    secc = cfg.get("seccionador", "") if cfg.get("seccionador") in ("antes", "despues") else ""
+    secc_open = cfg.get("seccionador_estado") == "abierto"
+    p_antes, p_desp = str(cfg.get("proteccion_antes") or "").strip(), str(cfg.get("proteccion_despues") or "").strip()
+    p_gen = str(cfg.get("interruptor") or "").strip() or (f"{cfg['proteccion_amp']} A" if cfg.get("proteccion_amp") else "")
+    tot_pos = cfg.get("totalizador") if cfg.get("totalizador") in ("antes", "despues") else ""
+    if not tot_pos:
+        tot_pos = "antes" if (p_antes and not p_desp) else ("despues" if (p_desp or p_gen or p_antes) else "")
+    am = _num((p_antes if tot_pos == "antes" else p_desp) or p_gen or p_antes or p_desp)
+    amps_txt = f"{am:g} A".replace(".", ",") if am is not None else ""
+    pol = _num(cfg.get("interruptor_polos"))
+    polos = f"{int(pol)}P" if pol else {"mono": "1P", "bifasico": "2P", "tri3h": "3P", "tri4h": "3P"}[sistema]
+    tipo_int = str(cfg.get("interruptor_tipo") or "termomagnético").strip() or "termomagnético"
+    if tipo_int.lower().startswith("termomagnetico"): tipo_int = "termomagnético"
+    clase = _t1(cfg.get("clase_medidor"), 12)
+    bt_txt, bt_asumida = _bt_texto(cfg, sistema)
+    kva = _num(cfg.get("trafo_kva"))
+    kva_txt = f"{_kva_txt(kva)} kVA" if kva is not None else "___ kVA  (por definir)"
+    tt = str(cfg.get("trafo_tipo") or "").lower()
+    tipo_trafo = {"trifasico": "trifásico", "monofasico": "monofásico", "bifasico": "bifásico"}.get(tt, "trifásico" if tri else "")
+    bajante = _t1(cfg.get("bajante_mt"), 50)
+    planta = _planta_de(cfg)
+    circuito = _t1(cfg.get("circuito"), 30)
+    proyecto = _t1(cfg.get("proyecto"), 40)
+    calibre = _t1(cfg.get("calibre_conductor") or cfg.get("calibre_acometida"), 30)
+
+    cls_txt = f"clase {clase}" if clase else "clase ___"
+    kwh = "kWh\nkVArh" if tri else "kWh"
+    med_lines = (f"Medidor {med_adj}\ndirecto (sin TC)\n{cls_txt}" if not respaldo else
+                 f"Medidores {med_adj}s\ndirectos (sin TC)\nprincipal + respaldo\n{cls_txt}")
+    tot_lines = f"Totalizador {tipo_int} {polos}\n" + (amps_txt or "___ A  (por definir)")
+    lab_w = max(_ancho_u(med_lines, 9), _ancho_u(tot_lines, 9, bold=True) if tot_pos else 0.0)
+
+    # ── geometria horizontal (coordenadas del ejemplo) ────────────────────────
+    lab_acom = "Acometida BT " + f_txt + (f"  –  {calibre}" if calibre else "")
+    CX0 = 76.0 if con_trafo else 2.0 + _ancho_u(lab_acom, 9) + 6.0     # borde izquierdo del gabinete
+    hw = 16.0 if respaldo else 11.0                # semiancho del recuadro azul (ESTE medidor)
+    slots, x = [], CX0 + 12.0
+    for i in range(1, n_draw + 1):
+        w = (2 * hw + 1.2 + lab_w + 3.5) if i == pos else 17.0
+        w = max(w, 42.0) if i == pos else w
+        slots.append((i, x, w)); x += w
+    CX1 = x + 4.0
+    W = max(CX1 + 4.0, 150.0 if con_trafo else 100.0)
+    xs = {i: sx + ((hw - 1.0) if i == pos else sw / 2) for i, sx, sw in slots}
+    x0 = xs[pos]                                   # eje del ramal de ESTE usuario
+    bx0, bx1 = x0 - hw, x0 + hw
+    lab_x = bx1 + 1.2                              # rotulos del ramal: FUERA del recuadro azul
+    bus_x0, bus_x1 = CX0 + 6.0, max(xs.values()) + 4.0
+
+    # ── geometria vertical: cadena barraje -> [totalizador] -> medidor(es) -> [totalizador] -> carga ──
+    BY = 62.0                                      # nivel del barraje BT
+    y = BY - 8.0
+    yc_ta = y_ta_bot = None
+    if tot_pos == "antes":
+        yc_ta = y - 4.0; y_ta_bot = y - 8.0; y = y_ta_bot - 6.0
+    r_m = 4.2 if respaldo else 5.0
+    if not respaldo:
+        yc_m = y - r_m
+        y_med_top, y_med_bot = y, y - 2 * r_m
+        y_n1 = y_n2 = None
+    else:
+        y_n1 = y
+        yc_m = y_n1 - 4.0 - r_m
+        y_med_top = yc_m + r_m
+        y_n2 = yc_m - r_m - 4.0
+        y_med_bot = y_n2
+    y = y_med_bot
+    yc_td = y_td_top = y_td_bot = None
+    if tot_pos == "despues":
+        y_td_top = y - 6.0; yc_td = y_td_top - 4.0; y_td_bot = y_td_top - 8.0; y = y_td_bot
+    y_load0 = min(20.0, y - 10.0)
+    y_load1 = y_load0 - 6.0
+    y_ac = min(14.0, y_load1)                      # horizontal de la acometida BT
+    cab_bot = min(6.0, y_load1 - 8.0)
+    ytop = 110.0 if con_trafo else 92.0
+
+    # ── notas (se arman antes: su altura decide el alto del lienzo) ───────────
+    pend = []
+    if con_trafo and kva is None: pend.append("kVA del transformador")
+    if not clase:                 pend.append("clase del medidor")
+    if tot_pos and am is None:    pend.append(f"amperaje del totalizador {polos}")
+    if con_trafo and not kv:      pend.append("tensión MT de la red")
+    notas = []
+    if pend:
+        notas.append("Valores marcados con ___ pendientes de confirmar en campo: " + ", ".join(pend) + ".")
+    if bt_asumida:
+        notas.append("Tensión BT asumida; verificar " + ("en placa del transformador." if con_trafo else "en la acometida."))
+    if tot_pos == "despues":
+        notas.append(f"Totalizador {tipo_int} ubicado después del medidor, en el mismo ramal del barraje.")
+    elif tot_pos == "antes":
+        notas.append(f"Totalizador {tipo_int} ubicado antes del medidor, en el mismo ramal del barraje.")
+    if secc == "antes" and con_trafo:
+        notas.append(f"Seccionador MT antes del transformador conforme a norma {norma} del operador de red.")
+    elif secc == "despues" and con_trafo:
+        notas.append("Seccionador en el lado BT, aguas abajo del transformador.")
+    if secc and secc_open and con_trafo:
+        notas.append("El seccionador se dibuja ABIERTO (instalación desenergizada).")
+    if not otros_def:
+        notas.append("Cantidad de usuarios del gabinete por definir: se muestran 2 posiciones de ejemplo.")
+    elif mas:
+        notas.append(f"El gabinete tiene {total} medidores: se dibujan {n_draw - 1} posiciones de otros usuarios y "
+                     f"se resume el resto en la última.")
+    try: dps = int(cfg.get("dps_cantidad") or 0)
+    except (TypeError, ValueError): dps = 0
+    if dps >= 1 and con_trafo:
+        notas.append(("Protección contra sobretensiones: " + ("banco de %d pararrayos" % dps if dps > 1 else "pararrayos")
+                      + " ZnO (DPS) en la entrada MT (no dibujado en este plano)."))
+    if planta:
+        notas.append("Planta de respaldo: Sí"
+                     + (f" ({_kva_txt(planta['kva'])} kVA)" if planta["kva"] is not None else " (kVA no informado)")
+                     + (f", transferencia {planta['transf_txt']}" if planta["transf"] else "")
+                     + ". No es medida por este medidor.")
+    if cfg.get("tendido") == "subterraneo" and con_trafo:
+        notas.append("Acometida MT subterránea.")
+    ancho_car = max(60, int((W - 6.0) / 0.84))
+    notas_w = ["NOTAS:"]
+    for i, n_ in enumerate(notas, 1):
+        notas_w += textwrap.wrap(f"{i}. {n_}", ancho_car, subsequent_indent="    ") or [""]
+    y_notas = cab_bot - 1.5
+    ymin = y_notas - 1.8 * len(notas_w) - 1.5
+
+    fig = plt.figure(figsize=(W / _GAB_UPI, (ytop - ymin) / _GAB_UPI))
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, W); ax.set_ylim(ymin, ytop); ax.axis("off")
+    K, LW = "k", 1.8
+    def L(xx, yy, lw=LW, c=K, ls="-", z=3):
+        ax.plot(xx, yy, color=c, lw=lw, ls=ls, solid_capstyle="butt", zorder=z)
+    def T(xx, yy, s, ha="left", va="center", fs=9.0, fw="normal", c=K, st="normal"):
+        ax.text(xx, yy, s, ha=ha, va=va, fontsize=fs, fontweight=fw, color=c, style=st, zorder=6)
+    def marcas(xx, yy):                            # marcas de conductores (3 = trifasico) sobre un tramo vertical
+        for k in range(nf):
+            d = (k - (nf - 1) / 2) * 1.6
+            ax.plot([xx - 1.2, xx + 1.2], [yy + d - 0.9, yy + d + 0.9], color=K, lw=1.3, zorder=5, solid_capstyle="butt")
+    def marcas_h(xx, yy):                          # ... y sobre un tramo horizontal
+        for k in range(nf):
+            d = (k - (nf - 1) / 2) * 1.6
+            ax.plot([xx + d - 0.9, xx + d + 0.9], [yy - 1.2, yy + 1.2], color=K, lw=1.3, zorder=5, solid_capstyle="butt")
+    def tierra(xx, yy):
+        L([xx, xx], [yy, yy - 2])
+        for k, w in enumerate((3.5, 2.3, 1.1)):
+            L([xx - w, xx + w], [yy - 2 - k * 1.1] * 2)
+    def dot(xx, yy): ax.add_patch(Circle((xx, yy), 0.5, color=K, zorder=6))
+    def switch(xx, yc, h=8.0):                     # contactos + cuchilla
+        L([xx, xx], [yc + h / 2, yc + h / 2 - 2]); L([xx, xx], [yc - h / 2, yc - h / 2 + 2])
+        dot(xx, yc + h / 2 - 2); dot(xx, yc - h / 2 + 2)
+        L([xx, xx + 2.6], [yc - h / 2 + 2, yc + h / 2 - 2.4], z=6)
+    def box(xa_, ya_, w_, h_, c="gray", lw=1.3, ls="--", z=1):
+        ax.add_patch(Rectangle((xa_, ya_), w_, h_, fill=False, ls=ls, lw=lw, ec=c, zorder=z))
+    def circ(xx, yy, r, lw=LW):
+        ax.add_patch(Circle((xx, yy), r, fc="white", ec=K, lw=lw, zorder=4))
+
+    # ── encabezado ────────────────────────────────────────────────────────────
+    cnt = f" ({total} MEDIDORES)" if otros_def else ""
+    if gab is False:
+        titulo = f"DIAGRAMA UNIFILAR – MEDIDA DIRECTA EN PUNTO COMPARTIDO{cnt} – RED ABIERTA"
+    else:
+        titulo = f"DIAGRAMA UNIFILAR – MEDIDA DIRECTA {'INTERIOR ' if gab_si else ''}EN GABINETE COMPARTIDO{cnt}"
+    partes = []
+    if con_trafo: partes.append(f"Red MT {kv_es}" if kv_es else "Red MT")
+    if sistema != "tri4h": partes.append(f"Sistema {hilos}")
+    if con_trafo and sub_sub: partes.append(sub_sub)
+    partes.append("Barraje común" + (" con totalizador posterior al medidor" if tot_pos == "despues" else
+                                     " con totalizador previo al medidor" if tot_pos == "antes" else ""))
+    if circuito: partes.append(f"Circuito: {circuito}")
+    if proyecto: partes.append(proyecto)
+    sub_lin, cur = [], ""
+    for p_ in partes:                               # parte el subtitulo en lineas sin dejar "|" al inicio
+        cand = (cur + "  |  " + p_) if cur else p_
+        if cur and len(cand) > 160: sub_lin.append(cur); cur = p_
+        else: cur = cand
+    sub_lin.append(cur)
+    T(W / 2, ytop - 3.0, titulo, ha="center", fs=13, fw="bold")
+    T(W / 2, ytop - 6.5 - 1.8 * (len(sub_lin) - 1) / 2, "\n".join(sub_lin), ha="center", fs=9.5, st="italic")
+
+    # ── red MT + subestacion + acometida BT ───────────────────────────────────
+    BT_TOP = 80.0                                  # borde superior de subestacion y gabinete
+    if con_trafo:
+        T(30, 97, "RED DE DISTRIBUCIÓN MT" + (f"\n{kv_es} – 3F" if kv_es and tri else f"\n{kv_es}" if kv_es else ""),
+          ha="center", fs=10, fw="bold")
+        L([18, 42], [93, 93], lw=3)
+        marcas(30, 90.5)
+        T(36, 85, "\n".join(_bajante_lineas(bajante) + ([kv_es] if kv_es else [])), fs=9)
+        if sub_caja:
+            box(10, y_ac + 4.0, 60, BT_TOP - (y_ac + 4.0))
+            T(44, 77.5, sub_titulo, ha="center", fs=9, fw="bold", c="gray")
+        if secc == "antes":
+            L([30, 30], [93, 72]); switch(30, 68); L([30, 30], [64, 56])
+            T(46, 68, "Seccionador MT" + f"\n(según norma {norma})" + (f"\n{kv_es} – 3P" if kv_es and tri else "")
+              + ("\nABIERTO" if secc_open else ""), fs=9)
+        else:
+            L([30, 30], [93, 56])
+        circ(30, 52.5, 4.2, lw=LW); circ(30, 47.5, 4.2, lw=LW)
+        T(46, 50, f"Transformador {tipo_trafo}".rstrip() + f"\n{kva_txt}\n"
+          + (f"{kv_es} / {bt_txt}" if kv_es else f"MT / {bt_txt}") + ("\n(verificar tensión BT)" if bt_asumida else ""), fs=9)
+        if secc == "despues":
+            L([30, 30], [43.3, 34.0]); switch(30, 30.0); L([30, 30], [26.0, y_ac])
+            T(46, 30, "Seccionador BT" + ("\n3P" if tri else "") + ("\nABIERTO" if secc_open else ""), fs=9)
+            marcas(30, 38.0)
+        else:
+            L([30, 30], [43.3, y_ac]); marcas(30, 39.5)
+        L([24, 24], [42, 30]); L([24, 30], [42, 42]); tierra(24, 30)
+        T(28.6, 22.5, "SPT neutro BT y masas", ha="right", fs=8)
+        x_v = CX0 - 3.0                            # subida de la acometida hacia el barraje
+        L([30, x_v], [y_ac, y_ac]); L([x_v, x_v], [y_ac, BY]); marcas(x_v, (y_ac + BY) / 2)
+        L([x_v, bus_x0], [BY, BY])
+        T(34, y_ac - 4.5, lab_acom, fs=9)
+    else:
+        x_in = 2.0
+        L([x_in, bus_x0], [BY, BY]); marcas_h(x_in + 7.0, BY)
+        T(x_in, BY + 2.6, lab_acom, fs=9, va="bottom")
+
+    # ── gabinete + barraje ────────────────────────────────────────────────────
+    if gab_si:
+        box(CX0, cab_bot, CX1 - CX0, BT_TOP - cab_bot)
+        tit_cab = (f"GABINETE DE MEDIDA – {total} MEDIDORES (INTERIOR)" if otros_def else "GABINETE DE MEDIDA (INTERIOR)")
+    else:
+        tit_cab = (f"PUNTO COMPARTIDO – {total} MEDIDORES" if otros_def else "PUNTO COMPARTIDO") + (" (RED ABIERTA)" if gab is False else "")
+    T((CX0 + CX1) / 2, 77.5, tit_cab, ha="center", fs=9, fw="bold", c="gray")
+    L([bus_x0, bus_x1], [BY, BY], lw=5)
+    T(CX0 + 9, BY + 6.2, "Barraje BT\n" + bus_txt, fs=9, fw="bold")
+
+    # ── otros usuarios (punteados en gris) ────────────────────────────────────
+    otros_idx = [i for i in range(1, n_draw + 1) if i != pos]
+    for k, i in enumerate(otros_idx):
+        xo = xs[i]
+        ultimo = (k == len(otros_idx) - 1) and mas > 0
+        L([xo, xo], [BY, 50])
+        box(xo - 6, 38, 12, 12, c="gray", lw=1.2)
+        T(xo, 44, (f"+{mas + 1}\nmedidores\nmás" if ultimo else f"Medida\n{i}"), ha="center", fs=8.5, c="gray")
+        L([xo, xo], [38, 30], lw=1.2, c="gray", ls="--")
+        T(xo, 27, "otros\nusuarios" if ultimo else "otro\nusuario", ha="center", fs=8, c="gray")
+
+    # ── ESTE medidor ──────────────────────────────────────────────────────────
+    box(bx0, y_load1 - 3.5, bx1 - bx0, (BY + 2.5) - (y_load1 - 3.5), c="#1f6fb2", lw=1.0, ls="-")
+    ax.patches[-1].set_alpha(0.6)
+    T(x0, y_load1 - 6.0, "Medida objeto del unifilar", ha="center", fs=8.5, fw="bold", c="#1f6fb2")
+    def totalizador(yc):
+        switch(x0, yc, h=8.0)
+        ax.add_patch(Rectangle((x0 - 1.8, yc - 1), 3.6, 2, fill=False, lw=1, ec=K, zorder=6))
+        T(lab_x, yc, tot_lines, fs=9, fw="bold")
+    L([x0, x0], [BY, (yc_ta + 4.0) if yc_ta is not None else (y_n1 if respaldo else y_med_top)]); marcas(x0, BY - 4.0)
+    if yc_ta is not None:                          # totalizador ANTES del medidor
+        totalizador(yc_ta)
+        L([x0, x0], [y_ta_bot, y_n1 if respaldo else y_med_top])
+    if not respaldo:
+        circ(x0, yc_m, r_m, lw=2.2)
+        T(x0, yc_m, kwh, ha="center", fs=8.5, fw="bold")
+        T(lab_x, yc_m, med_lines, fs=9)
+        y_sale = y_med_bot
+    else:
+        xm1, xm2 = x0 - 6.5, x0 + 6.5
+        L([xm1, xm2], [y_n1, y_n1]); dot(x0, y_n1)
+        L([xm1, xm2], [y_n2, y_n2]); dot(x0, y_n2)
+        for xm_, et, ha_ in ((xm1, "PRINCIPAL", "right"), (xm2, "RESPALDO", "left")):
+            L([xm_, xm_], [y_n1, yc_m + r_m]); circ(xm_, yc_m, r_m, lw=2.0)
+            T(xm_, yc_m, "kWh", ha="center", fs=8, fw="bold")
+            L([xm_, xm_], [yc_m - r_m, y_n2])
+            T(xm_ + (-1.4 if ha_ == "right" else 1.4), yc_m - r_m - 1.9, et, ha=ha_, fs=7, fw="bold", c="#555555")
+        T(lab_x, yc_m, med_lines, fs=9)
+        y_sale = y_n2
+    if yc_td is not None:                          # totalizador DESPUES del medidor
+        L([x0, x0], [y_sale, yc_td + 4.0]); totalizador(yc_td)
+        y_sale = y_td_bot
+    L([x0, x0], [y_sale, y_load0])
+    if y_sale - y_load0 >= 6.0: marcas(x0, (y_sale + y_load0) / 2 - 1.0)
+    ax.add_patch(Rectangle((bx0, y_load1), bx1 - bx0, y_load0 - y_load1, fc="white", ec=K, lw=2, zorder=4))
+    T(x0, (y_load0 + y_load1) / 2, "CARGA DEL USUARIO", ha="center", fs=9, fw="bold")
+
+    # ── notas ─────────────────────────────────────────────────────────────────
+    for i, linea in enumerate(notas_w):
+        T(2, y_notas - 1.8 * i, linea, va="top", fs=8.2, fw="bold" if i == 0 else "normal")
+    plt.savefig(out_path, dpi=140, facecolor="white")
+    plt.close(fig)
+
+
 def draw_unifilar_generico(cfg, out_path):
     """
     Topologia vertical principal. TC/TP como ramas horizontales hacia la derecha.
@@ -1912,6 +2303,8 @@ def draw_unifilar_generico(cfg, out_path):
     """
     if isinstance(cfg.get("transformadores"), (list, tuple)) and len(_trafos_de(cfg)) >= 2:
         return draw_unifilar_frontera(cfg, out_path)      # 2+ transformadores (campos de acta)
+    if _gabinete_compartido(cfg):
+        return draw_unifilar_gabinete(cfg, out_path)      # medida directa en gabinete compartido
     try:
         _n_tr = int(cfg.get("n_trafos", 1) or 1)
     except (TypeError, ValueError):
