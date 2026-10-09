@@ -36,8 +36,8 @@ especificaciones de una medida (texto libre, comando o menú) y devuelve:
 - `test_conexiones.py` — geometria del diagrama de conexiones (sin solapes, reglas in/cierre,
   barra BN). `test_pdf.py` — PDF -> unifilar. `test_claude_sdk.py` — llamadas a Claude con el SDK real.
 - `test_gabinete.py` — plano de gabinete compartido de punta a punta: FIDELIDAD textual con el script del ejemplo, posición del medidor,
-  17 variantes dibujadas sin textos superpuestos (detector de `test_frontera`; `GAB_OUT=<dir>` guarda los PNG), despacho, parser,
-  `_completar_con_parser`, diálogo IA con el SDK real y correcciones después de un diagrama.
+  26 variantes dibujadas sin textos superpuestos (detector de `test_frontera`; `GAB_OUT=<dir>` guarda los PNG), despacho, parser,
+  trafo trifásico + medida mono/bifásica, `_completar_con_parser`, diálogo IA con el SDK real y correcciones después de un diagrama.
 - `test_frontera.py` — campos de acta (varios transformadores, planta de respaldo, celda de medida,
   ubicacion de la medida): helpers, escenarios e–p (`FRONTERA_OUT=<dir>` guarda los PNG) y un
   detector de textos superpuestos (texto/texto, texto/cable, texto/borde de recuadro).
@@ -168,7 +168,7 @@ automatico para rendirse en el primer intento.
 
 ## Modelo de configuración (cfg)
 ```
-sistema : 'mono' | 'bifasico' | 'tri3h' (2 elem) | 'tri4h' (3 elem)
+sistema : 'mono' | 'bifasico' | 'tri3h' (2 elem) | 'tri4h' (3 elem)   # sistema de la MEDIDA (no del trafo: ver trafo_tipo)
 tipo    : 'directa' | 'semidirecta' | 'indirecta'
 respaldo: bool                      # principal + chequeo (1 bloque, 2 medidores)
 norma   : 'CENS' | 'RA8'
@@ -181,6 +181,8 @@ trafo_uso: 'exclusivo' | 'compartido'   # ver regla de negocio abajo
 trafo_n_usuarios: str      # cantidad de otros usuarios (solo si trafo_uso='compartido')
 trafo_gabinete: bool|None  # True=gabinete/cuarto cerrado, False=red abierta, None=sin especificar
 trafo_kva, trafo_tipo, trafo_kva_list, n_trafos, n_cc, n_tc, interruptor, v_mt, v_bt
+# trafo_tipo ('monofasico'|'bifasico'|'trifasico') es la fase del TRANSFORMADOR y es INDEPENDIENTE de `sistema`
+#   (la de la medida): un trafo trifasico puede alimentar una medida mono o bifasica; al reves no (ver gabinete).
 # opcionales unifilar: dps (bool), rele (bool), rele_funcs (str ANSI)
 # campos de acta (opcionales, ver "Unifilar de frontera"): transformadores [{kva,tipo,uso}],
 #   configuracion_transformadores, planta_respaldo {existe,kva,transferencia}, ubicacion_medida, celda_medida {existe,tipo,estado}
@@ -956,6 +958,23 @@ SI dijo. Ademas la correccion "no mostro el cuadro de lo compartido con 4 mas" c
   vale entre 1 y 69 kV); y `_verificar_coherencia` ya NO descarta `v_mt` en un punto compartido: si hay MT dada e `instalacion != 'trafo'`
   la pasa a 'trafo' (red MT + trafo) y lo avisa. `v_mt` se normaliza a "13.2 kV". El recuadro azul deja ahora 1,5-3 u de margen a las
   posiciones vecinas (con `posicion_medida` en medio quedaba pegado).
+- **Cuarta ronda: "el transformador puede ser trifásico y la medida mono o bifásica".** Causas reales (reproducidas): (1) `parse_spec`
+  lanzaba "Sistema ambiguo" con "medida bifásica, transformador trifásico" (veía las dos palabras como dos sistemas) -> el dialogo
+  perdia TODO lo del gabinete (la red de seguridad cae si parse_spec lanza) y, peor, el fallback ponia `trafo_tipo` de la primera fase
+  nombrada; (2) `draw_unifilar_gabinete` derivaba barraje, acometida, bajante MT y rotulos del `sistema` de la medida.
+  Ahora: `parser._fase_trafo` saca la fase dicha JUNTO a "transformador/trafo" ("trafo trifasico", "trafo de 150 kVA trifasico",
+  "transformador es trifasico") antes de buscar el sistema de la medida (`_sistemas_dichos`; "bifasica 3 hilos" ya no es tri3h);
+  `parser.fases_dichas(texto)` = (medida, trafo) tal como se dijeron. Motor: `sis_bus` (barraje + acometida + secundario + marcas del MT, lo
+  fija `trafo_tipo`: trifasico -> 3F + N, bifasico -> 2F + N, monofasico -> 1F + N, o 2F + N si la medida es bifasica = punto medio) vs
+  `sistema` (ramal de ESTE usuario: marcas, polos del totalizador, "Medidor bifásico", kWh/kVArh). Con fases distintas el subtitulo dice
+  "Medida bifásica 3 hilos", el ramal lleva "2F + N" y una nota explica la derivacion; con `_bt_texto(cfg, sis_bus, sistema)` un "120"
+  suelto con trafo trifasico = "208-120 V". Sin `trafo_tipo` y medida mono/bifasica NO se inventa trifasico: se dibuja segun la medida y
+  la nota 4 dice "Fases del transformador sin indicar" (con medida tri4h, igual que siempre, sin nota). Medida trifasica + trafo
+  mono/bifasico es imposible: `_verificar_coherencia` lo pasa a trifasico y avisa (el motor tambien, con nota). `_completar_con_parser`: lo
+  que el usuario DIJO de las fases manda sobre el JSON de la IA (el ultimo mensaje gana) y solo si lo dijo explicitamente (no rellena
+  `trafo_tipo` con el fallback del parser). `PROMPT_DIAGRAMA` y `PROMPT_PDF` lo explican (sistema = medida, `trafo_tipo` = trafo) y
+  la IA pregunta UNA vez la fase del trafo si la medida es mono/bifasica y no la dijo. Generico: `Dyn11` sigue al trafo, no a la medida.
+  No verificado en vivo: que Haiku siga la regla del prompt (la red de seguridad del parser la cubre cuando el usuario lo escribe).
 - **`draw_unifilar_gabinete`** (coordenadas del ejemplo, ver arriba; `y` hacia arriba, 110 u de alto + notas). Se despacha desde `draw_unifilar_generico`
   (orden: frontera -> gabinete -> indirecta "pro" -> detallado) cuando `_gabinete_compartido(cfg)`: `tipo=='directa'` y
   (`trafo_uso=='compartido'` o `trafo_n_usuarios > 0`). Semidirecta/indirecta compartidas siguen con el renderer de siempre.
